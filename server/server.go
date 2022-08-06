@@ -74,13 +74,7 @@ func handleWriteBlock(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	newBlock, err := blockchain.GenerateBlock(blockchainInstance.LastBlock(), m.BPM)
-	if err != nil {
-		respondWithJSON(w, r, http.StatusInternalServerError, m)
-		fmt.Println(err)
-		return
-	}
-
+	newBlock := blockchain.GenerateBlock(blockchainInstance.LastBlock(), m.BPM)
 	if newBlock.IsValid(blockchainInstance.LastBlock()) {
 		blockchainInstance.Add(newBlock)
 		blockchainInstance.Dump()
