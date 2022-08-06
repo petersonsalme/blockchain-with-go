@@ -4,18 +4,19 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"time"
 )
 
 type Block struct {
 	Index     int
-	Timestamp string
+	Timestamp time.Time
 	BPM       int
 	Hash      string
 	PrevHash  string
 }
 
 func (b *Block) CalculateHash() string {
-	record := fmt.Sprintf("%d%s%d%s", b.Index, b.Timestamp, b.BPM, b.PrevHash)
+	record := fmt.Sprintf("%d%s%d%s", b.Index, b.Timestamp.String(), b.BPM, b.PrevHash)
 	h := sha256.New()
 	h.Write([]byte(record))
 	hashed := h.Sum(nil)

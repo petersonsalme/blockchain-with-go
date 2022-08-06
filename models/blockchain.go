@@ -11,8 +11,8 @@ func (b *Blockchain) LastBlock() *Block {
 	return b.Blocks[index]
 }
 
-func (b *Blockchain) Add(block Block) {
-	newBlockchain := append(b.Blocks, &block)
+func (b *Blockchain) Add(block *Block) {
+	newBlockchain := append(b.Blocks, block)
 	b.replaceChain(newBlockchain)
 }
 
