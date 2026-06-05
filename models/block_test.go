@@ -17,7 +17,7 @@ var _ = Describe("Block", func() {
 		BeforeEach(func() {
 			b = &models.Block{
 				Index:     0,
-				Timestamp: time.Date(2021, 8, 15, 14, 30, 45, 100, time.Local),
+				Timestamp: time.Date(2021, 8, 15, 14, 30, 45, 100, time.UTC),
 				BPM:       0,
 				PrevHash:  "123",
 				Hash:      "",
@@ -25,7 +25,7 @@ var _ = Describe("Block", func() {
 		})
 
 		It("should calculate the block hash successfully", func() {
-			Expect(b.CalculateHash()).To(Equal("b2f69408a72ef7c200b7485d9534c54a7463ac31d83f0f803e4723f787a85c8c"))
+			Expect(b.CalculateHash()).To(Equal("701230ac156bb6bc5d9a522caa9bcd7f23d02bc6579702f3bcfc01fac5e0148a"))
 		})
 	})
 	Describe("IsValid", func() {
@@ -34,7 +34,7 @@ var _ = Describe("Block", func() {
 		BeforeEach(func() {
 			oldBlock = &models.Block{
 				Index:     0,
-				Timestamp: time.Date(2021, 8, 15, 14, 30, 45, 100, time.Local),
+				Timestamp: time.Date(2021, 8, 15, 14, 30, 45, 100, time.UTC),
 				BPM:       0,
 				PrevHash:  "123",
 				Hash:      "",
