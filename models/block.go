@@ -16,7 +16,7 @@ type Block struct {
 }
 
 func (b *Block) CalculateHash() string {
-	record := fmt.Sprintf("%d%s%d%s", b.Index, b.Timestamp.String(), b.BPM, b.PrevHash)
+	record := fmt.Sprintf("%d%s%d%s", b.Index, b.Timestamp.UTC().String(), b.BPM, b.PrevHash)
 	h := sha256.New()
 	h.Write([]byte(record))
 	hashed := h.Sum(nil)
