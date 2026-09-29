@@ -3,7 +3,7 @@ package blockchain
 import (
 	"time"
 
-	"github.com/petersonsalme/go-blockchain/models"
+	"github.com/petersonsalme/blockchain-with-go/models"
 )
 
 func New() *models.Blockchain {

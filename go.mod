@@ -1,4 +1,4 @@
-module github.com/petersonsalme/go-blockchain
+module github.com/petersonsalme/blockchain-with-go
 
 go 1.18
 

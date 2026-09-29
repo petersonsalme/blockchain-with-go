@@ -1,4 +1,5 @@
 # GoBlockchain
+[![Go CI](https://github.com/petersonsalme/blockchain-with-go/actions/workflows/go-ci.yml/badge.svg)](https://github.com/petersonsalme/blockchain-with-go/actions/workflows/go-ci.yml)
 
 A simple blockchain implementation in Go, created as an exercise to demonstrate core blockchain concepts.
 
