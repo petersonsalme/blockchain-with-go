@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/petersonsalme/go-blockchain/blockchain"
-	"github.com/petersonsalme/go-blockchain/models"
+	"github.com/petersonsalme/blockchain-with-go/blockchain"
+	"github.com/petersonsalme/blockchain-with-go/models"
 )
 
 var blockchainInstance *models.Blockchain

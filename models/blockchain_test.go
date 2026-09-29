@@ -4,7 +4,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	. "github.com/petersonsalme/go-blockchain/models"
+	. "github.com/petersonsalme/blockchain-with-go/models"
 )
 
 var _ = Describe("Blockchain", func() {
