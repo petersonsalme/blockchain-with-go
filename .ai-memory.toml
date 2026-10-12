@@ -1,0 +1,9 @@
+workspace = "default"
+project = "blockchain-with-go"
+project_strategy = "repo-root"
+
+[briefing]
+inject_on_session_start = "false"
+
+[capture]
+ignore_paths = ["~/.claude/projects/**/tool-results/**"]
