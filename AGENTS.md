@@ -22,6 +22,8 @@ blockchain-with-go/
 
 ## Regras e Comandos
 
+- Prefix shell commands with `rtk` (see `.agents/rules/rtk.md`).
+
 1. **Validação e Testes:**
    - Executar testes e checagem de tipos: `go test ./...`
    - Formatação padrão de Go: `gofmt -s -w .` ou `goimports`
@@ -31,3 +33,5 @@ blockchain-with-go/
    - Não adicionar dependências pesadas sem necessidade justificável.
    - Mensagens de commit seguindo Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`).
    - Respostas ao usuário em Português do Brasil; código e commits em Inglês.
+
+@.agents/rules/rtk.md
