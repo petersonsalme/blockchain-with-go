@@ -28,7 +28,7 @@ func GenerateBlock(oldBlock *models.Block, BPM int) *models.Block {
 	newBlock.Timestamp = time.Now()
 	newBlock.BPM = BPM
 	newBlock.PrevHash = oldBlock.Hash
-	newBlock.Hash = newBlock.CalculateHash()
+	newBlock.Mine(models.Difficulty())
 
 	return &newBlock
 }
