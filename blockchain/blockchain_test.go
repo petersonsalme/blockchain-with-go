@@ -64,5 +64,12 @@ var _ = Describe("Blockchain", Ordered, func() {
 			Expect(newBlock.PrevHash).To(Equal(oldBlock.Hash))
 			Expect(newBlock.Hash).NotTo(BeEmpty())
 		})
+
+		It("Should be mined with the configured difficulty", func() {
+			Expect(newBlock.Difficulty).To(Equal(models.Difficulty()))
+			Expect(newBlock.Hash).To(Equal(newBlock.CalculateHash()))
+			Expect(newBlock.HasValidProofOfWork()).To(BeTrue())
+			Expect(newBlock.IsValid(oldBlock)).To(BeTrue())
+		})
 	})
 })
