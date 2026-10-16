@@ -1,12 +1,15 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -14,11 +17,34 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/models"
 )
 
+// DefaultMiningTimeout is the default duration allowed for block mining before timing out.
+const DefaultMiningTimeout = 10 * time.Second
+
+// MiningTimeoutEnvVar overrides DefaultMiningTimeout when set.
+const MiningTimeoutEnvVar = "MINING_TIMEOUT"
+
 var blockchainInstance *models.Blockchain
-var generateBlock = blockchain.GenerateBlock
+var generateBlock = blockchain.GenerateBlockWithContext
 
 type errorResponse struct {
 	Error string `json:"error"`
+}
+
+func miningTimeout() time.Duration {
+	raw := os.Getenv(MiningTimeoutEnvVar)
+	if raw == "" {
+		return DefaultMiningTimeout
+	}
+
+	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+		return d
+	}
+
+	if secs, err := strconv.Atoi(raw); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+
+	return DefaultMiningTimeout
 }
 
 func Run() error {
@@ -81,7 +107,23 @@ func handleWriteBlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newBlock := generateBlock(blockchainInstance.LastBlock(), m.BPM)
+	ctx, cancel := context.WithTimeout(r.Context(), miningTimeout())
+	defer cancel()
+
+	newBlock, err := generateBlock(ctx, blockchainInstance.LastBlock(), m.BPM)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			respondWithJSON(w, r, http.StatusGatewayTimeout, errorResponse{Error: "tempo limite de mineração excedido"})
+			return
+		}
+		if errors.Is(err, context.Canceled) {
+			respondWithJSON(w, r, http.StatusRequestTimeout, errorResponse{Error: "mineração cancelada"})
+			return
+		}
+		respondWithJSON(w, r, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+		return
+	}
+
 	if !newBlock.IsValid(blockchainInstance.LastBlock()) {
 		respondWithJSON(w, r, http.StatusUnprocessableEntity, errorResponse{Error: "bloco inválido não pôde ser adicionado"})
 		return
