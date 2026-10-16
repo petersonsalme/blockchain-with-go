@@ -1,6 +1,7 @@
 package models
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -53,6 +54,17 @@ func (b *Block) CalculateHash() string {
 // Mine searches for a nonce whose hash satisfies the given difficulty and stores
 // the resulting nonce, difficulty and hash on the block.
 func (b *Block) Mine(difficulty int) {
+	_ = b.MineWithContext(context.Background(), difficulty)
+}
+
+// MineWithContext searches for a nonce whose hash satisfies the given difficulty
+// and stores the resulting nonce, difficulty and hash on the block. It checks
+// ctx.Err() in the nonce loop and aborts with the context error if canceled or timed out.
+func (b *Block) MineWithContext(ctx context.Context, difficulty int) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	if difficulty < 0 {
 		difficulty = 0
 	}
@@ -60,10 +72,14 @@ func (b *Block) Mine(difficulty int) {
 	b.Difficulty = difficulty
 
 	for b.Nonce = 0; ; b.Nonce++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
 		hash := b.CalculateHash()
 		if solvesDifficulty(hash, difficulty) {
 			b.Hash = hash
-			return
+			return nil
 		}
 	}
 }
