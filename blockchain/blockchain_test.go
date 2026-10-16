@@ -1,6 +1,7 @@
 package blockchain_test
 
 import (
+	"context"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -70,6 +71,39 @@ var _ = Describe("Blockchain", Ordered, func() {
 			Expect(newBlock.Hash).To(Equal(newBlock.CalculateHash()))
 			Expect(newBlock.HasValidProofOfWork()).To(BeTrue())
 			Expect(newBlock.IsValid(oldBlock)).To(BeTrue())
+		})
+	})
+	Describe("GenerateBlockWithContext", func() {
+		var oldBlock *models.Block
+
+		BeforeAll(func() {
+			oldBlock = &models.Block{
+				Index:     0,
+				Timestamp: time.Now(),
+				BPM:       0,
+				PrevHash:  "",
+				Hash:      "",
+			}
+		})
+
+		It("should generate new block successfully with valid context", func() {
+			newBlock, err := GenerateBlockWithContext(context.Background(), oldBlock, 10)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(newBlock).NotTo(BeNil())
+			Expect(newBlock.Index).To(Equal(oldBlock.Index + 1))
+			Expect(newBlock.BPM).To(Equal(10))
+			Expect(newBlock.PrevHash).To(Equal(oldBlock.Hash))
+			Expect(newBlock.Hash).NotTo(BeEmpty())
+			Expect(newBlock.IsValid(oldBlock)).To(BeTrue())
+		})
+
+		It("should return an error when context is canceled", func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			newBlock, err := GenerateBlockWithContext(ctx, oldBlock, 10)
+			Expect(err).To(MatchError(context.Canceled))
+			Expect(newBlock).To(BeNil())
 		})
 	})
 })
