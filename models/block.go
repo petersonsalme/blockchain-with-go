@@ -86,10 +86,6 @@ func (b *Block) IsValid(oldBlock *Block) bool {
 		return false
 	}
 
-	if b.Difficulty < Difficulty() {
-		return false
-	}
-
 	if !b.HasValidProofOfWork() {
 		return false
 	}
