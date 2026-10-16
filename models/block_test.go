@@ -187,11 +187,32 @@ var _ = Describe("Block", func() {
 			})
 		})
 
-		When("the difficulty is lower than the required one", func() {
-			It("should return false", func() {
-				newBlock.Mine(models.Difficulty() - 1)
+		When("POW_DIFFICULTY is raised after the block was mined", func() {
+			It("should still return true", func() {
+				Expect(newBlock.Difficulty).To(Equal(2))
+
+				pinDifficultyEnv("4")
 
 				Expect(newBlock.HasValidProofOfWork()).To(BeTrue())
+				Expect(newBlock.IsValid(oldBlock)).To(BeTrue())
+			})
+		})
+
+		When("the block was mined with a difficulty lower than the current one", func() {
+			It("should validate the proof of work against the recorded difficulty", func() {
+				newBlock.Mine(models.Difficulty() - 1)
+
+				Expect(newBlock.Difficulty).To(Equal(models.Difficulty() - 1))
+				Expect(newBlock.HasValidProofOfWork()).To(BeTrue())
+				Expect(newBlock.IsValid(oldBlock)).To(BeTrue())
+			})
+		})
+
+		When("the recorded difficulty is tampered with after mining", func() {
+			It("should return false", func() {
+				newBlock.Difficulty++
+
+				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
 				Expect(newBlock.IsValid(oldBlock)).To(BeFalse())
 			})
 		})
