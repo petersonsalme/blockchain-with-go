@@ -15,6 +15,11 @@ import (
 )
 
 var blockchainInstance *models.Blockchain
+var generateBlock = blockchain.GenerateBlock
+
+type errorResponse struct {
+	Error string `json:"error"`
+}
 
 func Run() error {
 	blockchainInstance = blockchain.New()
@@ -50,6 +55,7 @@ func respondWithJSON(w http.ResponseWriter, r *http.Request, code int, payload i
 		w.Write([]byte("HTTP 500: Internal Server Error"))
 		return
 	}
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	w.Write(response)
 }
@@ -64,21 +70,25 @@ func handleGetBlockchain(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleWriteBlock(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
 	var m models.Message
 
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&m); err != nil {
-		respondWithJSON(w, r, http.StatusBadRequest, r.Body)
+		respondWithJSON(w, r, http.StatusBadRequest, errorResponse{Error: "corpo da requisição inválido"})
 		fmt.Println(err)
 		return
 	}
-	defer r.Body.Close()
 
-	newBlock := blockchain.GenerateBlock(blockchainInstance.LastBlock(), m.BPM)
-	if newBlock.IsValid(blockchainInstance.LastBlock()) {
-		blockchainInstance.Add(newBlock)
-		blockchainInstance.Dump()
+	newBlock := generateBlock(blockchainInstance.LastBlock(), m.BPM)
+	if !newBlock.IsValid(blockchainInstance.LastBlock()) {
+		respondWithJSON(w, r, http.StatusUnprocessableEntity, errorResponse{Error: "bloco inválido não pôde ser adicionado"})
+		return
 	}
+
+	blockchainInstance.Add(newBlock)
+	blockchainInstance.Dump()
 
 	respondWithJSON(w, r, http.StatusCreated, newBlock)
 }
