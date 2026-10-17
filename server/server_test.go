@@ -37,10 +37,10 @@ var _ = Describe("Server", func() {
 
 	Describe("POST / (handleWriteBlock)", func() {
 		Context("when receiving a valid block payload", func() {
-			It("returns 201 Created, the new block with correct BPM, and appends to the chain", func() {
+			It("returns 201 Created, the new block with populated transaction IDs, and appends to the chain", func() {
 				initialLen := len(blockchainInstance.Blocks)
 
-				payload := []byte(`{"BPM": 42}`)
+				payload := []byte(`{"Transactions":[{"From":"alice","To":"bob","Amount":42,"Fee":1,"Nonce":0}]}`)
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
 				req.Header.Set("Content-Type", "application/json")
 				rec := httptest.NewRecorder()
@@ -52,10 +52,17 @@ var _ = Describe("Server", func() {
 
 				var createdBlock models.Block
 				Expect(json.Unmarshal(rec.Body.Bytes(), &createdBlock)).To(Succeed())
-				Expect(createdBlock.BPM).To(Equal(42))
+				Expect(createdBlock.Transactions).To(HaveLen(1))
+				Expect(createdBlock.Transactions[0].From).To(Equal("alice"))
+				Expect(createdBlock.Transactions[0].To).To(Equal("bob"))
+				Expect(createdBlock.Transactions[0].Amount).To(Equal(uint64(42)))
+				Expect(createdBlock.Transactions[0].ID).NotTo(BeEmpty())
+				Expect(createdBlock.Transactions[0].ID).To(Equal(createdBlock.Transactions[0].CalculateHash()))
+				Expect(createdBlock.Transactions[0].Timestamp.IsZero()).To(BeFalse())
 
 				Expect(blockchainInstance.Blocks).To(HaveLen(initialLen + 1))
-				Expect(blockchainInstance.LastBlock().BPM).To(Equal(42))
+				Expect(blockchainInstance.LastBlock().Transactions).To(HaveLen(1))
+				Expect(blockchainInstance.LastBlock().Transactions[0].ID).To(Equal(createdBlock.Transactions[0].ID))
 				Expect(blockchainInstance.LastBlock().Hash).To(Equal(createdBlock.Hash))
 			})
 		})
@@ -67,8 +74,8 @@ var _ = Describe("Server", func() {
 					generateBlock = originalGenerateBlock
 				})
 
-				generateBlock = func(ctx context.Context, oldBlock *models.Block, BPM int) (*models.Block, error) {
-					b, err := originalGenerateBlock(ctx, oldBlock, BPM)
+				generateBlock = func(ctx context.Context, oldBlock *models.Block, txs []models.Transaction) (*models.Block, error) {
+					b, err := originalGenerateBlock(ctx, oldBlock, txs)
 					if err != nil {
 						return nil, err
 					}
@@ -78,7 +85,7 @@ var _ = Describe("Server", func() {
 
 				initialLen := len(blockchainInstance.Blocks)
 
-				payload := []byte(`{"BPM": 42}`)
+				payload := []byte(`{"Transactions":[{"From":"alice","To":"bob","Amount":42}]}`)
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
 				req.Header.Set("Content-Type", "application/json")
 				rec := httptest.NewRecorder()
@@ -105,13 +112,13 @@ var _ = Describe("Server", func() {
 					generateBlock = originalGenerateBlock
 				})
 
-				generateBlock = func(ctx context.Context, oldBlock *models.Block, BPM int) (*models.Block, error) {
+				generateBlock = func(ctx context.Context, oldBlock *models.Block, txs []models.Transaction) (*models.Block, error) {
 					return nil, context.DeadlineExceeded
 				}
 
 				initialLen := len(blockchainInstance.Blocks)
 
-				payload := []byte(`{"BPM": 42}`)
+				payload := []byte(`{"Transactions":[{"From":"alice","To":"bob","Amount":42}]}`)
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
 				req.Header.Set("Content-Type", "application/json")
 				rec := httptest.NewRecorder()
@@ -138,13 +145,13 @@ var _ = Describe("Server", func() {
 					generateBlock = originalGenerateBlock
 				})
 
-				generateBlock = func(ctx context.Context, oldBlock *models.Block, BPM int) (*models.Block, error) {
+				generateBlock = func(ctx context.Context, oldBlock *models.Block, txs []models.Transaction) (*models.Block, error) {
 					return nil, context.Canceled
 				}
 
 				initialLen := len(blockchainInstance.Blocks)
 
-				payload := []byte(`{"BPM": 42}`)
+				payload := []byte(`{"Transactions":[{"From":"alice","To":"bob","Amount":42}]}`)
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
 				req.Header.Set("Content-Type", "application/json")
 				rec := httptest.NewRecorder()
@@ -171,7 +178,7 @@ var _ = Describe("Server", func() {
 
 				initialLen := len(blockchainInstance.Blocks)
 
-				payload := []byte(`{"BPM": 42}`)
+				payload := []byte(`{"Transactions":[{"From":"alice","To":"bob","Amount":42}]}`)
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload)).WithContext(ctx)
 				req.Header.Set("Content-Type", "application/json")
 				rec := httptest.NewRecorder()
@@ -194,7 +201,7 @@ var _ = Describe("Server", func() {
 
 				initialLen := len(blockchainInstance.Blocks)
 
-				payload := []byte(`{"BPM": 42}`)
+				payload := []byte(`{"Transactions":[{"From":"alice","To":"bob","Amount":42}]}`)
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
 				req.Header.Set("Content-Type", "application/json")
 				rec := httptest.NewRecorder()
@@ -232,7 +239,7 @@ var _ = Describe("Server", func() {
 
 	Describe("POST / additional cases", func() {
 		DescribeTable("returns 400 for invalid bodies and leaves the chain unchanged",
-			func(body string) {
+			func(body string, expectedMsg string) {
 				initialLen := len(blockchainInstance.Blocks)
 
 				req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
@@ -241,23 +248,29 @@ var _ = Describe("Server", func() {
 				router.ServeHTTP(rec, req)
 
 				Expect(rec.Code).To(Equal(http.StatusBadRequest))
-				Expect(rec.Body.String()).To(MatchJSON(`{"error": "corpo da requisição inválido"}`))
+				Expect(rec.Body.String()).To(MatchJSON(`{"error": "` + expectedMsg + `"}`))
 				Expect(blockchainInstance.Blocks).To(HaveLen(initialLen))
 			},
-			Entry("empty body", ""),
-			Entry("wrong BPM type", `{"BPM":"abc"}`),
-			Entry("JSON array", `[1,2]`),
+			Entry("empty body", "", "corpo da requisição inválido"),
+			Entry("JSON array", `[1,2]`, "corpo da requisição inválido"),
+			Entry("wrong Transactions type", `{"Transactions":"abc"}`, "corpo da requisição inválido"),
+			Entry("missing Transactions field", `{}`, "lista de transações não pode ser vazia"),
+			Entry("empty Transactions list", `{"Transactions":[]}`, "lista de transações não pode ser vazia"),
+			Entry("transaction with zero Amount", `{"Transactions":[{"From":"alice","To":"bob","Amount":0}]}`, "transação inválida: amount must be greater than zero"),
+			Entry("transaction with empty From", `{"Transactions":[{"From":"","To":"bob","Amount":10}]}`, "transação inválida: from cannot be empty"),
+			Entry("transaction with empty To", `{"Transactions":[{"From":"alice","To":"","Amount":10}]}`, "transação inválida: to cannot be empty"),
+			Entry("transaction with divergent ID", `{"Transactions":[{"ID":"invalid-id","From":"alice","To":"bob","Amount":10}]}`, "transação inválida: transaction id does not match calculated hash"),
 		)
 
 		It("returns 500 with the error message on a generic generator error", func() {
 			originalGenerateBlock := generateBlock
 			DeferCleanup(func() { generateBlock = originalGenerateBlock })
-			generateBlock = func(ctx context.Context, oldBlock *models.Block, BPM int) (*models.Block, error) {
+			generateBlock = func(ctx context.Context, oldBlock *models.Block, txs []models.Transaction) (*models.Block, error) {
 				return nil, errors.New("boom")
 			}
 			initialLen := len(blockchainInstance.Blocks)
 
-			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"BPM": 42}`))
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"Transactions":[{"From":"alice","To":"bob","Amount":42}]}`))
 			rec := httptest.NewRecorder()
 
 			router.ServeHTTP(rec, req)
@@ -265,6 +278,59 @@ var _ = Describe("Server", func() {
 			Expect(rec.Code).To(Equal(http.StatusInternalServerError))
 			Expect(rec.Body.String()).To(MatchJSON(`{"error": "boom"}`))
 			Expect(blockchainInstance.Blocks).To(HaveLen(initialLen))
+		})
+	})
+
+	Describe("POST /legacy/bpm", func() {
+		Context("when receiving a valid BPM payload", func() {
+			It("returns 201 Created with Deprecation header and creates block with legacy transaction", func() {
+				initialLen := len(blockchainInstance.Blocks)
+
+				payload := []byte(`{"BPM": 42}`)
+				req := httptest.NewRequest(http.MethodPost, "/legacy/bpm", bytes.NewReader(payload))
+				req.Header.Set("Content-Type", "application/json")
+				rec := httptest.NewRecorder()
+
+				router.ServeHTTP(rec, req)
+
+				Expect(rec.Code).To(Equal(http.StatusCreated))
+				Expect(rec.Header().Get("Deprecation")).To(Equal("true"))
+				Expect(rec.Header().Get("Content-Type")).To(Equal("application/json"))
+
+				var createdBlock models.Block
+				Expect(json.Unmarshal(rec.Body.Bytes(), &createdBlock)).To(Succeed())
+				Expect(createdBlock.Transactions).To(HaveLen(1))
+				Expect(createdBlock.Transactions[0].From).To(Equal("legacy"))
+				Expect(createdBlock.Transactions[0].To).To(Equal("legacy"))
+				Expect(createdBlock.Transactions[0].Amount).To(Equal(uint64(42)))
+				Expect(createdBlock.Transactions[0].ID).NotTo(BeEmpty())
+				Expect(createdBlock.Transactions[0].ID).To(Equal(createdBlock.Transactions[0].CalculateHash()))
+
+				Expect(blockchainInstance.Blocks).To(HaveLen(initialLen + 1))
+				Expect(blockchainInstance.LastBlock().Transactions[0].Amount).To(Equal(uint64(42)))
+			})
+		})
+
+		Context("when BPM is invalid or body is malformed", func() {
+			DescribeTable("returns 400 Bad Request with Deprecation header and leaves chain unchanged",
+				func(body string, expectedMsg string) {
+					initialLen := len(blockchainInstance.Blocks)
+
+					req := httptest.NewRequest(http.MethodPost, "/legacy/bpm", strings.NewReader(body))
+					rec := httptest.NewRecorder()
+
+					router.ServeHTTP(rec, req)
+
+					Expect(rec.Code).To(Equal(http.StatusBadRequest))
+					Expect(rec.Header().Get("Deprecation")).To(Equal("true"))
+					Expect(rec.Body.String()).To(MatchJSON(`{"error": "` + expectedMsg + `"}`))
+					Expect(blockchainInstance.Blocks).To(HaveLen(initialLen))
+				},
+				Entry("BPM is zero", `{"BPM": 0}`, "BPM deve ser maior que zero"),
+				Entry("BPM is negative", `{"BPM": -10}`, "BPM deve ser maior que zero"),
+				Entry("BPM is wrong type", `{"BPM": "abc"}`, "corpo da requisição inválido"),
+				Entry("empty body", "", "corpo da requisição inválido"),
+			)
 		})
 	})
 
@@ -294,12 +360,12 @@ var _ = Describe("Server", func() {
 			Expect(json.Unmarshal(rec.Body.Bytes(), &bc)).To(Succeed())
 			Expect(bc.Blocks).To(HaveLen(1))
 			Expect(bc.Blocks[0].Index).To(Equal(0))
-			Expect(bc.Blocks[0].BPM).To(Equal(0))
+			Expect(bc.Blocks[0].Transactions).To(BeEmpty())
 			Expect(bc.Blocks[0].PrevHash).To(BeEmpty())
 		})
 
 		It("returns 2 linked blocks after a valid POST", func() {
-			post := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"BPM": 77}`))
+			post := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"Transactions":[{"From":"alice","To":"bob","Amount":77}]}`))
 			postRec := httptest.NewRecorder()
 			router.ServeHTTP(postRec, post)
 			Expect(postRec.Code).To(Equal(http.StatusCreated))
@@ -313,7 +379,8 @@ var _ = Describe("Server", func() {
 			Expect(bc.Blocks).To(HaveLen(2))
 			Expect(bc.Blocks[1].Index).To(Equal(1))
 			Expect(bc.Blocks[1].PrevHash).To(Equal(bc.Blocks[0].Hash))
-			Expect(bc.Blocks[1].BPM).To(Equal(77))
+			Expect(bc.Blocks[1].Transactions).To(HaveLen(1))
+			Expect(bc.Blocks[1].Transactions[0].Amount).To(Equal(uint64(77)))
 		})
 	})
 })

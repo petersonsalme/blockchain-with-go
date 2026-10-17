@@ -40,16 +40,16 @@ var _ = Describe("Block", func() {
 
 		BeforeEach(func() {
 			b = &models.Block{
-				Index:     0,
-				Timestamp: time.Date(2021, 8, 15, 14, 30, 45, 100, time.UTC),
-				BPM:       0,
-				PrevHash:  "123",
-				Hash:      "",
+				Index:        0,
+				Timestamp:    time.Date(2021, 8, 15, 14, 30, 45, 100, time.UTC),
+				Transactions: []models.Transaction{},
+				PrevHash:     "123",
+				Hash:         "",
 			}
 		})
 
 		It("should calculate the block hash successfully", func() {
-			Expect(b.CalculateHash()).To(Equal("244e67e7982dc88d8666d87dc7ec260f7e2d6273931b5202197a2990dc0abf83"))
+			Expect(b.CalculateHash()).To(Equal("88920d5c885bdbb82f32f116a8c34b320eabd362041084756e76e65639d5972c"))
 		})
 
 		It("should change the hash when the nonce changes", func() {
@@ -96,8 +96,10 @@ var _ = Describe("Block", func() {
 			b = &models.Block{
 				Index:     1,
 				Timestamp: time.Date(2021, 8, 15, 14, 30, 45, 100, time.UTC),
-				BPM:       10,
-				PrevHash:  "123",
+				Transactions: []models.Transaction{
+					{From: "alice", To: "bob", Amount: 10, Signature: "sig1"},
+				},
+				PrevHash: "123",
 			}
 		})
 
@@ -133,8 +135,10 @@ var _ = Describe("Block", func() {
 			b = &models.Block{
 				Index:     1,
 				Timestamp: time.Date(2021, 8, 15, 14, 30, 45, 100, time.UTC),
-				BPM:       10,
-				PrevHash:  "123",
+				Transactions: []models.Transaction{
+					{From: "alice", To: "bob", Amount: 10, Signature: "sig1"},
+				},
+				PrevHash: "123",
 			}
 		})
 
@@ -214,14 +218,17 @@ var _ = Describe("Block", func() {
 			pinDifficultyEnv("2")
 
 			oldBlock = &models.Block{
-				Index:     0,
-				Timestamp: time.Date(2021, 8, 15, 14, 30, 45, 100, time.UTC),
-				BPM:       0,
-				PrevHash:  "123",
-				Hash:      "",
+				Index:        0,
+				Timestamp:    time.Date(2021, 8, 15, 14, 30, 45, 100, time.UTC),
+				Transactions: []models.Transaction{},
+				PrevHash:     "123",
+				Hash:         "",
 			}
 
-			newBlock = blockchain.GenerateBlock(oldBlock, 10)
+			newBlock = blockchain.GenerateBlock(oldBlock, []models.Transaction{
+				{From: "alice", To: "bob", Amount: 10, Signature: "sig1"},
+				{From: "carol", To: "dave", Amount: 20, Signature: "sig2"},
+			})
 		})
 
 		When("everything is fine", func() {
@@ -293,6 +300,100 @@ var _ = Describe("Block", func() {
 		When("the recorded difficulty is tampered with after mining", func() {
 			It("should return false", func() {
 				newBlock.Difficulty++
+
+				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
+				Expect(newBlock.IsValid(oldBlock)).To(BeFalse())
+			})
+		})
+
+		When("transaction amount is altered after mining", func() {
+			It("should return false", func() {
+				newBlock.Transactions[0].Amount = 999
+
+				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
+				Expect(newBlock.IsValid(oldBlock)).To(BeFalse())
+			})
+		})
+
+		When("transaction sender (From) is altered after mining", func() {
+			It("should return false", func() {
+				newBlock.Transactions[0].From = "mallory"
+
+				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
+				Expect(newBlock.IsValid(oldBlock)).To(BeFalse())
+			})
+		})
+
+		When("transaction recipient (To) is altered after mining", func() {
+			It("should return false", func() {
+				newBlock.Transactions[0].To = "mallory"
+
+				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
+				Expect(newBlock.IsValid(oldBlock)).To(BeFalse())
+			})
+		})
+
+		When("transaction fee is altered after mining", func() {
+			It("should return false", func() {
+				newBlock.Transactions[0].Fee = 99
+
+				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
+				Expect(newBlock.IsValid(oldBlock)).To(BeFalse())
+			})
+		})
+
+		When("transaction nonce is altered after mining", func() {
+			It("should return false", func() {
+				newBlock.Transactions[0].Nonce = 42
+
+				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
+				Expect(newBlock.IsValid(oldBlock)).To(BeFalse())
+			})
+		})
+
+		When("transaction timestamp is altered after mining", func() {
+			It("should return false", func() {
+				newBlock.Transactions[0].Timestamp = time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+
+				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
+				Expect(newBlock.IsValid(oldBlock)).To(BeFalse())
+			})
+		})
+
+		When("a transaction is added after mining", func() {
+			It("should return false", func() {
+				newBlock.Transactions = append(newBlock.Transactions, models.Transaction{
+					From:   "eve",
+					To:     "frank",
+					Amount: 30,
+				})
+
+				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
+				Expect(newBlock.IsValid(oldBlock)).To(BeFalse())
+			})
+		})
+
+		When("a transaction is removed after mining", func() {
+			It("should return false", func() {
+				newBlock.Transactions = newBlock.Transactions[:1]
+
+				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
+				Expect(newBlock.IsValid(oldBlock)).To(BeFalse())
+			})
+		})
+
+		When("transactions are reordered after mining", func() {
+			It("should return false", func() {
+				newBlock.Transactions[0], newBlock.Transactions[1] = newBlock.Transactions[1], newBlock.Transactions[0]
+
+				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
+				Expect(newBlock.IsValid(oldBlock)).To(BeFalse())
+			})
+		})
+
+		When("a transaction signature is altered after mining", func() {
+			It("should return false", func() {
+				newBlock.Transactions[0].Signature = "tampered-sig"
 
 				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
 				Expect(newBlock.IsValid(oldBlock)).To(BeFalse())

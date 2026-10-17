@@ -71,6 +71,7 @@ func makeMuxRouter() http.Handler {
 	muxRouter := mux.NewRouter()
 	muxRouter.HandleFunc("/", handleGetBlockchain).Methods("GET")
 	muxRouter.HandleFunc("/", handleWriteBlock).Methods("POST")
+	muxRouter.HandleFunc("/legacy/bpm", handleLegacyBPM).Methods("POST")
 	return muxRouter
 }
 
@@ -95,22 +96,11 @@ func handleGetBlockchain(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, string(bytes))
 }
 
-func handleWriteBlock(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
-
-	var m models.Message
-
-	decoder := json.NewDecoder(r.Body)
-	if err := decoder.Decode(&m); err != nil {
-		respondWithJSON(w, r, http.StatusBadRequest, errorResponse{Error: "corpo da requisição inválido"})
-		fmt.Println(err)
-		return
-	}
-
+func mineAndAddBlock(w http.ResponseWriter, r *http.Request, txs []models.Transaction) {
 	ctx, cancel := context.WithTimeout(r.Context(), miningTimeout())
 	defer cancel()
 
-	newBlock, err := generateBlock(ctx, blockchainInstance.LastBlock(), m.BPM)
+	newBlock, err := generateBlock(ctx, blockchainInstance.LastBlock(), txs)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			respondWithJSON(w, r, http.StatusGatewayTimeout, errorResponse{Error: "tempo limite de mineração excedido"})
@@ -124,7 +114,7 @@ func handleWriteBlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !newBlock.IsValid(blockchainInstance.LastBlock()) {
+	if newBlock == nil || !newBlock.IsValid(blockchainInstance.LastBlock()) {
 		respondWithJSON(w, r, http.StatusUnprocessableEntity, errorResponse{Error: "bloco inválido não pôde ser adicionado"})
 		return
 	}
@@ -133,4 +123,65 @@ func handleWriteBlock(w http.ResponseWriter, r *http.Request) {
 	blockchainInstance.Dump()
 
 	respondWithJSON(w, r, http.StatusCreated, newBlock)
+}
+
+func handleWriteBlock(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
+	var m models.Message
+
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&m); err != nil {
+		respondWithJSON(w, r, http.StatusBadRequest, errorResponse{Error: "corpo da requisição inválido"})
+		return
+	}
+
+	if len(m.Transactions) == 0 {
+		respondWithJSON(w, r, http.StatusBadRequest, errorResponse{Error: "lista de transações não pode ser vazia"})
+		return
+	}
+
+	for i := range m.Transactions {
+		if m.Transactions[i].Timestamp.IsZero() {
+			m.Transactions[i].Timestamp = time.Now()
+		}
+		if m.Transactions[i].ID == "" {
+			m.Transactions[i].ID = m.Transactions[i].CalculateHash()
+		}
+		if err := m.Transactions[i].Validate(); err != nil {
+			respondWithJSON(w, r, http.StatusBadRequest, errorResponse{Error: fmt.Sprintf("transação inválida: %s", err.Error())})
+			return
+		}
+	}
+
+	mineAndAddBlock(w, r, m.Transactions)
+}
+
+func handleLegacyBPM(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
+	w.Header().Set("Deprecation", "true")
+
+	var m models.LegacyMessage
+
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&m); err != nil {
+		respondWithJSON(w, r, http.StatusBadRequest, errorResponse{Error: "corpo da requisição inválido"})
+		return
+	}
+
+	if m.BPM <= 0 {
+		respondWithJSON(w, r, http.StatusBadRequest, errorResponse{Error: "BPM deve ser maior que zero"})
+		return
+	}
+
+	tx := models.Transaction{
+		From:      "legacy",
+		To:        "legacy",
+		Amount:    uint64(m.BPM),
+		Timestamp: time.Now(),
+	}
+	tx.ID = tx.CalculateHash()
+
+	mineAndAddBlock(w, r, []models.Transaction{tx})
 }
