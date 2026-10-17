@@ -265,6 +265,14 @@ var _ = Describe("ProofOfWork", func() {
 			})
 		})
 
+		When("both index and previous hash don't match", func() {
+			It("should report the index first", func() {
+				newBlock.Index = 50
+				newBlock.PrevHash = "abc"
+				Expect(pow.Verify(oldBlock, newBlock)).To(MatchError(consensus.ErrInvalidIndex))
+			})
+		})
+
 		When("previous hash doesn't match", func() {
 			It("should return false", func() {
 				newBlock.PrevHash = "abc"
