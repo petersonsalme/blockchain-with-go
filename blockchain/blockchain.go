@@ -1,6 +1,7 @@
 package blockchain
 
 import (
+	"context"
 	"time"
 
 	"github.com/petersonsalme/blockchain-with-go/models"
@@ -21,14 +22,21 @@ func New() *models.Blockchain {
 	return &b
 }
 
-func GenerateBlock(oldBlock *models.Block, BPM int) *models.Block {
+func GenerateBlockWithContext(ctx context.Context, oldBlock *models.Block, BPM int) (*models.Block, error) {
 	var newBlock models.Block
 
 	newBlock.Index = oldBlock.Index + 1
 	newBlock.Timestamp = time.Now()
 	newBlock.BPM = BPM
 	newBlock.PrevHash = oldBlock.Hash
-	newBlock.Mine(models.Difficulty())
+	if err := newBlock.MineWithContext(ctx, models.Difficulty()); err != nil {
+		return nil, err
+	}
 
-	return &newBlock
+	return &newBlock, nil
+}
+
+func GenerateBlock(oldBlock *models.Block, BPM int) *models.Block {
+	newBlock, _ := GenerateBlockWithContext(context.Background(), oldBlock, BPM)
+	return newBlock
 }
