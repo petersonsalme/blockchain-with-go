@@ -14,6 +14,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/petersonsalme/blockchain-with-go/blockchain"
+	"github.com/petersonsalme/blockchain-with-go/consensus"
 	"github.com/petersonsalme/blockchain-with-go/models"
 )
 
@@ -24,6 +25,7 @@ const DefaultMiningTimeout = 10 * time.Second
 const MiningTimeoutEnvVar = "MINING_TIMEOUT"
 
 var blockchainInstance *models.Blockchain
+var consensusEngine consensus.Consensus
 var generateBlock = blockchain.GenerateBlockWithContext
 
 type errorResponse struct {
@@ -48,6 +50,12 @@ func miningTimeout() time.Duration {
 }
 
 func Run() error {
+	return RunWithConsensus(consensus.NewProofOfWorkFromEnv())
+}
+
+// RunWithConsensus starts the server using c to seal and verify blocks.
+func RunWithConsensus(c consensus.Consensus) error {
+	consensusEngine = c
 	blockchainInstance = blockchain.New()
 	mux := makeMuxRouter()
 	httpAddr := os.Getenv("PORT")
@@ -100,7 +108,7 @@ func mineAndAddBlock(w http.ResponseWriter, r *http.Request, txs []models.Transa
 	ctx, cancel := context.WithTimeout(r.Context(), miningTimeout())
 	defer cancel()
 
-	newBlock, err := generateBlock(ctx, blockchainInstance.LastBlock(), txs)
+	newBlock, err := generateBlock(ctx, consensusEngine, blockchainInstance.LastBlock(), txs)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			respondWithJSON(w, r, http.StatusGatewayTimeout, errorResponse{Error: "tempo limite de mineração excedido"})
@@ -114,7 +122,7 @@ func mineAndAddBlock(w http.ResponseWriter, r *http.Request, txs []models.Transa
 		return
 	}
 
-	if newBlock == nil || !newBlock.IsValid(blockchainInstance.LastBlock()) {
+	if newBlock == nil || consensusEngine.Verify(blockchainInstance.LastBlock(), newBlock) != nil {
 		respondWithJSON(w, r, http.StatusUnprocessableEntity, errorResponse{Error: "bloco inválido não pôde ser adicionado"})
 		return
 	}

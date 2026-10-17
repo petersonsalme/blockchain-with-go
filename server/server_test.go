@@ -14,22 +14,28 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/petersonsalme/blockchain-with-go/blockchain"
+	"github.com/petersonsalme/blockchain-with-go/consensus"
 	"github.com/petersonsalme/blockchain-with-go/models"
 )
+
+// rejectingConsensus seals with inner but never accepts a block.
+type rejectingConsensus struct{ inner consensus.Consensus }
+
+func (r rejectingConsensus) Seal(ctx context.Context, b *models.Block) error {
+	return r.inner.Seal(ctx, b)
+}
+
+func (rejectingConsensus) Verify(prev, b *models.Block) error {
+	return errors.New("rejected by fake consensus")
+}
 
 var _ = Describe("Server", func() {
 	var router http.Handler
 
 	BeforeEach(func() {
-		previousDifficulty, hadDifficulty := os.LookupEnv(models.DifficultyEnvVar)
-		Expect(os.Setenv(models.DifficultyEnvVar, "1")).To(Succeed())
-		DeferCleanup(func() {
-			if hadDifficulty {
-				Expect(os.Setenv(models.DifficultyEnvVar, previousDifficulty)).To(Succeed())
-			} else {
-				Expect(os.Unsetenv(models.DifficultyEnvVar)).To(Succeed())
-			}
-		})
+		previousEngine := consensusEngine
+		DeferCleanup(func() { consensusEngine = previousEngine })
+		consensusEngine = consensus.NewProofOfWork(1)
 
 		blockchainInstance = blockchain.New()
 		router = makeMuxRouter()
@@ -74,8 +80,8 @@ var _ = Describe("Server", func() {
 					generateBlock = originalGenerateBlock
 				})
 
-				generateBlock = func(ctx context.Context, oldBlock *models.Block, txs []models.Transaction) (*models.Block, error) {
-					b, err := originalGenerateBlock(ctx, oldBlock, txs)
+				generateBlock = func(ctx context.Context, c consensus.Consensus, oldBlock *models.Block, txs []models.Transaction) (*models.Block, error) {
+					b, err := originalGenerateBlock(ctx, c, oldBlock, txs)
 					if err != nil {
 						return nil, err
 					}
@@ -112,7 +118,7 @@ var _ = Describe("Server", func() {
 					generateBlock = originalGenerateBlock
 				})
 
-				generateBlock = func(ctx context.Context, oldBlock *models.Block, txs []models.Transaction) (*models.Block, error) {
+				generateBlock = func(ctx context.Context, c consensus.Consensus, oldBlock *models.Block, txs []models.Transaction) (*models.Block, error) {
 					return nil, context.DeadlineExceeded
 				}
 
@@ -145,7 +151,7 @@ var _ = Describe("Server", func() {
 					generateBlock = originalGenerateBlock
 				})
 
-				generateBlock = func(ctx context.Context, oldBlock *models.Block, txs []models.Transaction) (*models.Block, error) {
+				generateBlock = func(ctx context.Context, c consensus.Consensus, oldBlock *models.Block, txs []models.Transaction) (*models.Block, error) {
 					return nil, context.Canceled
 				}
 
@@ -193,10 +199,9 @@ var _ = Describe("Server", func() {
 		Context("when MINING_TIMEOUT environment variable is configured", func() {
 			It("aborts mining when timeout expires with real mining", func() {
 				Expect(os.Setenv(MiningTimeoutEnvVar, "15ms")).To(Succeed())
-				Expect(os.Setenv(models.DifficultyEnvVar, "10")).To(Succeed())
+				consensusEngine = consensus.NewProofOfWork(10)
 				DeferCleanup(func() {
 					Expect(os.Unsetenv(MiningTimeoutEnvVar)).To(Succeed())
-					Expect(os.Setenv(models.DifficultyEnvVar, "1")).To(Succeed())
 				})
 
 				initialLen := len(blockchainInstance.Blocks)
@@ -262,10 +267,24 @@ var _ = Describe("Server", func() {
 			Entry("transaction with divergent ID", `{"Transactions":[{"ID":"invalid-id","From":"alice","To":"bob","Amount":10}]}`, "transação inválida: transaction id does not match calculated hash"),
 		)
 
+		It("rejects blocks with 422 when the injected consensus fails verification", func() {
+			consensusEngine = rejectingConsensus{inner: consensusEngine}
+			initialLen := len(blockchainInstance.Blocks)
+
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"Transactions":[{"From":"alice","To":"bob","Amount":42}]}`))
+			rec := httptest.NewRecorder()
+
+			router.ServeHTTP(rec, req)
+
+			Expect(rec.Code).To(Equal(http.StatusUnprocessableEntity))
+			Expect(rec.Body.String()).To(MatchJSON(`{"error": "bloco inválido não pôde ser adicionado"}`))
+			Expect(blockchainInstance.Blocks).To(HaveLen(initialLen))
+		})
+
 		It("returns 500 with the error message on a generic generator error", func() {
 			originalGenerateBlock := generateBlock
 			DeferCleanup(func() { generateBlock = originalGenerateBlock })
-			generateBlock = func(ctx context.Context, oldBlock *models.Block, txs []models.Transaction) (*models.Block, error) {
+			generateBlock = func(ctx context.Context, c consensus.Consensus, oldBlock *models.Block, txs []models.Transaction) (*models.Block, error) {
 				return nil, errors.New("boom")
 			}
 			initialLen := len(blockchainInstance.Blocks)
