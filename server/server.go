@@ -14,6 +14,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/petersonsalme/blockchain-with-go/blockchain"
+	"github.com/petersonsalme/blockchain-with-go/consensus"
 	"github.com/petersonsalme/blockchain-with-go/models"
 )
 
@@ -24,6 +25,7 @@ const DefaultMiningTimeout = 10 * time.Second
 const MiningTimeoutEnvVar = "MINING_TIMEOUT"
 
 var blockchainInstance *models.Blockchain
+var consensusEngine consensus.Consensus
 var generateBlock = blockchain.GenerateBlockWithContext
 
 type errorResponse struct {
@@ -61,7 +63,18 @@ func miningTimeout() time.Duration {
 	return DefaultMiningTimeout
 }
 
+// defaultConsensus is the engine used by Run: proof of work at POW_DIFFICULTY.
+func defaultConsensus() consensus.Consensus {
+	return consensus.NewProofOfWorkFromEnv()
+}
+
 func Run() error {
+	return RunWithConsensus(defaultConsensus())
+}
+
+// RunWithConsensus starts the server using c to seal and verify blocks.
+func RunWithConsensus(c consensus.Consensus) error {
+	consensusEngine = c
 	blockchainInstance = blockchain.New()
 	mux := makeMuxRouter()
 	httpAddr := os.Getenv("PORT")
@@ -114,7 +127,7 @@ func mineAndAddBlock(w http.ResponseWriter, r *http.Request, txs []models.Transa
 	ctx, cancel := context.WithTimeout(r.Context(), miningTimeout())
 	defer cancel()
 
-	newBlock, err := generateBlock(ctx, blockchainInstance.LastBlock(), txs)
+	newBlock, err := generateBlock(ctx, consensusEngine, blockchainInstance.LastBlock(), txs)
 	if err != nil {
 		var validationErr *models.ValidationError
 		if errors.As(err, &validationErr) {
@@ -145,7 +158,7 @@ func mineAndAddBlock(w http.ResponseWriter, r *http.Request, txs []models.Transa
 		}
 	}
 
-	if newBlock == nil || !newBlock.IsValid(blockchainInstance.LastBlock()) {
+	if newBlock == nil || consensusEngine.Verify(blockchainInstance.LastBlock(), newBlock) != nil {
 		respondWithJSON(w, r, http.StatusUnprocessableEntity, errorResponse{Error: "bloco inválido não pôde ser adicionado"})
 		return
 	}
