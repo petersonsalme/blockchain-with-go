@@ -1,6 +1,7 @@
 package models_test
 
 import (
+	"context"
 	"os"
 	"strings"
 	"time"
@@ -123,6 +124,87 @@ var _ = Describe("Block", func() {
 			Expect(b.Difficulty).To(Equal(0))
 			Expect(b.Nonce).To(Equal(0))
 			Expect(b.HasValidProofOfWork()).To(BeTrue())
+		})
+	})
+	Describe("MineWithContext", func() {
+		var b *models.Block
+
+		BeforeEach(func() {
+			b = &models.Block{
+				Index:     1,
+				Timestamp: time.Date(2021, 8, 15, 14, 30, 45, 100, time.UTC),
+				BPM:       10,
+				PrevHash:  "123",
+			}
+		})
+
+		It("should find a hash with the required leading zeros and return nil error", func() {
+			err := b.MineWithContext(context.Background(), 2)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(b.Difficulty).To(Equal(2))
+			Expect(b.Hash).To(HavePrefix("00"))
+			Expect(b.Hash).To(Equal(b.CalculateHash()))
+			Expect(b.HasValidProofOfWork()).To(BeTrue())
+		})
+
+		It("should treat a negative difficulty as zero", func() {
+			err := b.MineWithContext(context.Background(), -1)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(b.Difficulty).To(Equal(0))
+			Expect(b.Nonce).To(Equal(0))
+			Expect(b.HasValidProofOfWork()).To(BeTrue())
+		})
+
+		It("should handle a nil context gracefully", func() {
+			err := b.MineWithContext(nil, 1)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(b.Difficulty).To(Equal(1))
+			Expect(b.HasValidProofOfWork()).To(BeTrue())
+		})
+
+		When("the context is already canceled before mining", func() {
+			It("should abort immediately and return context.Canceled", func() {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+
+				err := b.MineWithContext(ctx, 12)
+
+				Expect(err).To(MatchError(context.Canceled))
+				Expect(b.Hash).To(BeEmpty())
+			})
+		})
+
+		When("the context is canceled while mining is in progress", func() {
+			It("should abort and return context.Canceled", func() {
+				ctx, cancel := context.WithCancel(context.Background())
+
+				go func() {
+					time.Sleep(10 * time.Millisecond)
+					cancel()
+				}()
+
+				// Use high difficulty so mining will not finish before cancel is called
+				err := b.MineWithContext(ctx, 12)
+
+				Expect(err).To(MatchError(context.Canceled))
+				Expect(b.Hash).To(BeEmpty())
+			})
+		})
+
+		When("the context deadline is exceeded (timeout)", func() {
+			It("should abort and return context.DeadlineExceeded", func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+				defer cancel()
+
+				// Use high difficulty so mining will timeout
+				err := b.MineWithContext(ctx, 12)
+
+				Expect(err).To(MatchError(context.DeadlineExceeded))
+				Expect(b.Hash).To(BeEmpty())
+			})
 		})
 	})
 	Describe("IsValid", func() {
