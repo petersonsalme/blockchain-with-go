@@ -33,7 +33,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 				block := b.Blocks[0]
 				Expect(block.Index).To(Equal(0))
 				Expect(block.Timestamp).Should(BeTemporally("~", time.Now(), time.Second))
-				Expect(block.BPM).To(Equal(0))
+				Expect(block.Transactions).To(BeEmpty())
 				Expect(block.PrevHash).To(BeEmpty())
 				Expect(block.Hash).To(BeEmpty())
 			})
@@ -42,26 +42,30 @@ var _ = Describe("Blockchain", Ordered, func() {
 	Describe("GenerateBlock", func() {
 		var oldBlock *models.Block
 		var newBlock *models.Block
+		var sampleTxs []models.Transaction
 
 		BeforeAll(func() {
 			oldBlock = &models.Block{
-				Index:     0,
-				Timestamp: time.Now(),
-				BPM:       0,
-				PrevHash:  "",
-				Hash:      "",
+				Index:        0,
+				Timestamp:    time.Now(),
+				Transactions: []models.Transaction{},
+				PrevHash:     "",
+				Hash:         "",
+			}
+			sampleTxs = []models.Transaction{
+				{From: "alice", To: "bob", Amount: 10, Fee: 1, Nonce: 0},
 			}
 		})
 
 		It("should generate new block successfully", func() {
-			newBlock = GenerateBlock(oldBlock, 10)
+			newBlock = GenerateBlock(oldBlock, sampleTxs)
 			Expect(newBlock).NotTo(BeNil())
 		})
 
 		It("Should be a valid block", func() {
 			Expect(newBlock.Index).To(Equal(oldBlock.Index + 1))
 			Expect(newBlock.Timestamp).Should(BeTemporally("~", time.Now(), time.Second))
-			Expect(newBlock.BPM).To(Equal(10))
+			Expect(newBlock.Transactions).To(Equal(sampleTxs))
 			Expect(newBlock.PrevHash).To(Equal(oldBlock.Hash))
 			Expect(newBlock.Hash).NotTo(BeEmpty())
 		})
@@ -75,23 +79,27 @@ var _ = Describe("Blockchain", Ordered, func() {
 	})
 	Describe("GenerateBlockWithContext", func() {
 		var oldBlock *models.Block
+		var sampleTxs []models.Transaction
 
 		BeforeAll(func() {
 			oldBlock = &models.Block{
-				Index:     0,
-				Timestamp: time.Now(),
-				BPM:       0,
-				PrevHash:  "",
-				Hash:      "",
+				Index:        0,
+				Timestamp:    time.Now(),
+				Transactions: []models.Transaction{},
+				PrevHash:     "",
+				Hash:         "",
+			}
+			sampleTxs = []models.Transaction{
+				{From: "alice", To: "bob", Amount: 10, Fee: 1, Nonce: 0},
 			}
 		})
 
 		It("should generate new block successfully with valid context", func() {
-			newBlock, err := GenerateBlockWithContext(context.Background(), oldBlock, 10)
+			newBlock, err := GenerateBlockWithContext(context.Background(), oldBlock, sampleTxs)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(newBlock).NotTo(BeNil())
 			Expect(newBlock.Index).To(Equal(oldBlock.Index + 1))
-			Expect(newBlock.BPM).To(Equal(10))
+			Expect(newBlock.Transactions).To(Equal(sampleTxs))
 			Expect(newBlock.PrevHash).To(Equal(oldBlock.Hash))
 			Expect(newBlock.Hash).NotTo(BeEmpty())
 			Expect(newBlock.IsValid(oldBlock)).To(BeTrue())
@@ -101,7 +109,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 
-			newBlock, err := GenerateBlockWithContext(ctx, oldBlock, 10)
+			newBlock, err := GenerateBlockWithContext(ctx, oldBlock, sampleTxs)
 			Expect(err).To(MatchError(context.Canceled))
 			Expect(newBlock).To(BeNil())
 		})
