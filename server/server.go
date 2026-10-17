@@ -49,8 +49,13 @@ func miningTimeout() time.Duration {
 	return DefaultMiningTimeout
 }
 
+// defaultConsensus is the engine used by Run: proof of work at POW_DIFFICULTY.
+func defaultConsensus() consensus.Consensus {
+	return consensus.NewProofOfWorkFromEnv()
+}
+
 func Run() error {
-	return RunWithConsensus(consensus.NewProofOfWorkFromEnv())
+	return RunWithConsensus(defaultConsensus())
 }
 
 // RunWithConsensus starts the server using c to seal and verify blocks.
