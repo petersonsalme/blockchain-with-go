@@ -9,10 +9,13 @@ import (
 	. "github.com/onsi/gomega"
 
 	. "github.com/petersonsalme/blockchain-with-go/blockchain"
+	"github.com/petersonsalme/blockchain-with-go/consensus"
 	"github.com/petersonsalme/blockchain-with-go/models"
 )
 
 var _ = Describe("Blockchain", Ordered, func() {
+	pow := consensus.NewProofOfWork(2)
+
 	Describe("New", func() {
 		var b *models.Blockchain
 
@@ -59,7 +62,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 		})
 
 		It("should generate new block successfully", func() {
-			newBlock = GenerateBlock(oldBlock, sampleTxs)
+			newBlock = GenerateBlock(pow, oldBlock, sampleTxs)
 			Expect(newBlock).NotTo(BeNil())
 		})
 
@@ -72,10 +75,9 @@ var _ = Describe("Blockchain", Ordered, func() {
 		})
 
 		It("Should be mined with the configured difficulty", func() {
-			Expect(newBlock.Difficulty).To(Equal(models.Difficulty()))
+			Expect(newBlock.Difficulty).To(Equal(pow.Difficulty))
 			Expect(newBlock.Hash).To(Equal(newBlock.CalculateHash()))
-			Expect(newBlock.HasValidProofOfWork()).To(BeTrue())
-			Expect(newBlock.IsValid(oldBlock)).To(BeTrue())
+			Expect(pow.Verify(oldBlock, newBlock)).To(Succeed())
 		})
 	})
 	Describe("GenerateBlockWithContext", func() {
@@ -96,21 +98,21 @@ var _ = Describe("Blockchain", Ordered, func() {
 		})
 
 		It("should generate new block successfully with valid context", func() {
-			newBlock, err := GenerateBlockWithContext(context.Background(), oldBlock, sampleTxs)
+			newBlock, err := GenerateBlockWithContext(context.Background(), pow, oldBlock, sampleTxs)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(newBlock).NotTo(BeNil())
 			Expect(newBlock.Index).To(Equal(oldBlock.Index + 1))
 			Expect(newBlock.Transactions).To(Equal(sampleTxs))
 			Expect(newBlock.PrevHash).To(Equal(oldBlock.Hash))
 			Expect(newBlock.Hash).NotTo(BeEmpty())
-			Expect(newBlock.IsValid(oldBlock)).To(BeTrue())
+			Expect(pow.Verify(oldBlock, newBlock)).To(Succeed())
 		})
 
 		It("should return an error when context is canceled", func() {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 
-			newBlock, err := GenerateBlockWithContext(ctx, oldBlock, sampleTxs)
+			newBlock, err := GenerateBlockWithContext(ctx, pow, oldBlock, sampleTxs)
 			Expect(err).To(MatchError(context.Canceled))
 			Expect(newBlock).To(BeNil())
 		})
@@ -119,7 +121,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 	Describe("GenerateBlockWithContext size limit", func() {
 		It("returns a ValidationError without mining when the candidate is too large", func() {
 			GinkgoT().Setenv(models.MaxBlockBytesEnvVar, "50")
-			GinkgoT().Setenv(models.DifficultyEnvVar, "8")
+			slowPoW := consensus.NewProofOfWork(8)
 
 			parent := New().LastBlock()
 			done := make(chan struct{})
@@ -129,7 +131,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 			)
 			go func() {
 				defer close(done)
-				block, err = GenerateBlockWithContext(context.Background(), parent, []models.Transaction{{From: "a", To: "b", Amount: 1}})
+				block, err = GenerateBlockWithContext(context.Background(), slowPoW, parent, []models.Transaction{{From: "a", To: "b", Amount: 1}})
 			}()
 			Eventually(done, time.Second).Should(BeClosed())
 

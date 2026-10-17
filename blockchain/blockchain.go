@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/petersonsalme/blockchain-with-go/consensus"
 	"github.com/petersonsalme/blockchain-with-go/models"
 )
 
@@ -23,7 +24,7 @@ func New() *models.Blockchain {
 	return &b
 }
 
-func GenerateBlockWithContext(ctx context.Context, oldBlock *models.Block, txs []models.Transaction) (*models.Block, error) {
+func GenerateBlockWithContext(ctx context.Context, c consensus.Consensus, oldBlock *models.Block, txs []models.Transaction) (*models.Block, error) {
 	var newBlock models.Block
 
 	newBlock.Index = oldBlock.Index + 1
@@ -38,14 +39,14 @@ func GenerateBlockWithContext(ctx context.Context, oldBlock *models.Block, txs [
 		return nil, err
 	}
 
-	if err := newBlock.MineWithContext(ctx, models.Difficulty()); err != nil {
+	if err := c.Seal(ctx, &newBlock); err != nil {
 		return nil, err
 	}
 
 	return &newBlock, nil
 }
 
-func GenerateBlock(oldBlock *models.Block, txs []models.Transaction) *models.Block {
-	newBlock, _ := GenerateBlockWithContext(context.Background(), oldBlock, txs)
+func GenerateBlock(c consensus.Consensus, oldBlock *models.Block, txs []models.Transaction) *models.Block {
+	newBlock, _ := GenerateBlockWithContext(context.Background(), c, oldBlock, txs)
 	return newBlock
 }
