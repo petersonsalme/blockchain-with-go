@@ -315,6 +315,51 @@ var _ = Describe("Block", func() {
 			})
 		})
 
+		When("transaction sender (From) is altered after mining", func() {
+			It("should return false", func() {
+				newBlock.Transactions[0].From = "mallory"
+
+				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
+				Expect(newBlock.IsValid(oldBlock)).To(BeFalse())
+			})
+		})
+
+		When("transaction recipient (To) is altered after mining", func() {
+			It("should return false", func() {
+				newBlock.Transactions[0].To = "mallory"
+
+				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
+				Expect(newBlock.IsValid(oldBlock)).To(BeFalse())
+			})
+		})
+
+		When("transaction fee is altered after mining", func() {
+			It("should return false", func() {
+				newBlock.Transactions[0].Fee = 99
+
+				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
+				Expect(newBlock.IsValid(oldBlock)).To(BeFalse())
+			})
+		})
+
+		When("transaction nonce is altered after mining", func() {
+			It("should return false", func() {
+				newBlock.Transactions[0].Nonce = 42
+
+				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
+				Expect(newBlock.IsValid(oldBlock)).To(BeFalse())
+			})
+		})
+
+		When("transaction timestamp is altered after mining", func() {
+			It("should return false", func() {
+				newBlock.Transactions[0].Timestamp = time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+
+				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
+				Expect(newBlock.IsValid(oldBlock)).To(BeFalse())
+			})
+		})
+
 		When("a transaction is added after mining", func() {
 			It("should return false", func() {
 				newBlock.Transactions = append(newBlock.Transactions, models.Transaction{
