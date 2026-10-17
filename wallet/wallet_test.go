@@ -18,6 +18,18 @@ var _ = Describe("Wallet", func() {
 			Expect(err).To(HaveOccurred())
 		})
 
+		It("tests seed size boundaries (len-1, len, len+1)", func() {
+			_, errShort := FromSeed(make([]byte, ed25519.SeedSize-1))
+			Expect(errShort).To(MatchError("wallet: seed must be 32 bytes, got 31"))
+
+			w, errValid := FromSeed(make([]byte, ed25519.SeedSize))
+			Expect(errValid).NotTo(HaveOccurred())
+			Expect(w).NotTo(BeNil())
+
+			_, errLong := FromSeed(make([]byte, ed25519.SeedSize+1))
+			Expect(errLong).To(MatchError("wallet: seed must be 32 bytes, got 33"))
+		})
+
 		It("is deterministic with a fixed address vector", func() {
 			w1, err := FromSeed(fixedSeed)
 			Expect(err).NotTo(HaveOccurred())
@@ -41,6 +53,22 @@ var _ = Describe("Wallet", func() {
 			bad[0] ^= 0xff
 			Expect(Verify(w.PublicKey(), msg, bad)).To(BeFalse())
 			Expect(Verify(other.PublicKey(), msg, sig)).To(BeFalse())
+		})
+
+		It("tests public key size boundaries for Verify (len-1, len, len+1)", func() {
+			w, err := New()
+			Expect(err).NotTo(HaveOccurred())
+			msg := []byte("boundary test message")
+			sig := w.Sign(msg)
+
+			// len - 1 (31 bytes)
+			Expect(Verify(make([]byte, ed25519.PublicKeySize-1), msg, sig)).To(BeFalse())
+
+			// len (32 bytes)
+			Expect(Verify(w.PublicKey(), msg, sig)).To(BeTrue())
+
+			// len + 1 (33 bytes)
+			Expect(Verify(make([]byte, ed25519.PublicKeySize+1), msg, sig)).To(BeFalse())
 		})
 
 		It("returns false for invalid key sizes without panicking", func() {
@@ -81,6 +109,12 @@ var _ = Describe("ValidateAddress", func() {
 	It("rejects wrong length", func() {
 		Expect(ValidateAddress(addr[:48])).To(MatchError(ErrInvalidAddressLength))
 		Expect(ValidateAddress("")).To(MatchError(ErrInvalidAddressLength))
+	})
+
+	It("tests address string length boundaries (len-1, len, len+1)", func() {
+		Expect(ValidateAddress(addr[:len(addr)-1])).To(MatchError(ErrInvalidAddressLength))
+		Expect(ValidateAddress(addr)).To(Succeed())
+		Expect(ValidateAddress(addr + "0")).To(MatchError(ErrInvalidAddressLength))
 	})
 
 	It("rejects non-hex", func() {
