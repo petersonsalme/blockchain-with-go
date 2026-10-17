@@ -2,6 +2,7 @@ package blockchain_test
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -114,6 +115,30 @@ var _ = Describe("Blockchain", Ordered, func() {
 			newBlock, err := GenerateBlockWithContext(ctx, pow, oldBlock, sampleTxs)
 			Expect(err).To(MatchError(context.Canceled))
 			Expect(newBlock).To(BeNil())
+		})
+	})
+
+	Describe("GenerateBlockWithContext size limit", func() {
+		It("returns a ValidationError without mining when the candidate is too large", func() {
+			GinkgoT().Setenv(models.MaxBlockBytesEnvVar, "50")
+			slowPoW := consensus.NewProofOfWork(8)
+
+			parent := New().LastBlock()
+			done := make(chan struct{})
+			var (
+				block *models.Block
+				err   error
+			)
+			go func() {
+				defer close(done)
+				block, err = GenerateBlockWithContext(context.Background(), slowPoW, parent, []models.Transaction{{From: "a", To: "b", Amount: 1}})
+			}()
+			Eventually(done, time.Second).Should(BeClosed())
+
+			Expect(block).To(BeNil())
+			var ve *models.ValidationError
+			Expect(errors.As(err, &ve)).To(BeTrue())
+			Expect(ve.Code).To(Equal(models.CodeBlockTooLarge))
 		})
 	})
 })

@@ -2,6 +2,7 @@ package blockchain
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/petersonsalme/blockchain-with-go/consensus"
@@ -30,6 +31,14 @@ func GenerateBlockWithContext(ctx context.Context, c consensus.Consensus, oldBlo
 	newBlock.Timestamp = time.Now()
 	newBlock.Transactions = txs
 	newBlock.PrevHash = oldBlock.Hash
+
+	// Check size before mining, using a full-length hash placeholder for a fair estimate.
+	estimate := newBlock
+	estimate.Hash = strings.Repeat("0", 64)
+	if err := models.ValidateSize(&estimate, models.MaxBlockBytes()); err != nil {
+		return nil, err
+	}
+
 	if err := c.Seal(ctx, &newBlock); err != nil {
 		return nil, err
 	}

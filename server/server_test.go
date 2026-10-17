@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -239,6 +240,81 @@ var _ = Describe("Server", func() {
 
 				Expect(blockchainInstance.Blocks).To(HaveLen(initialLen))
 			})
+		})
+	})
+
+	Describe("POST / block rules", func() {
+		post := func(body string) *httptest.ResponseRecorder {
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			return rec
+		}
+		payload := `{"Transactions":[{"From":"alice","To":"bob","Amount":42,"Fee":1,"Nonce":0}]}`
+
+		It("returns 422 block_too_large when transactions exceed the limit", func() {
+			GinkgoT().Setenv(models.MaxBlockBytesEnvVar, "100")
+			rec := post(payload)
+
+			Expect(rec.Code).To(Equal(http.StatusUnprocessableEntity))
+			var body map[string]any
+			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
+			Expect(body).To(HaveKey("error"))
+			Expect(body["code"]).To(Equal("block_too_large"))
+			Expect(body["details"]).To(HaveKey("size"))
+			Expect(body["details"]).To(HaveKeyWithValue("max", BeNumerically("==", 100)))
+			Expect(blockchainInstance.Blocks).To(HaveLen(1))
+		})
+
+		It("returns 422 with the code of a timestamp violation after mining", func() {
+			original := generateBlock
+			DeferCleanup(func() { generateBlock = original })
+			generateBlock = func(ctx context.Context, c consensus.Consensus, oldBlock *models.Block, txs []models.Transaction) (*models.Block, error) {
+				b, err := original(ctx, c, oldBlock, txs)
+				if err == nil {
+					b.Timestamp = oldBlock.Timestamp.Add(-time.Second)
+				}
+				return b, err
+			}
+			rec := post(payload)
+
+			Expect(rec.Code).To(Equal(http.StatusUnprocessableEntity))
+			var body map[string]any
+			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
+			Expect(body["code"]).To(Equal("timestamp_before_parent"))
+			Expect(blockchainInstance.Blocks).To(HaveLen(1))
+		})
+
+		It("returns 422 timestamp_too_far_in_future for a far-future block", func() {
+			original := generateBlock
+			DeferCleanup(func() { generateBlock = original })
+			generateBlock = func(ctx context.Context, c consensus.Consensus, oldBlock *models.Block, txs []models.Transaction) (*models.Block, error) {
+				b, err := original(ctx, c, oldBlock, txs)
+				if err == nil {
+					b.Timestamp = time.Now().Add(3 * time.Hour)
+				}
+				return b, err
+			}
+			rec := post(payload)
+
+			Expect(rec.Code).To(Equal(http.StatusUnprocessableEntity))
+			var body map[string]any
+			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
+			Expect(body["code"]).To(Equal("timestamp_too_far_in_future"))
+		})
+
+		It("returns 413 request_too_large for a giant body", func() {
+			GinkgoT().Setenv(models.MaxBlockBytesEnvVar, "100")
+			rec := post(`{"Transactions":[{"From":"` + strings.Repeat("a", 1000) + `"}]}`)
+
+			Expect(rec.Code).To(Equal(http.StatusRequestEntityTooLarge))
+			var body map[string]any
+			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
+			Expect(body["code"]).To(Equal("request_too_large"))
+		})
+
+		It("still returns 201 on the happy path", func() {
+			Expect(post(payload).Code).To(Equal(http.StatusCreated))
 		})
 	})
 
