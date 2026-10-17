@@ -14,6 +14,7 @@ Implementação didática de blockchain em Go com validação de blocos, hashing
 blockchain-with-go/
 ├── main.go         # Inicialização do servidor e porta HTTP
 ├── blockchain/     # Regras de cadeia, blocos e validação
+├── consensus/      # Interface Consensus e implementação ProofOfWork
 ├── models/         # Estruturas de dados (Block, Message, etc.)
 ├── server/         # Handlers e rotas HTTP (gorilla/mux)
 ├── go.mod          # Módulo Go e dependências
