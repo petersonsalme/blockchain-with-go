@@ -19,13 +19,13 @@ const DefaultDifficulty = 2
 const DifficultyEnvVar = "POW_DIFFICULTY"
 
 type Block struct {
-	Index      int
-	Timestamp  time.Time
-	BPM        int
-	Hash       string
-	PrevHash   string
-	Nonce      int
-	Difficulty int
+	Index        int
+	Timestamp    time.Time
+	Transactions []Transaction
+	Hash         string
+	PrevHash     string
+	Nonce        int
+	Difficulty   int
 }
 
 // Difficulty returns the proof-of-work difficulty new blocks must satisfy.
@@ -44,7 +44,7 @@ func Difficulty() int {
 }
 
 func (b *Block) CalculateHash() string {
-	record := fmt.Sprintf("%d%s%d%s%d%d", b.Index, b.Timestamp.UTC().String(), b.BPM, b.PrevHash, b.Nonce, b.Difficulty)
+	record := fmt.Sprintf("%d%s%s%s%d%d", b.Index, b.Timestamp.UTC().String(), TransactionsHash(b.Transactions), b.PrevHash, b.Nonce, b.Difficulty)
 	h := sha256.New()
 	h.Write([]byte(record))
 	hashed := h.Sum(nil)
