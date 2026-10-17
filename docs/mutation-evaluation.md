@@ -113,3 +113,36 @@ Test efficacy: 78.57%
 Mutator coverage: 100.00%
 ```
 *(37 mutantes fora das linhas alteradas pelo diff foram marcados como `Skipped`, enquanto todos os mutantes nas linhas adicionadas/modificadas foram avaliados).*
+
+## ENG-61 — resultado após os testes
+
+Comando (pacote `./consensus`, sem `--diff`):
+
+```
+$ go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --timeout-coefficient 20 ./consensus
+Starting...
+Gathering coverage... done in 386.942454ms
+      KILLED CONDITIONALS_NEGATION at pow.go:84:16
+      KILLED CONDITIONALS_NEGATION at pow.go:65:23
+       LIVED CONDITIONALS_BOUNDARY at pow.go:84:16
+      KILLED CONDITIONALS_NEGATION at pow.go:38:9
+      KILLED CONDITIONALS_NEGATION at pow.go:61:15
+      KILLED CONDITIONALS_NEGATION at pow.go:57:18
+      KILLED CONDITIONALS_NEGATION at pow.go:43:30
+      KILLED INCREMENT_DECREMENT at pow.go:90:28
+      KILLED CONDITIONALS_NEGATION at pow.go:43:9
+      KILLED CONDITIONALS_BOUNDARY at pow.go:43:30
+      KILLED CONDITIONALS_NEGATION at pow.go:91:28
+      KILLED ARITHMETIC_BASE at pow.go:57:15
+      KILLED CONDITIONALS_NEGATION at pow.go:80:9
+
+Mutation testing completed in 4 seconds 21 milliseconds
+Killed: 12, Lived: 1, Not covered: 0
+Timed out: 0, Not viable: 0, Skipped: 0
+Test efficacy: 92.31%
+Mutator coverage: 100.00%
+```
+
+- `pow.go:43:30`, `pow.go:90:28`: mortos por testes novos (`POW_DIFFICULTY=0`; menor nonce não-negativo).
+- `pow.go:80:9`, `pow.go:91:28`: antes `TIMED OUT`; agora `KILLED` (contexto já cancelado com dificuldade 0; os testes de cancelamento em andamento/deadline usam `mineAsync`, que falha em 1s em vez de travar).
+- `pow.go:84:16` (`difficulty < 0` → `<= 0`): **equivalente** — com `difficulty == 0` o ramo atribui `0`, sem efeito observável. Aguarda concordância do revisor.
