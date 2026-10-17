@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -229,17 +230,90 @@ var _ = Describe("Server", func() {
 		})
 	})
 
+	Describe("POST / additional cases", func() {
+		DescribeTable("returns 400 for invalid bodies and leaves the chain unchanged",
+			func(body string) {
+				initialLen := len(blockchainInstance.Blocks)
+
+				req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+				rec := httptest.NewRecorder()
+
+				router.ServeHTTP(rec, req)
+
+				Expect(rec.Code).To(Equal(http.StatusBadRequest))
+				Expect(rec.Body.String()).To(MatchJSON(`{"error": "corpo da requisição inválido"}`))
+				Expect(blockchainInstance.Blocks).To(HaveLen(initialLen))
+			},
+			Entry("empty body", ""),
+			Entry("wrong BPM type", `{"BPM":"abc"}`),
+			Entry("JSON array", `[1,2]`),
+		)
+
+		It("returns 500 with the error message on a generic generator error", func() {
+			originalGenerateBlock := generateBlock
+			DeferCleanup(func() { generateBlock = originalGenerateBlock })
+			generateBlock = func(ctx context.Context, oldBlock *models.Block, BPM int) (*models.Block, error) {
+				return nil, errors.New("boom")
+			}
+			initialLen := len(blockchainInstance.Blocks)
+
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"BPM": 42}`))
+			rec := httptest.NewRecorder()
+
+			router.ServeHTTP(rec, req)
+
+			Expect(rec.Code).To(Equal(http.StatusInternalServerError))
+			Expect(rec.Body.String()).To(MatchJSON(`{"error": "boom"}`))
+			Expect(blockchainInstance.Blocks).To(HaveLen(initialLen))
+		})
+	})
+
+	DescribeTable("unsupported methods on / return 405",
+		func(method string) {
+			req := httptest.NewRequest(method, "/", nil)
+			rec := httptest.NewRecorder()
+
+			router.ServeHTTP(rec, req)
+
+			Expect(rec.Code).To(Equal(http.StatusMethodNotAllowed))
+		},
+		Entry("PUT", http.MethodPut),
+		Entry("DELETE", http.MethodDelete),
+	)
+
 	Describe("GET / (handleGetBlockchain)", func() {
-		It("returns 200 OK with the blockchain instance", func() {
+		It("returns 200 OK with only the valid genesis block", func() {
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
 			rec := httptest.NewRecorder()
 
 			router.ServeHTTP(rec, req)
 
 			Expect(rec.Code).To(Equal(http.StatusOK))
+			Expect(json.Valid(rec.Body.Bytes())).To(BeTrue())
 			var bc models.Blockchain
 			Expect(json.Unmarshal(rec.Body.Bytes(), &bc)).To(Succeed())
 			Expect(bc.Blocks).To(HaveLen(1))
+			Expect(bc.Blocks[0].Index).To(Equal(0))
+			Expect(bc.Blocks[0].BPM).To(Equal(0))
+			Expect(bc.Blocks[0].PrevHash).To(BeEmpty())
+		})
+
+		It("returns 2 linked blocks after a valid POST", func() {
+			post := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"BPM": 77}`))
+			postRec := httptest.NewRecorder()
+			router.ServeHTTP(postRec, post)
+			Expect(postRec.Code).To(Equal(http.StatusCreated))
+
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+			Expect(rec.Code).To(Equal(http.StatusOK))
+			var bc models.Blockchain
+			Expect(json.Unmarshal(rec.Body.Bytes(), &bc)).To(Succeed())
+			Expect(bc.Blocks).To(HaveLen(2))
+			Expect(bc.Blocks[1].Index).To(Equal(1))
+			Expect(bc.Blocks[1].PrevHash).To(Equal(bc.Blocks[0].Hash))
+			Expect(bc.Blocks[1].BPM).To(Equal(77))
 		})
 	})
 })
