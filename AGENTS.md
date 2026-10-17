@@ -26,6 +26,8 @@ blockchain-with-go/
    - Executar testes e checagem de tipos: `go test ./...`
    - Formatação padrão de Go: `gofmt -s -w .` ou `goimports`
    - Verificação de compilação: `go build -o /dev/null .`
+   - Teste de mutação (gremlins): `go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --timeout-coefficient 20 ./<pacote>` (ou `--diff <base>` contra a base branch)
+   - Limiar de mutação: zero mutantes `LIVED` ou `NOT COVERED` nas linhas alteradas pelo diff. Um mutante equivalente só é aceito se constar no relatório do QA com justificativa de uma linha e o revisor concordar. Mutante sobrevivente continua bloqueante.
 2. **Boas Práticas:**
    - Manter código idiomático em Go (tratamento explícito de erros, nomenclatura concisa).
    - Não adicionar dependências pesadas sem necessidade justificável.
