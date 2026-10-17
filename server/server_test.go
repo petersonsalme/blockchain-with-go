@@ -366,6 +366,24 @@ var _ = Describe("Server", func() {
 		Entry("DELETE", http.MethodDelete),
 	)
 
+	Describe("defaultConsensus", func() {
+		It("returns proof of work using POW_DIFFICULTY", func() {
+			previous, hadPrevious := os.LookupEnv(consensus.DifficultyEnvVar)
+			Expect(os.Setenv(consensus.DifficultyEnvVar, "3")).To(Succeed())
+			DeferCleanup(func() {
+				if hadPrevious {
+					Expect(os.Setenv(consensus.DifficultyEnvVar, previous)).To(Succeed())
+				} else {
+					Expect(os.Unsetenv(consensus.DifficultyEnvVar)).To(Succeed())
+				}
+			})
+
+			pow, ok := defaultConsensus().(*consensus.ProofOfWork)
+			Expect(ok).To(BeTrue())
+			Expect(pow.Difficulty).To(Equal(3))
+		})
+	})
+
 	Describe("GET / (handleGetBlockchain)", func() {
 		It("returns 200 OK with only the valid genesis block", func() {
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
