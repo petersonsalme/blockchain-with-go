@@ -382,6 +382,27 @@ var _ = Describe("Server", func() {
 			Expect(ok).To(BeTrue())
 			Expect(pow.Difficulty).To(Equal(3))
 		})
+
+		It("is installed by Run", func() {
+			for key, value := range map[string]string{"PORT": "not-a-port", consensus.DifficultyEnvVar: "3"} {
+				previous, hadPrevious := os.LookupEnv(key)
+				Expect(os.Setenv(key, value)).To(Succeed())
+				DeferCleanup(func() {
+					if hadPrevious {
+						Expect(os.Setenv(key, previous)).To(Succeed())
+					} else {
+						Expect(os.Unsetenv(key)).To(Succeed())
+					}
+				})
+			}
+
+			// An invalid PORT makes ListenAndServe fail at once, after the engine is set.
+			Expect(Run()).To(HaveOccurred())
+
+			pow, ok := consensusEngine.(*consensus.ProofOfWork)
+			Expect(ok).To(BeTrue())
+			Expect(pow.Difficulty).To(Equal(3))
+		})
 	})
 
 	Describe("GET / (handleGetBlockchain)", func() {
