@@ -91,6 +91,18 @@ var _ = Describe("Transaction", func() {
 			Expect(modified.CalculateHash()).To(Equal(original))
 		})
 
+		It("provides unambiguous encoding across adjacent field boundaries", func() {
+			tx1 := baseTx
+			tx1.From = "ab"
+			tx1.To = "c"
+
+			tx2 := baseTx
+			tx2.From = "a"
+			tx2.To = "bc"
+
+			Expect(tx1.CalculateHash()).NotTo(Equal(tx2.CalculateHash()))
+		})
+
 		It("returns empty string when called on nil", func() {
 			var nilTx *models.Transaction
 			Expect(nilTx.CalculateHash()).To(BeEmpty())
