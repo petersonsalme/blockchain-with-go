@@ -27,7 +27,21 @@ var blockchainInstance *models.Blockchain
 var generateBlock = blockchain.GenerateBlockWithContext
 
 type errorResponse struct {
-	Error string `json:"error"`
+	Error   string         `json:"error"`
+	Code    string         `json:"code,omitempty"`
+	Details map[string]any `json:"details,omitempty"`
+}
+
+// requestTooLargeCode is the error code returned when the request body exceeds the allowed size.
+const requestTooLargeCode = "request_too_large"
+
+// maxRequestBodyBytes allows headroom over MaxBlockBytes() for JSON overhead of the request.
+func maxRequestBodyBytes() int64 {
+	return 2 * int64(models.MaxBlockBytes())
+}
+
+func respondWithValidationError(w http.ResponseWriter, r *http.Request, err *models.ValidationError) {
+	respondWithJSON(w, r, http.StatusUnprocessableEntity, errorResponse{Error: err.Message, Code: err.Code, Details: err.Details})
 }
 
 func miningTimeout() time.Duration {
@@ -102,6 +116,11 @@ func mineAndAddBlock(w http.ResponseWriter, r *http.Request, txs []models.Transa
 
 	newBlock, err := generateBlock(ctx, blockchainInstance.LastBlock(), txs)
 	if err != nil {
+		var validationErr *models.ValidationError
+		if errors.As(err, &validationErr) {
+			respondWithValidationError(w, r, validationErr)
+			return
+		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			respondWithJSON(w, r, http.StatusGatewayTimeout, errorResponse{Error: "tempo limite de mineração excedido"})
 			return
@@ -112,6 +131,18 @@ func mineAndAddBlock(w http.ResponseWriter, r *http.Request, txs []models.Transa
 		}
 		respondWithJSON(w, r, http.StatusInternalServerError, errorResponse{Error: err.Error()})
 		return
+	}
+
+	if newBlock != nil {
+		if err := models.ValidateBlockRules(newBlock, blockchainInstance.LastBlock(), time.Now()); err != nil {
+			var validationErr *models.ValidationError
+			if errors.As(err, &validationErr) {
+				respondWithValidationError(w, r, validationErr)
+				return
+			}
+			respondWithJSON(w, r, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+			return
+		}
 	}
 
 	if newBlock == nil || !newBlock.IsValid(blockchainInstance.LastBlock()) {
@@ -130,8 +161,18 @@ func handleWriteBlock(w http.ResponseWriter, r *http.Request) {
 
 	var m models.Message
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes())
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&m); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			respondWithJSON(w, r, http.StatusRequestEntityTooLarge, errorResponse{
+				Error:   "corpo da requisição excede o tamanho máximo",
+				Code:    requestTooLargeCode,
+				Details: map[string]any{"max": tooLarge.Limit},
+			})
+			return
+		}
 		respondWithJSON(w, r, http.StatusBadRequest, errorResponse{Error: "corpo da requisição inválido"})
 		return
 	}
