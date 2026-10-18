@@ -7,10 +7,14 @@ import (
 
 	"github.com/petersonsalme/blockchain-with-go/internal/chain"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
+	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 )
 
 // requestTooLargeCode is the error code returned when the request body exceeds the allowed size.
 const requestTooLargeCode = "request_too_large"
+
+// chainConflictCode is the error code returned when another block was appended while mining.
+const chainConflictCode = "chain_conflict"
 
 // respondWithMineError maps an error from chain mining to its HTTP response.
 func respondWithMineError(w http.ResponseWriter, err error) {
@@ -20,6 +24,8 @@ func respondWithMineError(w http.ResponseWriter, err error) {
 		respondWithJSON(w, http.StatusUnprocessableEntity, errorResponse{Error: validationErr.Message, Code: validationErr.Code, Details: validationErr.Details})
 	case errors.Is(err, chain.ErrInvalidBlock):
 		respondWithJSON(w, http.StatusUnprocessableEntity, errorResponse{Error: "invalid block could not be added"})
+	case errors.Is(err, storage.ErrConflict):
+		respondWithJSON(w, http.StatusConflict, errorResponse{Error: "chain changed during mining; try again", Code: chainConflictCode})
 	case errors.Is(err, context.DeadlineExceeded):
 		respondWithJSON(w, http.StatusGatewayTimeout, errorResponse{Error: "mining timeout exceeded"})
 	case errors.Is(err, context.Canceled):

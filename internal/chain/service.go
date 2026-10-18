@@ -29,11 +29,13 @@ type Service struct {
 	repo      storage.BlockRepository
 	consensus consensus.Consensus
 	generate  Generator
+	// writeSem serializes Mine; a buffered channel lets waiters honour ctx.
+	writeSem chan struct{}
 }
 
 // NewService builds a Service over repo and stores the genesis block when repo is empty.
 func NewService(repo storage.BlockRepository, c consensus.Consensus, opts ...Option) (*Service, error) {
-	s := &Service{repo: repo, consensus: c, generate: GenerateBlockWithContext}
+	s := &Service{repo: repo, consensus: c, generate: GenerateBlockWithContext, writeSem: make(chan struct{}, 1)}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -57,8 +59,16 @@ func (s *Service) Blocks() ([]*domain.Block, error) {
 }
 
 // Mine seals txs into a new block and appends it to the chain.
-// A rejected block leaves the repository untouched.
+// Calls are serialized; waiting for the turn is bounded by ctx. A rejected
+// block leaves the repository untouched, and Blocks never waits for Mine.
 func (s *Service) Mine(ctx context.Context, txs []domain.Transaction) (*domain.Block, error) {
+	select {
+	case s.writeSem <- struct{}{}:
+		defer func() { <-s.writeSem }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
 	prev, err := s.repo.Last()
 	if err != nil {
 		return nil, err
