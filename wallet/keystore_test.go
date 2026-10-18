@@ -1,6 +1,7 @@
 package wallet
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -140,5 +141,182 @@ var _ = Describe("Keystore", func() {
 		_, err = Load(filepath.Join(dir, "missing.json"), pw)
 		Expect(err).To(HaveOccurred())
 		Expect(strings.Contains(err.Error(), "missing.json")).To(BeTrue())
+	})
+
+	Context("Load parameter boundaries", func() {
+		Describe("N parameter", func() {
+			It("accepts N at lower boundary (2)", func() {
+				pN2 := filepath.Join(dir, "ks-n2.json")
+				origN := scryptN
+				scryptN = 2
+				defer func() { scryptN = origN }()
+				wN2, err := New()
+				Expect(err).NotTo(HaveOccurred())
+				Expect(wN2.Save(pN2, pw)).To(Succeed())
+				loaded, err := Load(pN2, pw)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(loaded.Address()).To(Equal(wN2.Address()))
+			})
+
+			It("rejects N at lower boundary - 1 (1)", func() {
+				pMut := mutate(func(m map[string]any) { crypt(m)["kdfparams"].(map[string]any)["n"] = 1 })
+				_, err := Load(pMut, pw)
+				Expect(err).To(MatchError(ErrInvalidKeystore))
+			})
+
+			It("rejects non-power-of-two N (3)", func() {
+				pMut := mutate(func(m map[string]any) { crypt(m)["kdfparams"].(map[string]any)["n"] = 3 })
+				_, err := Load(pMut, pw)
+				Expect(err).To(MatchError(ErrInvalidKeystore))
+			})
+
+			It("accepts N at upper boundary (maxScryptN = 1<<20) before KDF", func() {
+				pMut := mutate(func(m map[string]any) { crypt(m)["kdfparams"].(map[string]any)["n"] = maxScryptN })
+				_, err := Load(pMut, "")
+				Expect(err).To(MatchError(ErrEmptyPassword))
+			})
+
+			It("rejects N at upper boundary + 1 non-power-of-two (maxScryptN + 1)", func() {
+				pMut := mutate(func(m map[string]any) { crypt(m)["kdfparams"].(map[string]any)["n"] = maxScryptN + 1 })
+				_, err := Load(pMut, pw)
+				Expect(err).To(MatchError(ErrInvalidKeystore))
+			})
+
+			It("rejects power-of-two N exceeding maxScryptN (maxScryptN << 1)", func() {
+				pMut := mutate(func(m map[string]any) { crypt(m)["kdfparams"].(map[string]any)["n"] = maxScryptN << 1 })
+				_, err := Load(pMut, pw)
+				Expect(err).To(MatchError(ErrInvalidKeystore))
+			})
+		})
+
+		Describe("R parameter", func() {
+			It("accepts R at lower boundary (1)", func() {
+				pR1 := filepath.Join(dir, "ks-r1.json")
+				origR := scryptR
+				scryptR = 1
+				defer func() { scryptR = origR }()
+				wR1, err := New()
+				Expect(err).NotTo(HaveOccurred())
+				Expect(wR1.Save(pR1, pw)).To(Succeed())
+				loaded, err := Load(pR1, pw)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(loaded.Address()).To(Equal(wR1.Address()))
+			})
+
+			It("rejects R at lower boundary - 1 (0)", func() {
+				pMut := mutate(func(m map[string]any) { crypt(m)["kdfparams"].(map[string]any)["r"] = 0 })
+				_, err := Load(pMut, pw)
+				Expect(err).To(MatchError(ErrInvalidKeystore))
+			})
+
+			It("accepts R at upper boundary (maxScryptR = 32)", func() {
+				pR32 := filepath.Join(dir, "ks-r32.json")
+				origR := scryptR
+				scryptR = maxScryptR
+				defer func() { scryptR = origR }()
+				wR32, err := New()
+				Expect(err).NotTo(HaveOccurred())
+				Expect(wR32.Save(pR32, pw)).To(Succeed())
+				loaded, err := Load(pR32, pw)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(loaded.Address()).To(Equal(wR32.Address()))
+			})
+
+			It("rejects R at upper boundary + 1 (33)", func() {
+				pMut := mutate(func(m map[string]any) { crypt(m)["kdfparams"].(map[string]any)["r"] = maxScryptR + 1 })
+				_, err := Load(pMut, pw)
+				Expect(err).To(MatchError(ErrInvalidKeystore))
+			})
+		})
+
+		Describe("P parameter", func() {
+			It("accepts P at lower boundary (1)", func() {
+				pP1 := filepath.Join(dir, "ks-p1.json")
+				origP := scryptP
+				scryptP = 1
+				defer func() { scryptP = origP }()
+				wP1, err := New()
+				Expect(err).NotTo(HaveOccurred())
+				Expect(wP1.Save(pP1, pw)).To(Succeed())
+				loaded, err := Load(pP1, pw)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(loaded.Address()).To(Equal(wP1.Address()))
+			})
+
+			It("rejects P at lower boundary - 1 (0)", func() {
+				pMut := mutate(func(m map[string]any) { crypt(m)["kdfparams"].(map[string]any)["p"] = 0 })
+				_, err := Load(pMut, pw)
+				Expect(err).To(MatchError(ErrInvalidKeystore))
+			})
+
+			It("accepts P at upper boundary (maxScryptP = 16)", func() {
+				pP16 := filepath.Join(dir, "ks-p16.json")
+				origP := scryptP
+				scryptP = maxScryptP
+				defer func() { scryptP = origP }()
+				wP16, err := New()
+				Expect(err).NotTo(HaveOccurred())
+				Expect(wP16.Save(pP16, pw)).To(Succeed())
+				loaded, err := Load(pP16, pw)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(loaded.Address()).To(Equal(wP16.Address()))
+			})
+
+			It("rejects P at upper boundary + 1 (17)", func() {
+				pMut := mutate(func(m map[string]any) { crypt(m)["kdfparams"].(map[string]any)["p"] = maxScryptP + 1 })
+				_, err := Load(pMut, pw)
+				Expect(err).To(MatchError(ErrInvalidKeystore))
+			})
+		})
+
+		Describe("dkLen parameter", func() {
+			It("rejects dkLen at limit - 1 (31)", func() {
+				pMut := mutate(func(m map[string]any) { crypt(m)["kdfparams"].(map[string]any)["dklen"] = dkLen - 1 })
+				_, err := Load(pMut, pw)
+				Expect(err).To(MatchError(ErrInvalidKeystore))
+			})
+
+			It("rejects dkLen at limit + 1 (33)", func() {
+				pMut := mutate(func(m map[string]any) { crypt(m)["kdfparams"].(map[string]any)["dklen"] = dkLen + 1 })
+				_, err := Load(pMut, pw)
+				Expect(err).To(MatchError(ErrInvalidKeystore))
+			})
+		})
+
+		Describe("salt length parameter", func() {
+			It("rejects salt length at limit - 1 (31 bytes)", func() {
+				pMut := mutate(func(m map[string]any) {
+					crypt(m)["kdfparams"].(map[string]any)["salt"] = hex.EncodeToString(make([]byte, saltLen-1))
+				})
+				_, err := Load(pMut, pw)
+				Expect(err).To(MatchError(ErrInvalidKeystore))
+			})
+
+			It("rejects salt length at limit + 1 (33 bytes)", func() {
+				pMut := mutate(func(m map[string]any) {
+					crypt(m)["kdfparams"].(map[string]any)["salt"] = hex.EncodeToString(make([]byte, saltLen+1))
+				})
+				_, err := Load(pMut, pw)
+				Expect(err).To(MatchError(ErrInvalidKeystore))
+			})
+		})
+
+		Describe("nonce length parameter", func() {
+			It("rejects nonce length at limit - 1 (11 bytes)", func() {
+				pMut := mutate(func(m map[string]any) {
+					crypt(m)["nonce"] = hex.EncodeToString(make([]byte, nonceLen-1))
+				})
+				_, err := Load(pMut, pw)
+				Expect(err).To(MatchError(ErrInvalidKeystore))
+			})
+
+			It("rejects nonce length at limit + 1 (13 bytes)", func() {
+				pMut := mutate(func(m map[string]any) {
+					crypt(m)["nonce"] = hex.EncodeToString(make([]byte, nonceLen+1))
+				})
+				_, err := Load(pMut, pw)
+				Expect(err).To(MatchError(ErrInvalidKeystore))
+			})
+		})
 	})
 })
