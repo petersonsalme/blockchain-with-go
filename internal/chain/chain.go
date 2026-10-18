@@ -9,21 +9,6 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 )
 
-func New() *domain.Blockchain {
-	genesisBlock := domain.Block{
-		Index:        0,
-		Timestamp:    time.Now(),
-		Transactions: []domain.Transaction{},
-		Hash:         "",
-		PrevHash:     "",
-	}
-
-	b := domain.Blockchain{}
-	b.Add(&genesisBlock)
-
-	return &b
-}
-
 func GenerateBlockWithContext(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 	var newBlock domain.Block
 

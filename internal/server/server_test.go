@@ -9,8 +9,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -22,6 +20,7 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus"
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus/pow"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
+	"github.com/petersonsalme/blockchain-with-go/internal/storage/memory"
 )
 
 // rejectingConsensus seals with inner but never accepts a block.
@@ -35,22 +34,55 @@ func (rejectingConsensus) Verify(prev, b *domain.Block) error {
 	return errors.New("rejected by fake consensus")
 }
 
+type chainBody struct {
+	Blocks []*domain.Block
+}
+
+// brokenChain fails to read blocks.
+type brokenChain struct{}
+
+func (brokenChain) Blocks() ([]*domain.Block, error) { return nil, errors.New("read failed") }
+func (brokenChain) Mine(context.Context, []domain.Transaction) (*domain.Block, error) {
+	return nil, errors.New("unused")
+}
+
 var _ = Describe("Server", func() {
-	var router http.Handler
+	var (
+		router http.Handler
+		repo   *memory.Repository
+		engine consensus.Consensus
+		cfg    Config
+	)
+
+	// build wires repo, engine and cfg into a fresh Server; call it again after changing them.
+	build := func(opts ...chain.Option) {
+		svc, err := chain.NewService(repo, engine, opts...)
+		Expect(err).NotTo(HaveOccurred())
+		router = NewServer(svc, cfg).Handler()
+	}
+	chainLen := func() int {
+		all, err := repo.All()
+		Expect(err).NotTo(HaveOccurred())
+		return len(all)
+	}
+	lastBlock := func() *domain.Block {
+		b, err := repo.Last()
+		Expect(err).NotTo(HaveOccurred())
+		return b
+	}
+	withGenerator := func(g chain.Generator) { build(chain.WithGenerator(g)) }
 
 	BeforeEach(func() {
-		previousEngine := consensusEngine
-		DeferCleanup(func() { consensusEngine = previousEngine })
-		consensusEngine = pow.NewProofOfWork(1)
-
-		blockchainInstance = chain.New()
-		router = makeMuxRouter()
+		repo = memory.New()
+		engine = pow.NewProofOfWork(1)
+		cfg = Config{}
+		build()
 	})
 
 	Describe("POST / (handleWriteBlock)", func() {
 		Context("when receiving a valid block payload", func() {
 			It("returns 201 Created, the new block with populated transaction IDs, and appends to the chain", func() {
-				initialLen := len(blockchainInstance.Blocks)
+				initialLen := chainLen()
 
 				payload := []byte(`{"Transactions":[{"From":"alice","To":"bob","Amount":42,"Fee":1,"Nonce":0}]}`)
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
@@ -72,30 +104,25 @@ var _ = Describe("Server", func() {
 				Expect(createdBlock.Transactions[0].ID).To(Equal(createdBlock.Transactions[0].CalculateHash()))
 				Expect(createdBlock.Transactions[0].Timestamp.IsZero()).To(BeFalse())
 
-				Expect(blockchainInstance.Blocks).To(HaveLen(initialLen + 1))
-				Expect(blockchainInstance.LastBlock().Transactions).To(HaveLen(1))
-				Expect(blockchainInstance.LastBlock().Transactions[0].ID).To(Equal(createdBlock.Transactions[0].ID))
-				Expect(blockchainInstance.LastBlock().Hash).To(Equal(createdBlock.Hash))
+				Expect(chainLen()).To(Equal(initialLen + 1))
+				Expect(lastBlock().Transactions).To(HaveLen(1))
+				Expect(lastBlock().Transactions[0].ID).To(Equal(createdBlock.Transactions[0].ID))
+				Expect(lastBlock().Hash).To(Equal(createdBlock.Hash))
 			})
 		})
 
-		Context("when generateBlock produces an invalid block", func() {
+		Context("when the generator produces an invalid block", func() {
 			It("returns 422 Unprocessable Entity, error JSON, and leaves the chain unchanged", func() {
-				originalGenerateBlock := generateBlock
-				DeferCleanup(func() {
-					generateBlock = originalGenerateBlock
-				})
-
-				generateBlock = func(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
-					b, err := originalGenerateBlock(ctx, c, oldBlock, txs)
+				withGenerator(func(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+					b, err := chain.GenerateBlockWithContext(ctx, c, oldBlock, txs)
 					if err != nil {
 						return nil, err
 					}
 					b.PrevHash = "tampered-invalid-hash"
 					return b, nil
-				}
+				})
 
-				initialLen := len(blockchainInstance.Blocks)
+				initialLen := chainLen()
 
 				payload := []byte(`{"Transactions":[{"From":"alice","To":"bob","Amount":42}]}`)
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
@@ -113,22 +140,17 @@ var _ = Describe("Server", func() {
 				Expect(json.Unmarshal(rec.Body.Bytes(), &resp)).To(Succeed())
 				Expect(resp.Error).To(Equal("bloco inválido não pôde ser adicionado"))
 
-				Expect(blockchainInstance.Blocks).To(HaveLen(initialLen))
+				Expect(chainLen()).To(Equal(initialLen))
 			})
 		})
 
 		Context("when mining times out (deadline exceeded)", func() {
 			It("returns 504 Gateway Timeout, error JSON, and leaves the chain unchanged", func() {
-				originalGenerateBlock := generateBlock
-				DeferCleanup(func() {
-					generateBlock = originalGenerateBlock
+				withGenerator(func(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+					return nil, context.DeadlineExceeded
 				})
 
-				generateBlock = func(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
-					return nil, context.DeadlineExceeded
-				}
-
-				initialLen := len(blockchainInstance.Blocks)
+				initialLen := chainLen()
 
 				payload := []byte(`{"Transactions":[{"From":"alice","To":"bob","Amount":42}]}`)
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
@@ -146,22 +168,17 @@ var _ = Describe("Server", func() {
 				Expect(json.Unmarshal(rec.Body.Bytes(), &resp)).To(Succeed())
 				Expect(resp.Error).To(Equal("tempo limite de mineração excedido"))
 
-				Expect(blockchainInstance.Blocks).To(HaveLen(initialLen))
+				Expect(chainLen()).To(Equal(initialLen))
 			})
 		})
 
 		Context("when mining context is canceled", func() {
 			It("returns 408 Request Timeout, error JSON, and leaves the chain unchanged", func() {
-				originalGenerateBlock := generateBlock
-				DeferCleanup(func() {
-					generateBlock = originalGenerateBlock
+				withGenerator(func(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+					return nil, context.Canceled
 				})
 
-				generateBlock = func(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
-					return nil, context.Canceled
-				}
-
-				initialLen := len(blockchainInstance.Blocks)
+				initialLen := chainLen()
 
 				payload := []byte(`{"Transactions":[{"From":"alice","To":"bob","Amount":42}]}`)
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
@@ -179,7 +196,7 @@ var _ = Describe("Server", func() {
 				Expect(json.Unmarshal(rec.Body.Bytes(), &resp)).To(Succeed())
 				Expect(resp.Error).To(Equal("mineração cancelada"))
 
-				Expect(blockchainInstance.Blocks).To(HaveLen(initialLen))
+				Expect(chainLen()).To(Equal(initialLen))
 			})
 		})
 
@@ -188,7 +205,7 @@ var _ = Describe("Server", func() {
 				ctx, cancel := context.WithCancel(context.Background())
 				cancel()
 
-				initialLen := len(blockchainInstance.Blocks)
+				initialLen := chainLen()
 
 				payload := []byte(`{"Transactions":[{"From":"alice","To":"bob","Amount":42}]}`)
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload)).WithContext(ctx)
@@ -198,19 +215,17 @@ var _ = Describe("Server", func() {
 				router.ServeHTTP(rec, req)
 
 				Expect(rec.Code).To(Equal(http.StatusRequestTimeout))
-				Expect(blockchainInstance.Blocks).To(HaveLen(initialLen))
+				Expect(chainLen()).To(Equal(initialLen))
 			})
 		})
 
-		Context("when MINING_TIMEOUT environment variable is configured", func() {
+		Context("when Config.MiningTimeout is configured", func() {
 			It("aborts mining when timeout expires with real mining", func() {
-				Expect(os.Setenv(MiningTimeoutEnvVar, "15ms")).To(Succeed())
-				consensusEngine = pow.NewProofOfWork(10)
-				DeferCleanup(func() {
-					Expect(os.Unsetenv(MiningTimeoutEnvVar)).To(Succeed())
-				})
+				cfg = Config{MiningTimeout: 15 * time.Millisecond}
+				engine = pow.NewProofOfWork(10)
+				build()
 
-				initialLen := len(blockchainInstance.Blocks)
+				initialLen := chainLen()
 
 				payload := []byte(`{"Transactions":[{"From":"alice","To":"bob","Amount":42}]}`)
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
@@ -220,13 +235,13 @@ var _ = Describe("Server", func() {
 				router.ServeHTTP(rec, req)
 
 				Expect(rec.Code).To(Equal(http.StatusGatewayTimeout))
-				Expect(blockchainInstance.Blocks).To(HaveLen(initialLen))
+				Expect(chainLen()).To(Equal(initialLen))
 			})
 		})
 
 		Context("when receiving malformed JSON", func() {
 			It("returns 400 Bad Request with an error message and json content-type", func() {
-				initialLen := len(blockchainInstance.Blocks)
+				initialLen := chainLen()
 
 				req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{invalid-json`))
 				req.Header.Set("Content-Type", "application/json")
@@ -243,7 +258,7 @@ var _ = Describe("Server", func() {
 				Expect(json.Unmarshal(rec.Body.Bytes(), &resp)).To(Succeed())
 				Expect(resp.Error).To(Equal("corpo da requisição inválido"))
 
-				Expect(blockchainInstance.Blocks).To(HaveLen(initialLen))
+				Expect(chainLen()).To(Equal(initialLen))
 			})
 		})
 	})
@@ -268,38 +283,34 @@ var _ = Describe("Server", func() {
 			Expect(body["code"]).To(Equal("block_too_large"))
 			Expect(body["details"]).To(HaveKey("size"))
 			Expect(body["details"]).To(HaveKeyWithValue("max", BeNumerically("==", 100)))
-			Expect(blockchainInstance.Blocks).To(HaveLen(1))
+			Expect(chainLen()).To(Equal(1))
 		})
 
 		It("returns 422 with the code of a timestamp violation after mining", func() {
-			original := generateBlock
-			DeferCleanup(func() { generateBlock = original })
-			generateBlock = func(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
-				b, err := original(ctx, c, oldBlock, txs)
+			withGenerator(func(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+				b, err := chain.GenerateBlockWithContext(ctx, c, oldBlock, txs)
 				if err == nil {
 					b.Timestamp = oldBlock.Timestamp.Add(-time.Second)
 				}
 				return b, err
-			}
+			})
 			rec := post(payload)
 
 			Expect(rec.Code).To(Equal(http.StatusUnprocessableEntity))
 			var body map[string]any
 			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 			Expect(body["code"]).To(Equal("timestamp_before_parent"))
-			Expect(blockchainInstance.Blocks).To(HaveLen(1))
+			Expect(chainLen()).To(Equal(1))
 		})
 
 		It("returns 422 timestamp_too_far_in_future for a far-future block", func() {
-			original := generateBlock
-			DeferCleanup(func() { generateBlock = original })
-			generateBlock = func(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
-				b, err := original(ctx, c, oldBlock, txs)
+			withGenerator(func(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+				b, err := chain.GenerateBlockWithContext(ctx, c, oldBlock, txs)
 				if err == nil {
 					b.Timestamp = time.Now().Add(3 * time.Hour)
 				}
 				return b, err
-			}
+			})
 			rec := post(payload)
 
 			Expect(rec.Code).To(Equal(http.StatusUnprocessableEntity))
@@ -316,6 +327,7 @@ var _ = Describe("Server", func() {
 			var body map[string]any
 			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 			Expect(body["code"]).To(Equal("request_too_large"))
+			Expect(body["details"]).To(HaveKeyWithValue("max", BeNumerically("==", 200)))
 		})
 
 		It("still returns 201 on the happy path", func() {
@@ -326,7 +338,7 @@ var _ = Describe("Server", func() {
 	Describe("POST / additional cases", func() {
 		DescribeTable("returns 400 for invalid bodies and leaves the chain unchanged",
 			func(body string, expectedMsg string) {
-				initialLen := len(blockchainInstance.Blocks)
+				initialLen := chainLen()
 
 				req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 				rec := httptest.NewRecorder()
@@ -335,7 +347,7 @@ var _ = Describe("Server", func() {
 
 				Expect(rec.Code).To(Equal(http.StatusBadRequest))
 				Expect(rec.Body.String()).To(MatchJSON(`{"error": "` + expectedMsg + `"}`))
-				Expect(blockchainInstance.Blocks).To(HaveLen(initialLen))
+				Expect(chainLen()).To(Equal(initialLen))
 			},
 			Entry("empty body", "", "corpo da requisição inválido"),
 			Entry("JSON array", `[1,2]`, "corpo da requisição inválido"),
@@ -349,8 +361,9 @@ var _ = Describe("Server", func() {
 		)
 
 		It("rejects blocks with 422 when the injected consensus fails verification", func() {
-			consensusEngine = rejectingConsensus{inner: consensusEngine}
-			initialLen := len(blockchainInstance.Blocks)
+			engine = rejectingConsensus{inner: engine}
+			build()
+			initialLen := chainLen()
 
 			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"Transactions":[{"From":"alice","To":"bob","Amount":42}]}`))
 			rec := httptest.NewRecorder()
@@ -359,16 +372,14 @@ var _ = Describe("Server", func() {
 
 			Expect(rec.Code).To(Equal(http.StatusUnprocessableEntity))
 			Expect(rec.Body.String()).To(MatchJSON(`{"error": "bloco inválido não pôde ser adicionado"}`))
-			Expect(blockchainInstance.Blocks).To(HaveLen(initialLen))
+			Expect(chainLen()).To(Equal(initialLen))
 		})
 
 		It("returns 500 with the error message on a generic generator error", func() {
-			originalGenerateBlock := generateBlock
-			DeferCleanup(func() { generateBlock = originalGenerateBlock })
-			generateBlock = func(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+			withGenerator(func(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 				return nil, errors.New("boom")
-			}
-			initialLen := len(blockchainInstance.Blocks)
+			})
+			initialLen := chainLen()
 
 			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"Transactions":[{"From":"alice","To":"bob","Amount":42}]}`))
 			rec := httptest.NewRecorder()
@@ -377,14 +388,14 @@ var _ = Describe("Server", func() {
 
 			Expect(rec.Code).To(Equal(http.StatusInternalServerError))
 			Expect(rec.Body.String()).To(MatchJSON(`{"error": "boom"}`))
-			Expect(blockchainInstance.Blocks).To(HaveLen(initialLen))
+			Expect(chainLen()).To(Equal(initialLen))
 		})
 	})
 
 	Describe("POST /legacy/bpm", func() {
 		Context("when receiving a valid BPM payload", func() {
 			It("returns 201 Created with Deprecation header and creates block with legacy transaction", func() {
-				initialLen := len(blockchainInstance.Blocks)
+				initialLen := chainLen()
 
 				payload := []byte(`{"BPM": 42}`)
 				req := httptest.NewRequest(http.MethodPost, "/legacy/bpm", bytes.NewReader(payload))
@@ -406,15 +417,15 @@ var _ = Describe("Server", func() {
 				Expect(createdBlock.Transactions[0].ID).NotTo(BeEmpty())
 				Expect(createdBlock.Transactions[0].ID).To(Equal(createdBlock.Transactions[0].CalculateHash()))
 
-				Expect(blockchainInstance.Blocks).To(HaveLen(initialLen + 1))
-				Expect(blockchainInstance.LastBlock().Transactions[0].Amount).To(Equal(uint64(42)))
+				Expect(chainLen()).To(Equal(initialLen + 1))
+				Expect(lastBlock().Transactions[0].Amount).To(Equal(uint64(42)))
 			})
 		})
 
 		Context("when BPM is invalid or body is malformed", func() {
 			DescribeTable("returns 400 Bad Request with Deprecation header and leaves chain unchanged",
 				func(body string, expectedMsg string) {
-					initialLen := len(blockchainInstance.Blocks)
+					initialLen := chainLen()
 
 					req := httptest.NewRequest(http.MethodPost, "/legacy/bpm", strings.NewReader(body))
 					rec := httptest.NewRecorder()
@@ -424,7 +435,7 @@ var _ = Describe("Server", func() {
 					Expect(rec.Code).To(Equal(http.StatusBadRequest))
 					Expect(rec.Header().Get("Deprecation")).To(Equal("true"))
 					Expect(rec.Body.String()).To(MatchJSON(`{"error": "` + expectedMsg + `"}`))
-					Expect(blockchainInstance.Blocks).To(HaveLen(initialLen))
+					Expect(chainLen()).To(Equal(initialLen))
 				},
 				Entry("BPM is zero", `{"BPM": 0}`, "BPM deve ser maior que zero"),
 				Entry("BPM is negative", `{"BPM": -10}`, "BPM deve ser maior que zero"),
@@ -447,50 +458,10 @@ var _ = Describe("Server", func() {
 		Entry("DELETE", http.MethodDelete),
 	)
 
-	Describe("defaultConsensus", func() {
-		It("returns proof of work using POW_DIFFICULTY", func() {
-			previous, hadPrevious := os.LookupEnv(pow.DifficultyEnvVar)
-			Expect(os.Setenv(pow.DifficultyEnvVar, "3")).To(Succeed())
-			DeferCleanup(func() {
-				if hadPrevious {
-					Expect(os.Setenv(pow.DifficultyEnvVar, previous)).To(Succeed())
-				} else {
-					Expect(os.Unsetenv(pow.DifficultyEnvVar)).To(Succeed())
-				}
-			})
-
-			pow, ok := defaultConsensus().(*pow.ProofOfWork)
-			Expect(ok).To(BeTrue())
-			Expect(pow.Difficulty).To(Equal(3))
-		})
-
-		It("is installed by Run", func() {
-			for key, value := range map[string]string{"PORT": "not-a-port", pow.DifficultyEnvVar: "3"} {
-				previous, hadPrevious := os.LookupEnv(key)
-				Expect(os.Setenv(key, value)).To(Succeed())
-				DeferCleanup(func() {
-					if hadPrevious {
-						Expect(os.Setenv(key, previous)).To(Succeed())
-					} else {
-						Expect(os.Unsetenv(key)).To(Succeed())
-					}
-				})
-			}
-
-			// An invalid PORT makes ListenAndServe fail at once, after the engine is set.
-			Expect(Run()).To(HaveOccurred())
-
-			pow, ok := consensusEngine.(*pow.ProofOfWork)
-			Expect(ok).To(BeTrue())
-			Expect(pow.Difficulty).To(Equal(3))
-		})
-	})
-
-	Describe("miningTimeout", func() {
+	Describe("ParseMiningTimeout", func() {
 		DescribeTable("parses MINING_TIMEOUT",
 			func(raw string, expected time.Duration) {
-				GinkgoT().Setenv(MiningTimeoutEnvVar, raw)
-				Expect(miningTimeout()).To(Equal(expected))
+				Expect(ParseMiningTimeout(raw)).To(Equal(expected))
 			},
 			Entry("duration", "5s", 5*time.Second),
 			Entry("zero duration", "0s", 10*time.Second),
@@ -506,27 +477,59 @@ var _ = Describe("Server", func() {
 		})
 	})
 
-	Describe("RunWithConsensus over a real listener", func() {
-		It("serves GET / through a real HTTP client", func() {
-			previousChain := blockchainInstance
-			previousEngine := consensusEngine
-			DeferCleanup(func() {
-				blockchainInstance = previousChain
-				consensusEngine = previousEngine
-			})
+	Describe("NewServer", func() {
+		It("falls back to the default mining timeout for a non-positive value", func() {
+			svc, err := chain.NewService(memory.New(), engine)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(NewServer(svc, Config{}).miningTimeout).To(Equal(DefaultMiningTimeout))
+			Expect(NewServer(svc, Config{MiningTimeout: -time.Second}).miningTimeout).To(Equal(DefaultMiningTimeout))
+			Expect(NewServer(svc, Config{MiningTimeout: time.Second}).miningTimeout).To(Equal(time.Second))
+		})
 
+		It("isolates state between two servers in the same process", func() {
+			svcA, _ := chain.NewService(memory.New(), engine)
+			svcB, _ := chain.NewService(memory.New(), engine)
+			a, b := NewServer(svcA, Config{}).Handler(), NewServer(svcB, Config{}).Handler()
+
+			rec := httptest.NewRecorder()
+			a.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"Transactions":[{"From":"alice","To":"bob","Amount":1}]}`)))
+			Expect(rec.Code).To(Equal(http.StatusCreated))
+
+			count := func(h http.Handler) int {
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+				var body chainBody
+				Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
+				return len(body.Blocks)
+			}
+			Expect(count(a)).To(Equal(2))
+			Expect(count(b)).To(Equal(1))
+		})
+
+		It("returns 500 on GET / when the chain cannot be read", func() {
+			h := NewServer(brokenChain{}, Config{}).Handler()
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+			Expect(rec.Code).To(Equal(http.StatusInternalServerError))
+			Expect(rec.Body.String()).To(ContainSubstring("read failed"))
+		})
+	})
+
+	Describe("HTTPServer over a real listener", func() {
+		start := func() string {
 			l, err := net.Listen("tcp", "127.0.0.1:0")
 			Expect(err).NotTo(HaveOccurred())
-			port := l.Addr().(*net.TCPAddr).Port
+			addr := l.Addr().String()
 			Expect(l.Close()).To(Succeed())
-			GinkgoT().Setenv("PORT", strconv.Itoa(port))
-			addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 
+			svc, err := chain.NewService(repo, engine)
+			Expect(err).NotTo(HaveOccurred())
+			hs := NewServer(svc, cfg).HTTPServer(addr)
+			DeferCleanup(func() { _ = hs.Close() })
 			go func() {
 				defer GinkgoRecover()
-				_ = RunWithConsensus(pow.NewProofOfWork(1))
+				_ = hs.ListenAndServe()
 			}()
-
 			Eventually(func() error {
 				conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
 				if err == nil {
@@ -534,6 +537,21 @@ var _ = Describe("Server", func() {
 				}
 				return err
 			}, 5*time.Second, 20*time.Millisecond).Should(Succeed())
+			return addr
+		}
+
+		It("sets the service address, header limit and handler", func() {
+			svc, _ := chain.NewService(memory.New(), engine)
+			hs := NewServer(svc, Config{}).HTTPServer(":1234")
+			Expect(hs.Addr).To(Equal(":1234"))
+			Expect(hs.Handler).NotTo(BeNil())
+			Expect(hs.MaxHeaderBytes).To(Equal(1 << 20))
+			Expect(hs.ReadTimeout).To(Equal(10 * time.Second))
+			Expect(hs.WriteTimeout).To(Equal(10 * time.Second))
+		})
+
+		It("serves GET / through a real HTTP client", func() {
+			addr := start()
 
 			client := &http.Client{Timeout: 5 * time.Second}
 			resp, err := client.Get("http://" + addr + "/")
@@ -543,7 +561,7 @@ var _ = Describe("Server", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(resp.StatusCode).To(Equal(http.StatusOK))
-			var bc domain.Blockchain
+			var bc chainBody
 			Expect(json.Unmarshal(body, &bc)).To(Succeed())
 			Expect(bc.Blocks).To(HaveLen(1))
 		})
@@ -551,38 +569,32 @@ var _ = Describe("Server", func() {
 		// A 10s ReadTimeout/WriteTimeout is only observable by waiting for it: a mutant that
 		// turns it into 0 (no timeout) leaves the idle connection open and lets the slow reply through.
 		It("closes idle connections and drops replies written after 10s", func() {
-			previousChain := blockchainInstance
-			previousEngine := consensusEngine
-			previousGenerate := generateBlock
 			handlerDone := make(chan struct{})
 			var handlerStarted atomic.Bool
 			DeferCleanup(func() {
 				if handlerStarted.Load() {
 					<-handlerDone
 				}
-				blockchainInstance = previousChain
-				consensusEngine = previousEngine
-				generateBlock = previousGenerate
 			})
 
-			l, err := net.Listen("tcp", "127.0.0.1:0")
-			Expect(err).NotTo(HaveOccurred())
-			port := l.Addr().(*net.TCPAddr).Port
-			Expect(l.Close()).To(Succeed())
-			GinkgoT().Setenv("PORT", strconv.Itoa(port))
-			GinkgoT().Setenv(MiningTimeoutEnvVar, "60s")
-			addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
-
-			generateBlock = func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+			cfg = Config{MiningTimeout: 60 * time.Second}
+			svc, err := chain.NewService(repo, engine, chain.WithGenerator(func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 				handlerStarted.Store(true)
 				defer close(handlerDone)
 				time.Sleep(11 * time.Second)
 				return nil, errors.New("too slow")
-			}
+			}))
+			Expect(err).NotTo(HaveOccurred())
 
+			l, err := net.Listen("tcp", "127.0.0.1:0")
+			Expect(err).NotTo(HaveOccurred())
+			addr := l.Addr().String()
+			Expect(l.Close()).To(Succeed())
+			hs := NewServer(svc, cfg).HTTPServer(addr)
+			DeferCleanup(func() { _ = hs.Close() })
 			go func() {
 				defer GinkgoRecover()
-				_ = RunWithConsensus(pow.NewProofOfWork(1))
+				_ = hs.ListenAndServe()
 			}()
 			Eventually(func() error {
 				conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
@@ -628,7 +640,7 @@ var _ = Describe("Server", func() {
 
 			Expect(rec.Code).To(Equal(http.StatusOK))
 			Expect(json.Valid(rec.Body.Bytes())).To(BeTrue())
-			var bc domain.Blockchain
+			var bc chainBody
 			Expect(json.Unmarshal(rec.Body.Bytes(), &bc)).To(Succeed())
 			Expect(bc.Blocks).To(HaveLen(1))
 			Expect(bc.Blocks[0].Index).To(Equal(0))
@@ -646,7 +658,7 @@ var _ = Describe("Server", func() {
 			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 
 			Expect(rec.Code).To(Equal(http.StatusOK))
-			var bc domain.Blockchain
+			var bc chainBody
 			Expect(json.Unmarshal(rec.Body.Bytes(), &bc)).To(Succeed())
 			Expect(bc.Blocks).To(HaveLen(2))
 			Expect(bc.Blocks[1].Index).To(Equal(1))

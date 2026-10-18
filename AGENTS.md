@@ -15,16 +15,24 @@ blockchain-with-go/
 ├── cmd/
 │   └── node/          # Ponto de entrada da aplicação (main.go)
 ├── internal/
-│   ├── chain/         # Regras de cadeia, blocos e geração de blocos
-│   ├── consensus/     # Interface Consensus e erros
-│   │   └── pow/       # Implementação Proof of Work
-│   ├── domain/        # Modelos de domínio (Block, Transaction, Blockchain, regras)
-│   └── server/        # Handlers, rotas HTTP e DTOs (gorilla/mux)
+│   ├── chain/         # chain.Service (Blocks/Mine), geração de blocos, ErrInvalidBlock
+│   ├── consensus/     # Porta Consensus e erros
+│   │   └── pow/       # Adaptador Proof of Work
+│   ├── domain/        # Modelos de domínio (Block, Transaction, regras) — sem dependências internas
+│   ├── server/        # Adaptador HTTP: server.Server (DI), handlers, DTOs e mapeamento de erros
+│   └── storage/       # Porta BlockRepository
+│       └── memory/    # Adaptador em memória (sync.RWMutex)
 ├── pkg/
 │   └── wallet/        # Chaves Ed25519, endereçamento e keystore
 ├── go.mod             # Módulo Go e dependências
 └── README.md          # Documentação do projeto e instruções de execução
 ```
+
+## Arquitetura (Ports & Adapters)
+
+- Dependências apontam para dentro: `cmd/node` → `server`/`chain`/adaptadores → `domain`. `internal/domain` nunca importa `storage`, `chain`, `server`, `net/http` nem `os/signal`; `internal/chain` não importa `server` nem `net/http`.
+- Sem estado global: `internal/server` e `internal/chain` só têm `const` e sentinelas `errors.New` no nível de pacote. Dependências (repositório, consenso, gerador de blocos) entram por construtor (`chain.NewService(repo, consensus, opts...)`, `server.NewServer(svc, cfg)`).
+- Composition root em `cmd/node/main.go`; é o único lugar que dispara a leitura de configuração (`PORT` e `MINING_TIMEOUT` diretamente; `POW_DIFFICULTY` via `pow.NewProofOfWorkFromEnv`).
 
 ## Regras e Comandos
 
