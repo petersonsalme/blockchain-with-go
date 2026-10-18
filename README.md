@@ -74,17 +74,17 @@ blockchain-with-go/
 
 ## Ports & Adapters
 
-| Camada | Pacote | Papel |
+| Layer | Package | Role |
 | --- | --- | --- |
-| Domínio | `internal/domain` | Entidades e regras puras (`Block`, `Transaction`, `ValidateBlockRules`). Não importa nenhum outro pacote interno. |
-| Porta (saída) | `internal/storage` (`BlockRepository`) | `Last`, `Append`, `All` — onde a cadeia é guardada. |
-| Porta (saída) | `internal/consensus` (`Consensus`) | `Seal`/`Verify` — como blocos são produzidos e aceitos. |
-| Aplicação | `internal/chain` (`Service`) | `Blocks()` e `Mine(ctx, txs)`: gênesis, pré-validação, `Seal`, regras, `Verify`, `Append`. Rejeição → `chain.ErrInvalidBlock`. |
-| Adaptador (entrada) | `internal/server` (`Server`) | HTTP (gorilla/mux); mapeia erros do `Service` para status HTTP. |
-| Adaptadores (saída) | `internal/storage/memory`, `internal/consensus/pow` | Repositório em memória (`sync.RWMutex`) e Proof of Work. |
-| Composition root | `cmd/node` | Lê `.env`/ambiente, monta repo → pow → service → server e faz graceful shutdown. |
+| Domain | `internal/domain` | Pure entities and rules (`Block`, `Transaction`, `ValidateBlockRules`). Imports no other internal package. |
+| Port (outbound) | `internal/storage` (`BlockRepository`) | `Last`, `Append`, `All` — where the chain is stored. |
+| Port (outbound) | `internal/consensus` (`Consensus`) | `Seal`/`Verify` — how blocks are produced and accepted. |
+| Application | `internal/chain` (`Service`) | `Blocks()` and `Mine(ctx, txs)`: genesis, pre-validation, `Seal`, rules, `Verify`, `Append`. Rejection → `chain.ErrInvalidBlock`. |
+| Adapter (inbound) | `internal/server` (`Server`) | HTTP (gorilla/mux); maps `Service` errors to HTTP status codes. |
+| Adapters (outbound) | `internal/storage/memory`, `internal/consensus/pow` | In-memory repository (`sync.RWMutex`) and Proof of Work. |
+| Composition root | `cmd/node` | Reads `.env`/environment, wires repo → pow → service → server and handles graceful shutdown. |
 
-**Regra de dependência:** as setas apontam para dentro (adaptadores → aplicação → domínio). `domain` não depende de `storage`, `chain`, `server`, `net/http` nem `os/signal`; `chain` não importa `server` nem `net/http`. Não há estado global: cada `Server` recebe seu `Service` por injeção.
+**Dependency rule:** arrows point inward (adapters → application → domain). `domain` does not depend on `storage`, `chain`, `server`, `net/http` or `os/signal`; `chain` does not import `server` or `net/http`. There is no global state: each `Server` receives its `Service` by injection.
 
 ## Running Locally
 
@@ -210,14 +210,14 @@ Content-Type: application/json
 |---|---|---|
 | `200 OK` | Blockchain retrieved successfully via `GET /` | JSON array of blocks |
 | `201 Created` | Block mined and appended to the blockchain via `POST /` or `POST /legacy/bpm` | JSON object of the new block |
-| `400 Bad Request` | Malformed JSON body or invalid transaction payload (e.g. empty list, missing address, zero amount) | `{"error": "corpo da requisição inválido"}` |
-| `405 Method Not Allowed` | HTTP method not allowed on endpoint (e.g. `PUT`, `DELETE`) | `{"error": "método não permitido"}` |
-| `408 Request Timeout` | Client disconnected or cancelled request during mining | `{"error": "mineração cancelada"}` |
-| `422 Unprocessable Entity` | Generated block failed chain validation | `{"error": "bloco inválido não pôde ser adicionado"}` |
+| `400 Bad Request` | Malformed JSON body or invalid transaction payload (e.g. empty list, missing address, zero amount) | `{"error": "invalid request body"}` |
+| `405 Method Not Allowed` | HTTP method not allowed on endpoint (e.g. `PUT`, `DELETE`) | empty body (router-level response) |
+| `408 Request Timeout` | Client disconnected or cancelled request during mining | `{"error": "mining cancelled"}` |
+| `422 Unprocessable Entity` | Generated block failed chain validation | `{"error": "invalid block could not be added"}` |
 | `422 Unprocessable Entity` | Block exceeds `MAX_BLOCK_BYTES` (checked before mining) | `{"error": "...", "code": "block_too_large", "details": {"size": 1200, "max": 1000}}` |
 | `422 Unprocessable Entity` | Block timestamp earlier than its parent or more than 2h in the future | `{"error": "...", "code": "timestamp_before_parent" \| "timestamp_too_far_in_future", "details": {...}}` |
 | `413 Request Entity Too Large` | `POST /` body larger than 2× `MAX_BLOCK_BYTES` | `{"error": "...", "code": "request_too_large", "details": {"max": 2000}}` |
-| `504 Gateway Timeout` | Mining exceeded deadline set by `MINING_TIMEOUT` | `{"error": "tempo limite de mineração excedido"}` |
+| `504 Gateway Timeout` | Mining exceeded deadline set by `MINING_TIMEOUT` | `{"error": "mining timeout exceeded"}` |
 | `500 Internal Server Error` | Unexpected internal server error | `{"error": "..."}` |
 
 ## Wallet
