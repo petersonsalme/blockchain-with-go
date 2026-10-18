@@ -5,10 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -478,6 +482,139 @@ var _ = Describe("Server", func() {
 			pow, ok := consensusEngine.(*consensus.ProofOfWork)
 			Expect(ok).To(BeTrue())
 			Expect(pow.Difficulty).To(Equal(3))
+		})
+	})
+
+	Describe("miningTimeout", func() {
+		DescribeTable("parses MINING_TIMEOUT",
+			func(raw string, expected time.Duration) {
+				GinkgoT().Setenv(MiningTimeoutEnvVar, raw)
+				Expect(miningTimeout()).To(Equal(expected))
+			},
+			Entry("duration", "5s", 5*time.Second),
+			Entry("zero duration", "0s", 10*time.Second),
+			Entry("negative duration", "-1s", 10*time.Second),
+			Entry("integer seconds", "7", 7*time.Second),
+			Entry("zero seconds", "0", 10*time.Second),
+			Entry("invalid", "abc", 10*time.Second),
+			Entry("empty", "", 10*time.Second),
+		)
+
+		It("has a 10s default", func() {
+			Expect(DefaultMiningTimeout).To(Equal(10 * time.Second))
+		})
+	})
+
+	Describe("RunWithConsensus over a real listener", func() {
+		It("serves GET / through a real HTTP client", func() {
+			previousChain := blockchainInstance
+			previousEngine := consensusEngine
+			DeferCleanup(func() {
+				blockchainInstance = previousChain
+				consensusEngine = previousEngine
+			})
+
+			l, err := net.Listen("tcp", "127.0.0.1:0")
+			Expect(err).NotTo(HaveOccurred())
+			port := l.Addr().(*net.TCPAddr).Port
+			Expect(l.Close()).To(Succeed())
+			GinkgoT().Setenv("PORT", strconv.Itoa(port))
+			addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+
+			go func() {
+				defer GinkgoRecover()
+				_ = RunWithConsensus(consensus.NewProofOfWork(1))
+			}()
+
+			Eventually(func() error {
+				conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+				if err == nil {
+					conn.Close()
+				}
+				return err
+			}, 5*time.Second, 20*time.Millisecond).Should(Succeed())
+
+			client := &http.Client{Timeout: 5 * time.Second}
+			resp, err := client.Get("http://" + addr + "/")
+			Expect(err).NotTo(HaveOccurred())
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(resp.StatusCode).To(Equal(http.StatusOK))
+			var bc models.Blockchain
+			Expect(json.Unmarshal(body, &bc)).To(Succeed())
+			Expect(bc.Blocks).To(HaveLen(1))
+		})
+
+		// A 10s ReadTimeout/WriteTimeout is only observable by waiting for it: a mutant that
+		// turns it into 0 (no timeout) leaves the idle connection open and lets the slow reply through.
+		It("closes idle connections and drops replies written after 10s", func() {
+			previousChain := blockchainInstance
+			previousEngine := consensusEngine
+			previousGenerate := generateBlock
+			handlerDone := make(chan struct{})
+			var handlerStarted atomic.Bool
+			DeferCleanup(func() {
+				if handlerStarted.Load() {
+					<-handlerDone
+				}
+				blockchainInstance = previousChain
+				consensusEngine = previousEngine
+				generateBlock = previousGenerate
+			})
+
+			l, err := net.Listen("tcp", "127.0.0.1:0")
+			Expect(err).NotTo(HaveOccurred())
+			port := l.Addr().(*net.TCPAddr).Port
+			Expect(l.Close()).To(Succeed())
+			GinkgoT().Setenv("PORT", strconv.Itoa(port))
+			GinkgoT().Setenv(MiningTimeoutEnvVar, "60s")
+			addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+
+			generateBlock = func(ctx context.Context, c consensus.Consensus, prev *models.Block, txs []models.Transaction) (*models.Block, error) {
+				handlerStarted.Store(true)
+				defer close(handlerDone)
+				time.Sleep(11 * time.Second)
+				return nil, errors.New("too slow")
+			}
+
+			go func() {
+				defer GinkgoRecover()
+				_ = RunWithConsensus(consensus.NewProofOfWork(1))
+			}()
+			Eventually(func() error {
+				conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+				if err == nil {
+					conn.Close()
+				}
+				return err
+			}, 5*time.Second, 20*time.Millisecond).Should(Succeed())
+
+			readErr := make(chan error, 1)
+			go func() {
+				defer GinkgoRecover()
+				conn, err := net.Dial("tcp", addr)
+				if err != nil {
+					readErr <- err
+					return
+				}
+				defer conn.Close()
+				_ = conn.SetReadDeadline(time.Now().Add(15 * time.Second))
+				_, err = conn.Read(make([]byte, 1))
+				readErr <- err
+			}()
+
+			client := &http.Client{Timeout: 20 * time.Second}
+			_, postErr := client.Post("http://"+addr+"/", "application/json",
+				strings.NewReader(`{"Transactions":[{"From":"alice","To":"bob","Amount":1}]}`))
+			Expect(postErr).To(HaveOccurred())
+			var netErr net.Error
+			Expect(errors.As(postErr, &netErr) && netErr.Timeout()).To(BeFalse(), "reply was not dropped by WriteTimeout")
+
+			var idleErr error
+			Eventually(readErr, 10*time.Second).Should(Receive(&idleErr))
+			Expect(idleErr).To(MatchError(io.EOF), "idle connection was not closed by ReadTimeout")
 		})
 	})
 
