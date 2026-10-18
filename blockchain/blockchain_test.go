@@ -176,8 +176,11 @@ var _ = Describe("Blockchain", Ordered, func() {
 
 			spyConsensus := &mockConsensus{}
 
+			refTimestamp := time.Now().Truncate(time.Second).Add(123456789 * time.Nanosecond)
+			fullTimestampLen := timestampJSONLen(refTimestamp)
+
 			tested := false
-			for attempt := 0; attempt < 50; attempt++ {
+			for attempt := 0; attempt < 100; attempt++ {
 				candidate := models.Block{
 					Index:        parent.Index + 1,
 					Timestamp:    time.Now(),
@@ -185,7 +188,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 					PrevHash:     parent.Hash,
 					Hash:         strings.Repeat("0", 64),
 				}
-				if timestampJSONLen(candidate.Timestamp) != 37 {
+				if timestampJSONLen(candidate.Timestamp) != fullTimestampLen {
 					time.Sleep(50 * time.Microsecond)
 					continue
 				}
@@ -205,7 +208,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 				block, err := GenerateBlockWithContext(context.Background(), spyConsensus, parent, txs)
 				if miningAttempted {
 					// Check if timestamp in GenerateBlockWithContext had trailing zero (shorter JSON length)
-					if timestampJSONLen(capturedBlock.Timestamp) < 37 {
+					if timestampJSONLen(capturedBlock.Timestamp) < fullTimestampLen {
 						time.Sleep(50 * time.Microsecond)
 						continue
 					}
