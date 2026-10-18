@@ -46,7 +46,9 @@ func (f *failingRepo) Last() (*domain.Block, error) {
 	return f.BlockRepository.Last()
 }
 
-var sampleTx = []domain.Transaction{{From: "alice", To: "bob", Amount: 1}}
+func sampleTx() []domain.Transaction {
+	return []domain.Transaction{{From: "alice", To: "bob", Amount: 1}}
+}
 
 var _ = Describe("Service", func() {
 	var (
@@ -111,7 +113,7 @@ var _ = Describe("Service", func() {
 	Describe("Mine", func() {
 		It("seals, validates and appends a linked block", func() {
 			svc, _ := NewService(repo, eng)
-			blk, err := svc.Mine(context.Background(), sampleTx)
+			blk, err := svc.Mine(context.Background(), sampleTx())
 			Expect(err).NotTo(HaveOccurred())
 			Expect(blk.Index).To(Equal(1))
 
@@ -124,7 +126,7 @@ var _ = Describe("Service", func() {
 
 		It("returns ErrInvalidBlock when Verify rejects, leaving the chain unchanged", func() {
 			svc, _ := NewService(repo, rejectingConsensus{inner: eng})
-			blk, err := svc.Mine(context.Background(), sampleTx)
+			blk, err := svc.Mine(context.Background(), sampleTx())
 			Expect(err).To(MatchError(ErrInvalidBlock))
 			Expect(blk).To(BeNil())
 
@@ -136,7 +138,7 @@ var _ = Describe("Service", func() {
 			svc, _ := NewService(repo, eng, WithGenerator(func(context.Context, consensus.Consensus, *domain.Block, []domain.Transaction) (*domain.Block, error) {
 				return nil, nil
 			}))
-			_, err := svc.Mine(context.Background(), sampleTx)
+			_, err := svc.Mine(context.Background(), sampleTx())
 			Expect(err).To(MatchError(ErrInvalidBlock))
 			all, _ := repo.All()
 			Expect(all).To(HaveLen(1))
@@ -148,7 +150,7 @@ var _ = Describe("Service", func() {
 				b.Timestamp = prev.Timestamp.Add(-time.Second)
 				return b, err
 			}))
-			_, err := svc.Mine(context.Background(), sampleTx)
+			_, err := svc.Mine(context.Background(), sampleTx())
 			var ve *domain.ValidationError
 			Expect(errors.As(err, &ve)).To(BeTrue())
 			Expect(ve.Code).To(Equal("timestamp_before_parent"))
@@ -159,7 +161,7 @@ var _ = Describe("Service", func() {
 		It("propagates a ValidationError from the size pre-check", func() {
 			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "100")
 			svc, _ := NewService(repo, eng)
-			_, err := svc.Mine(context.Background(), sampleTx)
+			_, err := svc.Mine(context.Background(), sampleTx())
 			var ve *domain.ValidationError
 			Expect(errors.As(err, &ve)).To(BeTrue())
 			Expect(ve.Code).To(Equal("block_too_large"))
@@ -170,7 +172,7 @@ var _ = Describe("Service", func() {
 				svc, _ := NewService(repo, eng, WithGenerator(func(context.Context, consensus.Consensus, *domain.Block, []domain.Transaction) (*domain.Block, error) {
 					return nil, e
 				}))
-				_, err := svc.Mine(context.Background(), sampleTx)
+				_, err := svc.Mine(context.Background(), sampleTx())
 				Expect(errors.Is(err, e)).To(BeTrue())
 				all, _ := repo.All()
 				Expect(all).To(HaveLen(1))
@@ -184,7 +186,7 @@ var _ = Describe("Service", func() {
 			svc, _ := NewService(repo, eng, WithGenerator(func(context.Context, consensus.Consensus, *domain.Block, []domain.Transaction) (*domain.Block, error) {
 				return nil, boom
 			}))
-			_, err := svc.Mine(context.Background(), sampleTx)
+			_, err := svc.Mine(context.Background(), sampleTx())
 			Expect(err).To(MatchError(boom))
 			Expect(errors.Is(err, ErrInvalidBlock)).To(BeFalse())
 		})
@@ -194,7 +196,7 @@ var _ = Describe("Service", func() {
 			fr := &failingRepo{BlockRepository: repo}
 			svc, _ := NewService(fr, eng)
 			fr.appendErr = boom
-			_, err := svc.Mine(context.Background(), sampleTx)
+			_, err := svc.Mine(context.Background(), sampleTx())
 			Expect(err).To(MatchError(boom))
 		})
 
@@ -203,14 +205,14 @@ var _ = Describe("Service", func() {
 			fr := &failingRepo{BlockRepository: repo}
 			svc, _ := NewService(fr, eng)
 			fr.lastErr = boom
-			_, err := svc.Mine(context.Background(), sampleTx)
+			_, err := svc.Mine(context.Background(), sampleTx())
 			Expect(err).To(MatchError(boom))
 		})
 
 		It("keeps services over separate repositories independent", func() {
 			a, _ := NewService(memory.New(), eng)
 			b, _ := NewService(memory.New(), eng)
-			_, err := a.Mine(context.Background(), sampleTx)
+			_, err := a.Mine(context.Background(), sampleTx())
 			Expect(err).NotTo(HaveOccurred())
 
 			ab, _ := a.Blocks()

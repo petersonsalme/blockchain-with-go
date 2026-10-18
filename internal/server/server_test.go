@@ -327,6 +327,7 @@ var _ = Describe("Server", func() {
 			var body map[string]any
 			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 			Expect(body["code"]).To(Equal("request_too_large"))
+			Expect(body["details"]).To(HaveKeyWithValue("max", BeNumerically("==", 200)))
 		})
 
 		It("still returns 201 on the happy path", func() {

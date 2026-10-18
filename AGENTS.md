@@ -32,7 +32,7 @@ blockchain-with-go/
 
 - Dependências apontam para dentro: `cmd/node` → `server`/`chain`/adaptadores → `domain`. `internal/domain` nunca importa `storage`, `chain`, `server`, `net/http` nem `os/signal`; `internal/chain` não importa `server` nem `net/http`.
 - Sem estado global: `internal/server` e `internal/chain` só têm `const` e sentinelas `errors.New` no nível de pacote. Dependências (repositório, consenso, gerador de blocos) entram por construtor (`chain.NewService(repo, consensus, opts...)`, `server.NewServer(svc, cfg)`).
-- Composition root em `cmd/node/main.go`; é o único lugar que lê `PORT`, `POW_DIFFICULTY` e `MINING_TIMEOUT`.
+- Composition root em `cmd/node/main.go`; é o único lugar que dispara a leitura de configuração (`PORT` e `MINING_TIMEOUT` diretamente; `POW_DIFFICULTY` via `pow.NewProofOfWorkFromEnv`).
 
 ## Regras e Comandos
 
