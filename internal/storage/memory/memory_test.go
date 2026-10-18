@@ -95,7 +95,9 @@ var _ = Describe("Repository", func() {
 			go func() {
 				defer GinkgoRecover()
 				defer wg.Done()
-				for i := 0; i < perWriter; {
+				// Bounded so a repository that rejects valid appends fails the test instead of hanging it.
+				for i, attempts := 0, 0; i < perWriter; attempts++ {
+					Expect(attempts).To(BeNumerically("<", 100000), "writer starved: valid appends keep being rejected")
 					last, err := repo.Last()
 					if err != nil {
 						Expect(repo.Append(&domain.Block{Hash: "h0"})).To(Or(Succeed(), MatchError(storage.ErrConflict)))
