@@ -137,18 +137,18 @@ func (s *Server) handleWriteBlock(w http.ResponseWriter, r *http.Request) {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			respondWithJSON(w, http.StatusRequestEntityTooLarge, errorResponse{
-				Error:   "corpo da requisição excede o tamanho máximo",
+				Error:   "request body exceeds the maximum size",
 				Code:    requestTooLargeCode,
 				Details: map[string]any{"max": tooLarge.Limit},
 			})
 			return
 		}
-		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "corpo da requisição inválido"})
+		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid request body"})
 		return
 	}
 
 	if len(m.Transactions) == 0 {
-		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "lista de transações não pode ser vazia"})
+		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "transaction list cannot be empty"})
 		return
 	}
 
@@ -160,7 +160,7 @@ func (s *Server) handleWriteBlock(w http.ResponseWriter, r *http.Request) {
 			m.Transactions[i].ID = m.Transactions[i].CalculateHash()
 		}
 		if err := m.Transactions[i].Validate(); err != nil {
-			respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: fmt.Sprintf("transação inválida: %s", err.Error())})
+			respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: fmt.Sprintf("invalid transaction: %s", err.Error())})
 			return
 		}
 	}
@@ -177,12 +177,12 @@ func (s *Server) handleLegacyBPM(w http.ResponseWriter, r *http.Request) {
 
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&m); err != nil {
-		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "corpo da requisição inválido"})
+		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid request body"})
 		return
 	}
 
 	if m.BPM <= 0 {
-		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "BPM deve ser maior que zero"})
+		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "BPM must be greater than zero"})
 		return
 	}
 

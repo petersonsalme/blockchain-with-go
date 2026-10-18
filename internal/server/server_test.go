@@ -134,11 +134,11 @@ var _ = Describe("Server", func() {
 				Expect(rec.Code).To(Equal(http.StatusUnprocessableEntity))
 				Expect(rec.Header().Get("Content-Type")).To(Equal("application/json"))
 
-				Expect(rec.Body.String()).To(MatchJSON(`{"error": "bloco inválido não pôde ser adicionado"}`))
+				Expect(rec.Body.String()).To(MatchJSON(`{"error": "invalid block could not be added"}`))
 
 				var resp errorResponse
 				Expect(json.Unmarshal(rec.Body.Bytes(), &resp)).To(Succeed())
-				Expect(resp.Error).To(Equal("bloco inválido não pôde ser adicionado"))
+				Expect(resp.Error).To(Equal("invalid block could not be added"))
 
 				Expect(chainLen()).To(Equal(initialLen))
 			})
@@ -162,11 +162,11 @@ var _ = Describe("Server", func() {
 				Expect(rec.Code).To(Equal(http.StatusGatewayTimeout))
 				Expect(rec.Header().Get("Content-Type")).To(Equal("application/json"))
 
-				Expect(rec.Body.String()).To(MatchJSON(`{"error": "tempo limite de mineração excedido"}`))
+				Expect(rec.Body.String()).To(MatchJSON(`{"error": "mining timeout exceeded"}`))
 
 				var resp errorResponse
 				Expect(json.Unmarshal(rec.Body.Bytes(), &resp)).To(Succeed())
-				Expect(resp.Error).To(Equal("tempo limite de mineração excedido"))
+				Expect(resp.Error).To(Equal("mining timeout exceeded"))
 
 				Expect(chainLen()).To(Equal(initialLen))
 			})
@@ -190,11 +190,11 @@ var _ = Describe("Server", func() {
 				Expect(rec.Code).To(Equal(http.StatusRequestTimeout))
 				Expect(rec.Header().Get("Content-Type")).To(Equal("application/json"))
 
-				Expect(rec.Body.String()).To(MatchJSON(`{"error": "mineração cancelada"}`))
+				Expect(rec.Body.String()).To(MatchJSON(`{"error": "mining cancelled"}`))
 
 				var resp errorResponse
 				Expect(json.Unmarshal(rec.Body.Bytes(), &resp)).To(Succeed())
-				Expect(resp.Error).To(Equal("mineração cancelada"))
+				Expect(resp.Error).To(Equal("mining cancelled"))
 
 				Expect(chainLen()).To(Equal(initialLen))
 			})
@@ -252,11 +252,11 @@ var _ = Describe("Server", func() {
 				Expect(rec.Code).To(Equal(http.StatusBadRequest))
 				Expect(rec.Header().Get("Content-Type")).To(Equal("application/json"))
 
-				Expect(rec.Body.String()).To(MatchJSON(`{"error": "corpo da requisição inválido"}`))
+				Expect(rec.Body.String()).To(MatchJSON(`{"error": "invalid request body"}`))
 
 				var resp errorResponse
 				Expect(json.Unmarshal(rec.Body.Bytes(), &resp)).To(Succeed())
-				Expect(resp.Error).To(Equal("corpo da requisição inválido"))
+				Expect(resp.Error).To(Equal("invalid request body"))
 
 				Expect(chainLen()).To(Equal(initialLen))
 			})
@@ -327,6 +327,7 @@ var _ = Describe("Server", func() {
 			var body map[string]any
 			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 			Expect(body["code"]).To(Equal("request_too_large"))
+			Expect(body["error"]).To(Equal("request body exceeds the maximum size"))
 			Expect(body["details"]).To(HaveKeyWithValue("max", BeNumerically("==", 200)))
 		})
 
@@ -349,15 +350,15 @@ var _ = Describe("Server", func() {
 				Expect(rec.Body.String()).To(MatchJSON(`{"error": "` + expectedMsg + `"}`))
 				Expect(chainLen()).To(Equal(initialLen))
 			},
-			Entry("empty body", "", "corpo da requisição inválido"),
-			Entry("JSON array", `[1,2]`, "corpo da requisição inválido"),
-			Entry("wrong Transactions type", `{"Transactions":"abc"}`, "corpo da requisição inválido"),
-			Entry("missing Transactions field", `{}`, "lista de transações não pode ser vazia"),
-			Entry("empty Transactions list", `{"Transactions":[]}`, "lista de transações não pode ser vazia"),
-			Entry("transaction with zero Amount", `{"Transactions":[{"From":"alice","To":"bob","Amount":0}]}`, "transação inválida: amount must be greater than zero"),
-			Entry("transaction with empty From", `{"Transactions":[{"From":"","To":"bob","Amount":10}]}`, "transação inválida: from cannot be empty"),
-			Entry("transaction with empty To", `{"Transactions":[{"From":"alice","To":"","Amount":10}]}`, "transação inválida: to cannot be empty"),
-			Entry("transaction with divergent ID", `{"Transactions":[{"ID":"invalid-id","From":"alice","To":"bob","Amount":10}]}`, "transação inválida: transaction id does not match calculated hash"),
+			Entry("empty body", "", "invalid request body"),
+			Entry("JSON array", `[1,2]`, "invalid request body"),
+			Entry("wrong Transactions type", `{"Transactions":"abc"}`, "invalid request body"),
+			Entry("missing Transactions field", `{}`, "transaction list cannot be empty"),
+			Entry("empty Transactions list", `{"Transactions":[]}`, "transaction list cannot be empty"),
+			Entry("transaction with zero Amount", `{"Transactions":[{"From":"alice","To":"bob","Amount":0}]}`, "invalid transaction: amount must be greater than zero"),
+			Entry("transaction with empty From", `{"Transactions":[{"From":"","To":"bob","Amount":10}]}`, "invalid transaction: from cannot be empty"),
+			Entry("transaction with empty To", `{"Transactions":[{"From":"alice","To":"","Amount":10}]}`, "invalid transaction: to cannot be empty"),
+			Entry("transaction with divergent ID", `{"Transactions":[{"ID":"invalid-id","From":"alice","To":"bob","Amount":10}]}`, "invalid transaction: transaction id does not match calculated hash"),
 		)
 
 		It("rejects blocks with 422 when the injected consensus fails verification", func() {
@@ -371,7 +372,7 @@ var _ = Describe("Server", func() {
 			router.ServeHTTP(rec, req)
 
 			Expect(rec.Code).To(Equal(http.StatusUnprocessableEntity))
-			Expect(rec.Body.String()).To(MatchJSON(`{"error": "bloco inválido não pôde ser adicionado"}`))
+			Expect(rec.Body.String()).To(MatchJSON(`{"error": "invalid block could not be added"}`))
 			Expect(chainLen()).To(Equal(initialLen))
 		})
 
@@ -437,10 +438,10 @@ var _ = Describe("Server", func() {
 					Expect(rec.Body.String()).To(MatchJSON(`{"error": "` + expectedMsg + `"}`))
 					Expect(chainLen()).To(Equal(initialLen))
 				},
-				Entry("BPM is zero", `{"BPM": 0}`, "BPM deve ser maior que zero"),
-				Entry("BPM is negative", `{"BPM": -10}`, "BPM deve ser maior que zero"),
-				Entry("BPM is wrong type", `{"BPM": "abc"}`, "corpo da requisição inválido"),
-				Entry("empty body", "", "corpo da requisição inválido"),
+				Entry("BPM is zero", `{"BPM": 0}`, "BPM must be greater than zero"),
+				Entry("BPM is negative", `{"BPM": -10}`, "BPM must be greater than zero"),
+				Entry("BPM is wrong type", `{"BPM": "abc"}`, "invalid request body"),
+				Entry("empty body", "", "invalid request body"),
 			)
 		})
 	})
@@ -453,6 +454,7 @@ var _ = Describe("Server", func() {
 			router.ServeHTTP(rec, req)
 
 			Expect(rec.Code).To(Equal(http.StatusMethodNotAllowed))
+			Expect(rec.Body.String()).To(BeEmpty())
 		},
 		Entry("PUT", http.MethodPut),
 		Entry("DELETE", http.MethodDelete),
