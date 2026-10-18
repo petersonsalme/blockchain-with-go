@@ -146,3 +146,71 @@ Mutator coverage: 100.00%
 - `pow.go:43:30`, `pow.go:90:28`: mortos por testes novos (`POW_DIFFICULTY=0`; menor nonce não-negativo).
 - `pow.go:80:9`, `pow.go:91:28`: antes `TIMED OUT`; agora `KILLED` (contexto já cancelado com dificuldade 0; os testes de cancelamento em andamento/deadline usam `mineAsync`, que falha em 1s em vez de travar).
 - `pow.go:84:16` (`difficulty < 0` → `<= 0`): **equivalente** — com `difficulty == 0` o ramo atribui `0`, sem efeito observável. Aguarda concordância do revisor.
+
+## ENG-59 — `./server` após os testes
+
+Comando (sobre `test/ENG-59-mutation-server`, base `7c7a940`):
+
+```
+$ go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --timeout-coefficient 20 ./server
+go: downloading github.com/go-gremlins/gremlins v0.6.0
+go: downloading github.com/spf13/cobra v1.10.2
+go: downloading github.com/bluekeyes/go-gitdiff v0.8.1
+go: downloading github.com/mitchellh/go-homedir v1.1.0
+go: downloading golang.org/x/tools v0.39.0
+go: downloading github.com/spf13/viper v1.21.0
+go: downloading github.com/fatih/color v1.18.0
+go: downloading github.com/spf13/pflag v1.0.10
+go: downloading github.com/MakeNowJust/heredoc v1.0.0
+go: downloading github.com/hako/durafmt v0.0.0-20210608085754-5c1018a4e16b
+go: downloading github.com/mattn/go-colorable v0.1.14
+go: downloading github.com/mattn/go-isatty v0.0.20
+go: downloading github.com/fsnotify/fsnotify v1.9.0
+go: downloading github.com/spf13/cast v1.10.0
+go: downloading go.yaml.in/yaml/v3 v3.0.4
+go: downloading github.com/sagikazarmark/locafero v0.12.0
+go: downloading github.com/subosito/gotenv v1.6.0
+go: downloading github.com/pelletier/go-toml/v2 v2.2.4
+go: downloading github.com/spf13/afero v1.15.0
+go: downloading github.com/go-viper/mapstructure/v2 v2.4.0
+go: downloading golang.org/x/sys v0.38.0
+go: downloading golang.org/x/text v0.31.0
+Starting...
+Gathering coverage... done in 11.578454491s
+ NOT COVERED ARITHMETIC_BASE at server.go:22:33
+      KILLED ARITHMETIC_BASE at server.go:83:23
+      KILLED ARITHMETIC_BASE at server.go:42:11
+      KILLED CONDITIONALS_NEGATION at server.go:131:9
+      KILLED ARITHMETIC_BASE at server.go:86:22
+      KILLED CONDITIONALS_NEGATION at server.go:107:9
+      KILLED CONDITIONALS_NEGATION at server.go:59:41
+      KILLED ARITHMETIC_BASE at server.go:60:30
+      KILLED CONDITIONALS_BOUNDARY at server.go:59:56
+      KILLED CONDITIONALS_NEGATION at server.go:119:9
+      KILLED CONDITIONALS_BOUNDARY at server.go:55:56
+      KILLED CONDITIONALS_NEGATION at server.go:90:36
+      KILLED CONDITIONALS_NEGATION at server.go:59:56
+      KILLED CONDITIONALS_NEGATION at server.go:149:14
+      KILLED CONDITIONALS_NEGATION at server.go:179:36
+      KILLED CONDITIONALS_NEGATION at server.go:150:98
+      KILLED CONDITIONALS_NEGATION at server.go:193:25
+      KILLED ARITHMETIC_BASE at server.go:85:22
+      KILLED CONDITIONALS_NEGATION at server.go:55:56
+      KILLED CONDITIONALS_NEGATION at server.go:51:9
+      KILLED CONDITIONALS_NEGATION at server.go:55:44
+      KILLED CONDITIONALS_NEGATION at server.go:205:47
+      KILLED CONDITIONALS_NEGATION at server.go:161:14
+      KILLED CONDITIONALS_NEGATION at server.go:161:89
+      KILLED CONDITIONALS_NEGATION at server.go:202:27
+      KILLED CONDITIONALS_NEGATION at server.go:222:36
+      KILLED CONDITIONALS_NEGATION at server.go:227:11
+      KILLED CONDITIONALS_BOUNDARY at server.go:227:11
+
+Mutation testing completed in 24 seconds 665 milliseconds
+Killed: 27, Lived: 0, Not covered: 1
+Timed out: 0, Not viable: 0, Skipped: 0
+Test efficacy: 100.00%
+Mutator coverage: 96.43%
+```
+
+Resultado: `Lived: 0`, `Timed out: 0`, `Skipped: 0`. Único `NOT COVERED`: `server.go:22:33` (`const DefaultMiningTimeout = 10 * time.Second`). Justificativa: uma linha de `const` não tem bloco de cobertura, então o gremlins não consegue instrumentá-la; o valor é fixado por asserção (`DefaultMiningTimeout == 10*time.Second`) em `server_test.go`. Limitação da ferramenta, sujeita à concordância do revisor.
