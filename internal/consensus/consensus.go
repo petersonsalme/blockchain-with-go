@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/petersonsalme/blockchain-with-go/models"
+	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 )
 
 var (
@@ -18,7 +18,7 @@ var (
 // Consensus decides how blocks are produced and accepted.
 type Consensus interface {
 	// Seal fills the consensus fields (Nonce, Difficulty, Hash) of b.
-	Seal(ctx context.Context, b *models.Block) error
+	Seal(ctx context.Context, b *domain.Block) error
 	// Verify returns nil when b is a valid successor of prev.
-	Verify(prev, b *models.Block) error
+	Verify(prev, b *domain.Block) error
 }

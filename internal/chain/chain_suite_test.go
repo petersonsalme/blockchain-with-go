@@ -1,4 +1,4 @@
-package consensus_test
+package chain_test
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func TestConsensus(t *testing.T) {
+func TestChain(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Consensus Suite")
+	RunSpecs(t, "Chain Suite")
 }

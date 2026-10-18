@@ -1,4 +1,4 @@
-package consensus
+package pow
 
 import (
 	"context"
@@ -6,7 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/petersonsalme/blockchain-with-go/models"
+	"github.com/petersonsalme/blockchain-with-go/internal/consensus"
+	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 )
 
 // DefaultDifficulty is the number of leading zeros a block hash must have when
@@ -16,20 +17,29 @@ const DefaultDifficulty = 2
 // DifficultyEnvVar overrides DefaultDifficulty when it holds a non-negative integer.
 const DifficultyEnvVar = "POW_DIFFICULTY"
 
-var _ Consensus = (*ProofOfWork)(nil)
+var _ consensus.Consensus = (*ProofOfWork)(nil)
 
 // ProofOfWork is a Consensus that requires block hashes to start with Difficulty zeros.
 type ProofOfWork struct {
 	Difficulty int
 }
 
-func NewProofOfWork(difficulty int) *ProofOfWork {
+func New(difficulty int) *ProofOfWork {
 	return &ProofOfWork{Difficulty: difficulty}
+}
+
+func NewProofOfWork(difficulty int) *ProofOfWork {
+	return New(difficulty)
+}
+
+// NewFromEnv builds a ProofOfWork using the difficulty from POW_DIFFICULTY.
+func NewFromEnv() *ProofOfWork {
+	return New(DifficultyFromEnv())
 }
 
 // NewProofOfWorkFromEnv builds a ProofOfWork using the difficulty from POW_DIFFICULTY.
 func NewProofOfWorkFromEnv() *ProofOfWork {
-	return NewProofOfWork(DifficultyFromEnv())
+	return NewFromEnv()
 }
 
 // DifficultyFromEnv returns the proof-of-work difficulty configured in the environment.
@@ -47,27 +57,27 @@ func DifficultyFromEnv() int {
 	return difficulty
 }
 
-func (p *ProofOfWork) Seal(ctx context.Context, b *models.Block) error {
+func (p *ProofOfWork) Seal(ctx context.Context, b *domain.Block) error {
 	return MineWithContext(ctx, b, p.Difficulty)
 }
 
 // Verify checks the block against its predecessor, validating the proof of
 // work against the block's own recorded difficulty.
-func (p *ProofOfWork) Verify(prev, b *models.Block) error {
+func (p *ProofOfWork) Verify(prev, b *domain.Block) error {
 	if prev.Index+1 != b.Index {
-		return ErrInvalidIndex
+		return consensus.ErrInvalidIndex
 	}
 
 	if prev.Hash != b.PrevHash {
-		return ErrInvalidPrevHash
+		return consensus.ErrInvalidPrevHash
 	}
 
 	if b.CalculateHash() != b.Hash {
-		return ErrInvalidHash
+		return consensus.ErrInvalidHash
 	}
 
 	if !solvesDifficulty(b.Hash, b.Difficulty) {
-		return ErrInvalidProofOfWork
+		return consensus.ErrInvalidProofOfWork
 	}
 
 	return nil
@@ -76,7 +86,7 @@ func (p *ProofOfWork) Verify(prev, b *models.Block) error {
 // MineWithContext searches for a nonce whose hash satisfies the given difficulty
 // and stores the resulting nonce, difficulty and hash on the block. It checks
 // ctx.Err() in the nonce loop and aborts with the context error if canceled or timed out.
-func MineWithContext(ctx context.Context, b *models.Block, difficulty int) error {
+func MineWithContext(ctx context.Context, b *domain.Block, difficulty int) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}

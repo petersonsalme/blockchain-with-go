@@ -18,19 +18,20 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/petersonsalme/blockchain-with-go/blockchain"
-	"github.com/petersonsalme/blockchain-with-go/consensus"
-	"github.com/petersonsalme/blockchain-with-go/models"
+	"github.com/petersonsalme/blockchain-with-go/internal/chain"
+	"github.com/petersonsalme/blockchain-with-go/internal/consensus"
+	"github.com/petersonsalme/blockchain-with-go/internal/consensus/pow"
+	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 )
 
 // rejectingConsensus seals with inner but never accepts a block.
 type rejectingConsensus struct{ inner consensus.Consensus }
 
-func (r rejectingConsensus) Seal(ctx context.Context, b *models.Block) error {
+func (r rejectingConsensus) Seal(ctx context.Context, b *domain.Block) error {
 	return r.inner.Seal(ctx, b)
 }
 
-func (rejectingConsensus) Verify(prev, b *models.Block) error {
+func (rejectingConsensus) Verify(prev, b *domain.Block) error {
 	return errors.New("rejected by fake consensus")
 }
 
@@ -40,9 +41,9 @@ var _ = Describe("Server", func() {
 	BeforeEach(func() {
 		previousEngine := consensusEngine
 		DeferCleanup(func() { consensusEngine = previousEngine })
-		consensusEngine = consensus.NewProofOfWork(1)
+		consensusEngine = pow.NewProofOfWork(1)
 
-		blockchainInstance = blockchain.New()
+		blockchainInstance = chain.New()
 		router = makeMuxRouter()
 	})
 
@@ -61,7 +62,7 @@ var _ = Describe("Server", func() {
 				Expect(rec.Code).To(Equal(http.StatusCreated))
 				Expect(rec.Header().Get("Content-Type")).To(Equal("application/json"))
 
-				var createdBlock models.Block
+				var createdBlock domain.Block
 				Expect(json.Unmarshal(rec.Body.Bytes(), &createdBlock)).To(Succeed())
 				Expect(createdBlock.Transactions).To(HaveLen(1))
 				Expect(createdBlock.Transactions[0].From).To(Equal("alice"))
@@ -85,7 +86,7 @@ var _ = Describe("Server", func() {
 					generateBlock = originalGenerateBlock
 				})
 
-				generateBlock = func(ctx context.Context, c consensus.Consensus, oldBlock *models.Block, txs []models.Transaction) (*models.Block, error) {
+				generateBlock = func(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 					b, err := originalGenerateBlock(ctx, c, oldBlock, txs)
 					if err != nil {
 						return nil, err
@@ -123,7 +124,7 @@ var _ = Describe("Server", func() {
 					generateBlock = originalGenerateBlock
 				})
 
-				generateBlock = func(ctx context.Context, c consensus.Consensus, oldBlock *models.Block, txs []models.Transaction) (*models.Block, error) {
+				generateBlock = func(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 					return nil, context.DeadlineExceeded
 				}
 
@@ -156,7 +157,7 @@ var _ = Describe("Server", func() {
 					generateBlock = originalGenerateBlock
 				})
 
-				generateBlock = func(ctx context.Context, c consensus.Consensus, oldBlock *models.Block, txs []models.Transaction) (*models.Block, error) {
+				generateBlock = func(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 					return nil, context.Canceled
 				}
 
@@ -204,7 +205,7 @@ var _ = Describe("Server", func() {
 		Context("when MINING_TIMEOUT environment variable is configured", func() {
 			It("aborts mining when timeout expires with real mining", func() {
 				Expect(os.Setenv(MiningTimeoutEnvVar, "15ms")).To(Succeed())
-				consensusEngine = consensus.NewProofOfWork(10)
+				consensusEngine = pow.NewProofOfWork(10)
 				DeferCleanup(func() {
 					Expect(os.Unsetenv(MiningTimeoutEnvVar)).To(Succeed())
 				})
@@ -257,7 +258,7 @@ var _ = Describe("Server", func() {
 		payload := `{"Transactions":[{"From":"alice","To":"bob","Amount":42,"Fee":1,"Nonce":0}]}`
 
 		It("returns 422 block_too_large when transactions exceed the limit", func() {
-			GinkgoT().Setenv(models.MaxBlockBytesEnvVar, "100")
+			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "100")
 			rec := post(payload)
 
 			Expect(rec.Code).To(Equal(http.StatusUnprocessableEntity))
@@ -273,7 +274,7 @@ var _ = Describe("Server", func() {
 		It("returns 422 with the code of a timestamp violation after mining", func() {
 			original := generateBlock
 			DeferCleanup(func() { generateBlock = original })
-			generateBlock = func(ctx context.Context, c consensus.Consensus, oldBlock *models.Block, txs []models.Transaction) (*models.Block, error) {
+			generateBlock = func(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 				b, err := original(ctx, c, oldBlock, txs)
 				if err == nil {
 					b.Timestamp = oldBlock.Timestamp.Add(-time.Second)
@@ -292,7 +293,7 @@ var _ = Describe("Server", func() {
 		It("returns 422 timestamp_too_far_in_future for a far-future block", func() {
 			original := generateBlock
 			DeferCleanup(func() { generateBlock = original })
-			generateBlock = func(ctx context.Context, c consensus.Consensus, oldBlock *models.Block, txs []models.Transaction) (*models.Block, error) {
+			generateBlock = func(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 				b, err := original(ctx, c, oldBlock, txs)
 				if err == nil {
 					b.Timestamp = time.Now().Add(3 * time.Hour)
@@ -308,7 +309,7 @@ var _ = Describe("Server", func() {
 		})
 
 		It("returns 413 request_too_large for a giant body", func() {
-			GinkgoT().Setenv(models.MaxBlockBytesEnvVar, "100")
+			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "100")
 			rec := post(`{"Transactions":[{"From":"` + strings.Repeat("a", 1000) + `"}]}`)
 
 			Expect(rec.Code).To(Equal(http.StatusRequestEntityTooLarge))
@@ -364,7 +365,7 @@ var _ = Describe("Server", func() {
 		It("returns 500 with the error message on a generic generator error", func() {
 			originalGenerateBlock := generateBlock
 			DeferCleanup(func() { generateBlock = originalGenerateBlock })
-			generateBlock = func(ctx context.Context, c consensus.Consensus, oldBlock *models.Block, txs []models.Transaction) (*models.Block, error) {
+			generateBlock = func(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 				return nil, errors.New("boom")
 			}
 			initialLen := len(blockchainInstance.Blocks)
@@ -396,7 +397,7 @@ var _ = Describe("Server", func() {
 				Expect(rec.Header().Get("Deprecation")).To(Equal("true"))
 				Expect(rec.Header().Get("Content-Type")).To(Equal("application/json"))
 
-				var createdBlock models.Block
+				var createdBlock domain.Block
 				Expect(json.Unmarshal(rec.Body.Bytes(), &createdBlock)).To(Succeed())
 				Expect(createdBlock.Transactions).To(HaveLen(1))
 				Expect(createdBlock.Transactions[0].From).To(Equal("legacy"))
@@ -448,23 +449,23 @@ var _ = Describe("Server", func() {
 
 	Describe("defaultConsensus", func() {
 		It("returns proof of work using POW_DIFFICULTY", func() {
-			previous, hadPrevious := os.LookupEnv(consensus.DifficultyEnvVar)
-			Expect(os.Setenv(consensus.DifficultyEnvVar, "3")).To(Succeed())
+			previous, hadPrevious := os.LookupEnv(pow.DifficultyEnvVar)
+			Expect(os.Setenv(pow.DifficultyEnvVar, "3")).To(Succeed())
 			DeferCleanup(func() {
 				if hadPrevious {
-					Expect(os.Setenv(consensus.DifficultyEnvVar, previous)).To(Succeed())
+					Expect(os.Setenv(pow.DifficultyEnvVar, previous)).To(Succeed())
 				} else {
-					Expect(os.Unsetenv(consensus.DifficultyEnvVar)).To(Succeed())
+					Expect(os.Unsetenv(pow.DifficultyEnvVar)).To(Succeed())
 				}
 			})
 
-			pow, ok := defaultConsensus().(*consensus.ProofOfWork)
+			pow, ok := defaultConsensus().(*pow.ProofOfWork)
 			Expect(ok).To(BeTrue())
 			Expect(pow.Difficulty).To(Equal(3))
 		})
 
 		It("is installed by Run", func() {
-			for key, value := range map[string]string{"PORT": "not-a-port", consensus.DifficultyEnvVar: "3"} {
+			for key, value := range map[string]string{"PORT": "not-a-port", pow.DifficultyEnvVar: "3"} {
 				previous, hadPrevious := os.LookupEnv(key)
 				Expect(os.Setenv(key, value)).To(Succeed())
 				DeferCleanup(func() {
@@ -479,7 +480,7 @@ var _ = Describe("Server", func() {
 			// An invalid PORT makes ListenAndServe fail at once, after the engine is set.
 			Expect(Run()).To(HaveOccurred())
 
-			pow, ok := consensusEngine.(*consensus.ProofOfWork)
+			pow, ok := consensusEngine.(*pow.ProofOfWork)
 			Expect(ok).To(BeTrue())
 			Expect(pow.Difficulty).To(Equal(3))
 		})
@@ -523,7 +524,7 @@ var _ = Describe("Server", func() {
 
 			go func() {
 				defer GinkgoRecover()
-				_ = RunWithConsensus(consensus.NewProofOfWork(1))
+				_ = RunWithConsensus(pow.NewProofOfWork(1))
 			}()
 
 			Eventually(func() error {
@@ -542,7 +543,7 @@ var _ = Describe("Server", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(resp.StatusCode).To(Equal(http.StatusOK))
-			var bc models.Blockchain
+			var bc domain.Blockchain
 			Expect(json.Unmarshal(body, &bc)).To(Succeed())
 			Expect(bc.Blocks).To(HaveLen(1))
 		})
@@ -572,7 +573,7 @@ var _ = Describe("Server", func() {
 			GinkgoT().Setenv(MiningTimeoutEnvVar, "60s")
 			addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 
-			generateBlock = func(ctx context.Context, c consensus.Consensus, prev *models.Block, txs []models.Transaction) (*models.Block, error) {
+			generateBlock = func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 				handlerStarted.Store(true)
 				defer close(handlerDone)
 				time.Sleep(11 * time.Second)
@@ -581,7 +582,7 @@ var _ = Describe("Server", func() {
 
 			go func() {
 				defer GinkgoRecover()
-				_ = RunWithConsensus(consensus.NewProofOfWork(1))
+				_ = RunWithConsensus(pow.NewProofOfWork(1))
 			}()
 			Eventually(func() error {
 				conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
@@ -627,7 +628,7 @@ var _ = Describe("Server", func() {
 
 			Expect(rec.Code).To(Equal(http.StatusOK))
 			Expect(json.Valid(rec.Body.Bytes())).To(BeTrue())
-			var bc models.Blockchain
+			var bc domain.Blockchain
 			Expect(json.Unmarshal(rec.Body.Bytes(), &bc)).To(Succeed())
 			Expect(bc.Blocks).To(HaveLen(1))
 			Expect(bc.Blocks[0].Index).To(Equal(0))
@@ -645,7 +646,7 @@ var _ = Describe("Server", func() {
 			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 
 			Expect(rec.Code).To(Equal(http.StatusOK))
-			var bc models.Blockchain
+			var bc domain.Blockchain
 			Expect(json.Unmarshal(rec.Body.Bytes(), &bc)).To(Succeed())
 			Expect(bc.Blocks).To(HaveLen(2))
 			Expect(bc.Blocks[1].Index).To(Equal(1))

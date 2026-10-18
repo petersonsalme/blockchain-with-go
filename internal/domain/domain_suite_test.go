@@ -1,4 +1,4 @@
-package blockchain_test
+package domain_test
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func TestBlockchain(t *testing.T) {
+func TestDomain(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Blockchain Suite")
+	RunSpecs(t, "Domain Suite")
 }

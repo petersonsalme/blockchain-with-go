@@ -1,10 +1,10 @@
-package models_test
+package domain_test
 
 import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	. "github.com/petersonsalme/blockchain-with-go/models"
+	. "github.com/petersonsalme/blockchain-with-go/internal/domain"
 )
 
 var _ = Describe("Blockchain", func() {

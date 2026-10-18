@@ -1,4 +1,4 @@
-package models_test
+package domain_test
 
 import (
 	"errors"
@@ -7,25 +7,25 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/petersonsalme/blockchain-with-go/models"
+	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 )
 
 var _ = Describe("Block rules", func() {
 	Describe("MaxBlockBytes", func() {
 		It("returns the default when unset", func() {
-			GinkgoT().Setenv(models.MaxBlockBytesEnvVar, "")
-			Expect(models.MaxBlockBytes()).To(Equal(models.DefaultMaxBlockBytes))
+			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "")
+			Expect(domain.MaxBlockBytes()).To(Equal(domain.DefaultMaxBlockBytes))
 		})
 
 		It("returns the configured value", func() {
-			GinkgoT().Setenv(models.MaxBlockBytesEnvVar, "512")
-			Expect(models.MaxBlockBytes()).To(Equal(512))
+			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "512")
+			Expect(domain.MaxBlockBytes()).To(Equal(512))
 		})
 
 		DescribeTable("falls back to the default for invalid values",
 			func(raw string) {
-				GinkgoT().Setenv(models.MaxBlockBytesEnvVar, raw)
-				Expect(models.MaxBlockBytes()).To(Equal(models.DefaultMaxBlockBytes))
+				GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, raw)
+				Expect(domain.MaxBlockBytes()).To(Equal(domain.DefaultMaxBlockBytes))
 			},
 			Entry("non-numeric", "abc"),
 			Entry("zero", "0"),
@@ -34,29 +34,29 @@ var _ = Describe("Block rules", func() {
 	})
 
 	Describe("ValidateSize", func() {
-		var b *models.Block
+		var b *domain.Block
 		var size int
 
 		BeforeEach(func() {
-			b = &models.Block{Index: 1, Timestamp: time.Now(), Transactions: []models.Transaction{}}
+			b = &domain.Block{Index: 1, Timestamp: time.Now(), Transactions: []domain.Transaction{}}
 			var err error
 			size, err = b.Size()
 			Expect(err).NotTo(HaveOccurred())
 		})
 
 		It("accepts a block exactly at the limit", func() {
-			Expect(models.ValidateSize(b, size)).To(Succeed())
+			Expect(domain.ValidateSize(b, size)).To(Succeed())
 		})
 
 		It("accepts a block one byte under the limit", func() {
-			Expect(models.ValidateSize(b, size+1)).To(Succeed())
+			Expect(domain.ValidateSize(b, size+1)).To(Succeed())
 		})
 
 		It("rejects a block one byte over the limit", func() {
-			err := models.ValidateSize(b, size-1)
-			var ve *models.ValidationError
+			err := domain.ValidateSize(b, size-1)
+			var ve *domain.ValidationError
 			Expect(errors.As(err, &ve)).To(BeTrue())
-			Expect(ve.Code).To(Equal(models.CodeBlockTooLarge))
+			Expect(ve.Code).To(Equal(domain.CodeBlockTooLarge))
 			Expect(ve.Details).To(HaveKeyWithValue("size", size))
 			Expect(ve.Details).To(HaveKeyWithValue("max", size-1))
 		})
@@ -64,10 +64,10 @@ var _ = Describe("Block rules", func() {
 
 	Describe("ValidateTimestamp", func() {
 		now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-		parent := &models.Block{Timestamp: now.Add(-time.Hour)}
+		parent := &domain.Block{Timestamp: now.Add(-time.Hour)}
 
 		check := func(ts time.Time) error {
-			return models.ValidateTimestamp(&models.Block{Timestamp: ts}, parent, now)
+			return domain.ValidateTimestamp(&domain.Block{Timestamp: ts}, parent, now)
 		}
 
 		It("accepts a timestamp equal to the parent's", func() {
@@ -75,36 +75,36 @@ var _ = Describe("Block rules", func() {
 		})
 
 		It("rejects a timestamp 1ns before the parent's", func() {
-			var ve *models.ValidationError
+			var ve *domain.ValidationError
 			Expect(errors.As(check(parent.Timestamp.Add(-time.Nanosecond)), &ve)).To(BeTrue())
-			Expect(ve.Code).To(Equal(models.CodeTimestampBeforeParent))
+			Expect(ve.Code).To(Equal(domain.CodeTimestampBeforeParent))
 			Expect(ve.Details).To(HaveKey("timestamp"))
 		})
 
 		It("accepts now+1h and pins MaxFutureDrift to 2h", func() {
-			Expect(models.MaxFutureDrift).To(Equal(2 * time.Hour))
+			Expect(domain.MaxFutureDrift).To(Equal(2 * time.Hour))
 			Expect(check(now.Add(time.Hour))).To(Succeed())
 		})
 
 		It("accepts exactly now+2h", func() {
-			Expect(check(now.Add(models.MaxFutureDrift))).To(Succeed())
+			Expect(check(now.Add(domain.MaxFutureDrift))).To(Succeed())
 		})
 
 		It("rejects now+2h+1ns", func() {
-			var ve *models.ValidationError
-			Expect(errors.As(check(now.Add(models.MaxFutureDrift+time.Nanosecond)), &ve)).To(BeTrue())
-			Expect(ve.Code).To(Equal(models.CodeTimestampTooFarInTheFuture))
+			var ve *domain.ValidationError
+			Expect(errors.As(check(now.Add(domain.MaxFutureDrift+time.Nanosecond)), &ve)).To(BeTrue())
+			Expect(ve.Code).To(Equal(domain.CodeTimestampTooFarInTheFuture))
 		})
 	})
 
 	Describe("ValidateBlockRules", func() {
 		It("applies the configured size limit", func() {
-			GinkgoT().Setenv(models.MaxBlockBytesEnvVar, "10")
+			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "10")
 			now := time.Now()
-			err := models.ValidateBlockRules(&models.Block{Timestamp: now}, &models.Block{Timestamp: now}, now)
-			var ve *models.ValidationError
+			err := domain.ValidateBlockRules(&domain.Block{Timestamp: now}, &domain.Block{Timestamp: now}, now)
+			var ve *domain.ValidationError
 			Expect(errors.As(err, &ve)).To(BeTrue())
-			Expect(ve.Code).To(Equal(models.CodeBlockTooLarge))
+			Expect(ve.Code).To(Equal(domain.CodeBlockTooLarge))
 		})
 	})
 })
