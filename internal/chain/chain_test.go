@@ -18,33 +18,6 @@ import (
 var _ = Describe("Blockchain", Ordered, func() {
 	pow := powpkg.NewProofOfWork(2)
 
-	Describe("New", func() {
-		var b *domain.Blockchain
-
-		BeforeAll(func() {
-			b = New()
-		})
-
-		It("should create a new instance successfully", func() {
-			Expect(b).NotTo(BeNil())
-		})
-
-		Context("Blocks validation", func() {
-			It("should contains only one block", func() {
-				Expect(b.Blocks).NotTo(BeNil())
-				Expect(b.Blocks).Should(HaveLen(1))
-			})
-
-			It("should be the genesis block", func() {
-				block := b.Blocks[0]
-				Expect(block.Index).To(Equal(0))
-				Expect(block.Timestamp).Should(BeTemporally("~", time.Now(), time.Second))
-				Expect(block.Transactions).To(BeEmpty())
-				Expect(block.PrevHash).To(BeEmpty())
-				Expect(block.Hash).To(BeEmpty())
-			})
-		})
-	})
 	Describe("GenerateBlock", func() {
 		var oldBlock *domain.Block
 		var newBlock *domain.Block
@@ -152,7 +125,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "50")
 			slowPoW := powpkg.NewProofOfWork(8)
 
-			parent := New().LastBlock()
+			parent := genesisBlock()
 			done := make(chan struct{})
 			var (
 				block *domain.Block
@@ -171,7 +144,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 		})
 
 		It("accounts for the 64-character hash placeholder in size estimation before mining", func() {
-			parent := New().LastBlock()
+			parent := genesisBlock()
 			txs := []domain.Transaction{{From: "alice", To: "bob", Amount: 1}}
 
 			spyConsensus := &mockConsensus{}
@@ -270,4 +243,8 @@ func timestampJSONLen(t time.Time) int {
 		return 0
 	}
 	return len(b)
+}
+
+func genesisBlock() *domain.Block {
+	return &domain.Block{Timestamp: time.Now(), Transactions: []domain.Transaction{}}
 }
