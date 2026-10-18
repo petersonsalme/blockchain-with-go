@@ -177,7 +177,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 			spyConsensus := &mockConsensus{}
 
 			tested := false
-			for attempt := 0; attempt < 20; attempt++ {
+			for attempt := 0; attempt < 50; attempt++ {
 				candidate := models.Block{
 					Index:        parent.Index + 1,
 					Timestamp:    time.Now(),
@@ -185,7 +185,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 					PrevHash:     parent.Hash,
 					Hash:         strings.Repeat("0", 64),
 				}
-				if candidate.Timestamp.Nanosecond()%10 == 0 {
+				if timestampJSONLen(candidate.Timestamp) != 37 {
 					time.Sleep(50 * time.Microsecond)
 					continue
 				}
@@ -195,36 +195,43 @@ var _ = Describe("Blockchain", Ordered, func() {
 				// 1) Exactly 1 byte below required size: must reject candidate without mining
 				GinkgoT().Setenv(models.MaxBlockBytesEnvVar, strconv.Itoa(exactSize-1))
 				miningAttempted := false
+				var capturedBlock models.Block
 				spyConsensus.sealFn = func(ctx context.Context, b *models.Block) error {
 					miningAttempted = true
+					capturedBlock = *b
 					return nil
 				}
 
 				block, err := GenerateBlockWithContext(context.Background(), spyConsensus, parent, txs)
 				if miningAttempted {
-					// Under mutant producing fewer than 64 chars (e.g. Repeat("0", 63)), size <= exactSize-1
-					Expect(miningAttempted).To(BeFalse(), "mining should not be attempted when placeholder is 64 chars")
+					// Check if timestamp in GenerateBlockWithContext had trailing zero (shorter JSON length)
+					if timestampJSONLen(capturedBlock.Timestamp) < 37 {
+						time.Sleep(50 * time.Microsecond)
+						continue
+					}
+					// Under mutant producing fewer than 64 chars (e.g. Repeat("0", 63)), mining is incorrectly attempted
+					Expect(miningAttempted).To(BeFalse())
 				}
 
 				Expect(block).To(BeNil())
 				var ve *models.ValidationError
 				Expect(errors.As(err, &ve)).To(BeTrue())
-				Expect(ve.Code).To(Equal(models.CodeBlockTooLarge))
 
-				if ve.Details["size"].(int) != exactSize {
+				// If estimate size is smaller than exactSize, timestamp had trailing zeroes: retry
+				if ve.Details["size"].(int) < exactSize {
 					time.Sleep(50 * time.Microsecond)
 					continue
 				}
+
+				// If estimate size is greater than exactSize, mutant produced > 64 chars: must fail
+				Expect(ve.Details["size"].(int)).To(Equal(exactSize))
+				Expect(ve.Code).To(Equal(models.CodeBlockTooLarge))
 
 				// 2) Exact size: must accept candidate and invoke consensus seal
 				GinkgoT().Setenv(models.MaxBlockBytesEnvVar, strconv.Itoa(exactSize))
 				miningAttempted = false
 				block, err = GenerateBlockWithContext(context.Background(), spyConsensus, parent, txs)
-				if err != nil {
-					// Under mutant producing more than 64 chars (e.g. Repeat("0", 70)), size > exactSize
-					Expect(err).NotTo(HaveOccurred(), "candidate should be accepted when limit equals exactSize with 64-char hash")
-				}
-
+				Expect(err).NotTo(HaveOccurred())
 				Expect(block).NotTo(BeNil())
 				Expect(miningAttempted).To(BeTrue())
 				tested = true
@@ -252,4 +259,12 @@ func (m *mockConsensus) Verify(parent, block *models.Block) error {
 		return m.verifyFn(parent, block)
 	}
 	return nil
+}
+
+func timestampJSONLen(t time.Time) int {
+	b, err := t.MarshalJSON()
+	if err != nil {
+		return 0
+	}
+	return len(b)
 }
