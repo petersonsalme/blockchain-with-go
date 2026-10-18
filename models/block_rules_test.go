@@ -81,6 +81,11 @@ var _ = Describe("Block rules", func() {
 			Expect(ve.Details).To(HaveKey("timestamp"))
 		})
 
+		It("accepts now+1h and pins MaxFutureDrift to 2h", func() {
+			Expect(models.MaxFutureDrift).To(Equal(2 * time.Hour))
+			Expect(check(now.Add(time.Hour))).To(Succeed())
+		})
+
 		It("accepts exactly now+2h", func() {
 			Expect(check(now.Add(models.MaxFutureDrift))).To(Succeed())
 		})
