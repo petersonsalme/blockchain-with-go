@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -55,7 +56,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 				Timestamp:    time.Now(),
 				Transactions: []models.Transaction{},
 				PrevHash:     "",
-				Hash:         "",
+				Hash:         strings.Repeat("a", 64),
 			}
 			sampleTxs = []models.Transaction{
 				{From: "alice", To: "bob", Amount: 10, Fee: 1, Nonce: 0},
@@ -107,7 +108,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 				Timestamp:    time.Now(),
 				Transactions: []models.Transaction{},
 				PrevHash:     "",
-				Hash:         "",
+				Hash:         strings.Repeat("a", 64),
 			}
 			sampleTxs = []models.Transaction{
 				{From: "alice", To: "bob", Amount: 10, Fee: 1, Nonce: 0},
@@ -173,35 +174,63 @@ var _ = Describe("Blockchain", Ordered, func() {
 			parent := New().LastBlock()
 			txs := []models.Transaction{{From: "alice", To: "bob", Amount: 1}}
 
-			candidate := models.Block{
-				Index:        parent.Index + 1,
-				Timestamp:    time.Now(),
-				Transactions: txs,
-				PrevHash:     parent.Hash,
-				Hash:         "",
-			}
-			sizeWithoutHash, err := candidate.Size()
-			Expect(err).NotTo(HaveOccurred())
+			spyConsensus := &mockConsensus{}
 
-			// Allow size without hash (+ 10 bytes margin), but reject when 64-char hash placeholder is added
-			threshold := sizeWithoutHash + 10
-			GinkgoT().Setenv(models.MaxBlockBytesEnvVar, strconv.Itoa(threshold))
+			tested := false
+			for attempt := 0; attempt < 20; attempt++ {
+				candidate := models.Block{
+					Index:        parent.Index + 1,
+					Timestamp:    time.Now(),
+					Transactions: txs,
+					PrevHash:     parent.Hash,
+					Hash:         strings.Repeat("0", 64),
+				}
+				if candidate.Timestamp.Nanosecond()%10 == 0 {
+					time.Sleep(50 * time.Microsecond)
+					continue
+				}
+				exactSize, err := candidate.Size()
+				Expect(err).NotTo(HaveOccurred())
 
-			miningAttempted := false
-			spyConsensus := &mockConsensus{
-				sealFn: func(ctx context.Context, b *models.Block) error {
+				// 1) Exactly 1 byte below required size: must reject candidate without mining
+				GinkgoT().Setenv(models.MaxBlockBytesEnvVar, strconv.Itoa(exactSize-1))
+				miningAttempted := false
+				spyConsensus.sealFn = func(ctx context.Context, b *models.Block) error {
 					miningAttempted = true
 					return nil
-				},
+				}
+
+				block, err := GenerateBlockWithContext(context.Background(), spyConsensus, parent, txs)
+				if miningAttempted {
+					// Under mutant producing fewer than 64 chars (e.g. Repeat("0", 63)), size <= exactSize-1
+					Expect(miningAttempted).To(BeFalse(), "mining should not be attempted when placeholder is 64 chars")
+				}
+
+				Expect(block).To(BeNil())
+				var ve *models.ValidationError
+				Expect(errors.As(err, &ve)).To(BeTrue())
+				Expect(ve.Code).To(Equal(models.CodeBlockTooLarge))
+
+				if ve.Details["size"].(int) != exactSize {
+					time.Sleep(50 * time.Microsecond)
+					continue
+				}
+
+				// 2) Exact size: must accept candidate and invoke consensus seal
+				GinkgoT().Setenv(models.MaxBlockBytesEnvVar, strconv.Itoa(exactSize))
+				miningAttempted = false
+				block, err = GenerateBlockWithContext(context.Background(), spyConsensus, parent, txs)
+				if err != nil {
+					// Under mutant producing more than 64 chars (e.g. Repeat("0", 70)), size > exactSize
+					Expect(err).NotTo(HaveOccurred(), "candidate should be accepted when limit equals exactSize with 64-char hash")
+				}
+
+				Expect(block).NotTo(BeNil())
+				Expect(miningAttempted).To(BeTrue())
+				tested = true
+				break
 			}
-
-			block, err := GenerateBlockWithContext(context.Background(), spyConsensus, parent, txs)
-			Expect(block).To(BeNil())
-			Expect(miningAttempted).To(BeFalse())
-
-			var ve *models.ValidationError
-			Expect(errors.As(err, &ve)).To(BeTrue())
-			Expect(ve.Code).To(Equal(models.CodeBlockTooLarge))
+			Expect(tested).To(BeTrue())
 		})
 	})
 })
