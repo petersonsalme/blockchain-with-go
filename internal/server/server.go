@@ -13,9 +13,10 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/petersonsalme/blockchain-with-go/blockchain"
-	"github.com/petersonsalme/blockchain-with-go/consensus"
-	"github.com/petersonsalme/blockchain-with-go/models"
+	"github.com/petersonsalme/blockchain-with-go/internal/chain"
+	"github.com/petersonsalme/blockchain-with-go/internal/consensus"
+	"github.com/petersonsalme/blockchain-with-go/internal/consensus/pow"
+	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 )
 
 // DefaultMiningTimeout is the default duration allowed for block mining before timing out.
@@ -24,9 +25,9 @@ const DefaultMiningTimeout = 10 * time.Second
 // MiningTimeoutEnvVar overrides DefaultMiningTimeout when set.
 const MiningTimeoutEnvVar = "MINING_TIMEOUT"
 
-var blockchainInstance *models.Blockchain
+var blockchainInstance *domain.Blockchain
 var consensusEngine consensus.Consensus
-var generateBlock = blockchain.GenerateBlockWithContext
+var generateBlock = chain.GenerateBlockWithContext
 
 type errorResponse struct {
 	Error   string         `json:"error"`
@@ -39,10 +40,10 @@ const requestTooLargeCode = "request_too_large"
 
 // maxRequestBodyBytes allows headroom over MaxBlockBytes() for JSON overhead of the request.
 func maxRequestBodyBytes() int64 {
-	return 2 * int64(models.MaxBlockBytes())
+	return 2 * int64(domain.MaxBlockBytes())
 }
 
-func respondWithValidationError(w http.ResponseWriter, r *http.Request, err *models.ValidationError) {
+func respondWithValidationError(w http.ResponseWriter, r *http.Request, err *domain.ValidationError) {
 	respondWithJSON(w, r, http.StatusUnprocessableEntity, errorResponse{Error: err.Message, Code: err.Code, Details: err.Details})
 }
 
@@ -65,7 +66,7 @@ func miningTimeout() time.Duration {
 
 // defaultConsensus is the engine used by Run: proof of work at POW_DIFFICULTY.
 func defaultConsensus() consensus.Consensus {
-	return consensus.NewProofOfWorkFromEnv()
+	return pow.NewProofOfWorkFromEnv()
 }
 
 func Run() error {
@@ -75,7 +76,7 @@ func Run() error {
 // RunWithConsensus starts the server using c to seal and verify blocks.
 func RunWithConsensus(c consensus.Consensus) error {
 	consensusEngine = c
-	blockchainInstance = blockchain.New()
+	blockchainInstance = chain.New()
 	mux := makeMuxRouter()
 	httpAddr := os.Getenv("PORT")
 	log.Println("Listening on ", httpAddr)
@@ -123,13 +124,13 @@ func handleGetBlockchain(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, string(bytes))
 }
 
-func mineAndAddBlock(w http.ResponseWriter, r *http.Request, txs []models.Transaction) {
+func mineAndAddBlock(w http.ResponseWriter, r *http.Request, txs []domain.Transaction) {
 	ctx, cancel := context.WithTimeout(r.Context(), miningTimeout())
 	defer cancel()
 
 	newBlock, err := generateBlock(ctx, consensusEngine, blockchainInstance.LastBlock(), txs)
 	if err != nil {
-		var validationErr *models.ValidationError
+		var validationErr *domain.ValidationError
 		if errors.As(err, &validationErr) {
 			respondWithValidationError(w, r, validationErr)
 			return
@@ -147,8 +148,8 @@ func mineAndAddBlock(w http.ResponseWriter, r *http.Request, txs []models.Transa
 	}
 
 	if newBlock != nil {
-		if err := models.ValidateBlockRules(newBlock, blockchainInstance.LastBlock(), time.Now()); err != nil {
-			var validationErr *models.ValidationError
+		if err := domain.ValidateBlockRules(newBlock, blockchainInstance.LastBlock(), time.Now()); err != nil {
+			var validationErr *domain.ValidationError
 			if errors.As(err, &validationErr) {
 				respondWithValidationError(w, r, validationErr)
 				return
@@ -172,7 +173,7 @@ func mineAndAddBlock(w http.ResponseWriter, r *http.Request, txs []models.Transa
 func handleWriteBlock(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
-	var m models.Message
+	var m Message
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes())
 	decoder := json.NewDecoder(r.Body)
@@ -216,7 +217,7 @@ func handleLegacyBPM(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Deprecation", "true")
 
-	var m models.LegacyMessage
+	var m LegacyMessage
 
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&m); err != nil {
@@ -229,7 +230,7 @@ func handleLegacyBPM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx := models.Transaction{
+	tx := domain.Transaction{
 		From:      "legacy",
 		To:        "legacy",
 		Amount:    uint64(m.BPM),
@@ -237,5 +238,5 @@ func handleLegacyBPM(w http.ResponseWriter, r *http.Request) {
 	}
 	tx.ID = tx.CalculateHash()
 
-	mineAndAddBlock(w, r, []models.Transaction{tx})
+	mineAndAddBlock(w, r, []domain.Transaction{tx})
 }

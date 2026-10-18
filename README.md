@@ -52,17 +52,46 @@ The application can be configured via environment variables (e.g., in a `.env` f
 | `MINING_TIMEOUT` | Maximum duration allowed for mining a block (e.g., `10s`, `500ms`, or integer seconds) | `10s` |
 | `MAX_BLOCK_BYTES` | Maximum JSON-serialized block size in bytes (positive integer; invalid values fall back to the default) | `1048576` |
 
+## Project Structure
+
+```
+blockchain-with-go/
+├── cmd/
+│   └── node/          # Node binary entrypoint (main.go)
+├── internal/
+│   ├── chain/         # Chain state, block generation and validation
+│   ├── consensus/     # Consensus port interface and errors
+│   │   └── pow/       # Proof of Work implementation
+│   ├── domain/        # Domain entities (Block, Transaction, Blockchain, rules)
+│   └── server/        # HTTP REST API server, handlers and DTOs (gorilla/mux)
+├── pkg/
+│   └── wallet/        # Cryptographic wallet (Ed25519), addresses, and keystore
+├── go.mod             # Go module definition
+└── README.md          # Project documentation
+```
+
 ## Running Locally
 
-Install dependencies and run:
+Build the node binary:
 ```shell
-$ go run main.go
+$ go build -o /dev/null ./cmd/node
+```
+
+Run the node:
+```shell
+$ go run ./cmd/node
 ```
 
 To run test suites:
 ```shell
 $ go test -v ./...
 $ go test -race ./...
+```
+
+Mutation testing (gremlins v0.6.0) per package:
+```shell
+$ go clean -testcache
+$ go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --timeout-coefficient 20 ./internal/<pacote>
 ```
 
 ## API Calls

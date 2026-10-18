@@ -1,4 +1,4 @@
-package models_test
+package domain_test
 
 import (
 	"time"
@@ -6,15 +6,15 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/petersonsalme/blockchain-with-go/models"
+	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 )
 
 var _ = Describe("Transaction", func() {
-	var baseTx models.Transaction
+	var baseTx domain.Transaction
 	fixedTime := time.Date(2026, 10, 16, 20, 0, 0, 123456000, time.UTC)
 
 	BeforeEach(func() {
-		baseTx = models.Transaction{
+		baseTx = domain.Transaction{
 			ID:        "",
 			From:      "alice",
 			To:        "bob",
@@ -104,7 +104,7 @@ var _ = Describe("Transaction", func() {
 		})
 
 		It("returns empty string when called on nil", func() {
-			var nilTx *models.Transaction
+			var nilTx *domain.Transaction
 			Expect(nilTx.CalculateHash()).To(BeEmpty())
 		})
 	})
@@ -122,37 +122,37 @@ var _ = Describe("Transaction", func() {
 		It("fails when From is empty", func() {
 			baseTx.From = ""
 			err := baseTx.Validate()
-			Expect(err).To(MatchError(models.ErrEmptyFrom))
+			Expect(err).To(MatchError(domain.ErrEmptyFrom))
 		})
 
 		It("fails when To is empty", func() {
 			baseTx.To = ""
 			err := baseTx.Validate()
-			Expect(err).To(MatchError(models.ErrEmptyTo))
+			Expect(err).To(MatchError(domain.ErrEmptyTo))
 		})
 
 		It("fails when Amount is zero", func() {
 			baseTx.Amount = 0
 			err := baseTx.Validate()
-			Expect(err).To(MatchError(models.ErrInvalidAmount))
+			Expect(err).To(MatchError(domain.ErrInvalidAmount))
 		})
 
 		It("fails when ID is non-empty and does not match CalculateHash()", func() {
 			baseTx.ID = "tampered-or-divergent-id"
 			err := baseTx.Validate()
-			Expect(err).To(MatchError(models.ErrInvalidID))
+			Expect(err).To(MatchError(domain.ErrInvalidID))
 		})
 
 		It("fails when transaction is nil", func() {
-			var nilTx *models.Transaction
+			var nilTx *domain.Transaction
 			Expect(nilTx.Validate()).To(HaveOccurred())
 		})
 	})
 
 	Describe("TransactionsHash", func() {
 		It("returns the same deterministic hash for nil and empty slices", func() {
-			hashNil := models.TransactionsHash(nil)
-			hashEmpty := models.TransactionsHash([]models.Transaction{})
+			hashNil := domain.TransactionsHash(nil)
+			hashEmpty := domain.TransactionsHash([]domain.Transaction{})
 
 			Expect(hashNil).To(HaveLen(64))
 			Expect(hashEmpty).To(Equal(hashNil))
@@ -164,30 +164,30 @@ var _ = Describe("Transaction", func() {
 			tx2 := baseTx
 			tx2.Nonce = 2
 
-			order1 := models.TransactionsHash([]models.Transaction{tx1, tx2})
-			order2 := models.TransactionsHash([]models.Transaction{tx2, tx1})
+			order1 := domain.TransactionsHash([]domain.Transaction{tx1, tx2})
+			order2 := domain.TransactionsHash([]domain.Transaction{tx2, tx1})
 
 			Expect(order1).NotTo(Equal(order2))
 		})
 
 		It("is sensitive to transaction content", func() {
 			tx1 := baseTx
-			hashOriginal := models.TransactionsHash([]models.Transaction{tx1})
+			hashOriginal := domain.TransactionsHash([]domain.Transaction{tx1})
 
 			txModified := baseTx
 			txModified.Amount = 999
-			hashModified := models.TransactionsHash([]models.Transaction{txModified})
+			hashModified := domain.TransactionsHash([]domain.Transaction{txModified})
 
 			Expect(hashModified).NotTo(Equal(hashOriginal))
 		})
 
 		It("is sensitive to transaction signature", func() {
 			tx1 := baseTx
-			hashOriginal := models.TransactionsHash([]models.Transaction{tx1})
+			hashOriginal := domain.TransactionsHash([]domain.Transaction{tx1})
 
 			txModified := baseTx
 			txModified.Signature = "modified-signature"
-			hashModified := models.TransactionsHash([]models.Transaction{txModified})
+			hashModified := domain.TransactionsHash([]domain.Transaction{txModified})
 
 			Expect(hashModified).NotTo(Equal(hashOriginal))
 		})

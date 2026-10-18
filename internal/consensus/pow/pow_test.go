@@ -1,4 +1,4 @@
-package consensus_test
+package pow_test
 
 import (
 	"context"
@@ -10,30 +10,31 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/petersonsalme/blockchain-with-go/blockchain"
-	"github.com/petersonsalme/blockchain-with-go/consensus"
-	"github.com/petersonsalme/blockchain-with-go/models"
+	"github.com/petersonsalme/blockchain-with-go/internal/chain"
+	"github.com/petersonsalme/blockchain-with-go/internal/consensus"
+	powpkg "github.com/petersonsalme/blockchain-with-go/internal/consensus/pow"
+	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 )
 
 // pinDifficultyEnv sets POW_DIFFICULTY for the current spec (an empty value
 // unsets it) and restores the previous value afterwards.
 func pinDifficultyEnv(value string) {
-	previous, existed := os.LookupEnv(consensus.DifficultyEnvVar)
+	previous, existed := os.LookupEnv(powpkg.DifficultyEnvVar)
 	DeferCleanup(func() {
 		if existed {
-			Expect(os.Setenv(consensus.DifficultyEnvVar, previous)).To(Succeed())
+			Expect(os.Setenv(powpkg.DifficultyEnvVar, previous)).To(Succeed())
 			return
 		}
 
-		Expect(os.Unsetenv(consensus.DifficultyEnvVar)).To(Succeed())
+		Expect(os.Unsetenv(powpkg.DifficultyEnvVar)).To(Succeed())
 	})
 
 	if value == "" {
-		Expect(os.Unsetenv(consensus.DifficultyEnvVar)).To(Succeed())
+		Expect(os.Unsetenv(powpkg.DifficultyEnvVar)).To(Succeed())
 		return
 	}
 
-	Expect(os.Setenv(consensus.DifficultyEnvVar, value)).To(Succeed())
+	Expect(os.Setenv(powpkg.DifficultyEnvVar, value)).To(Succeed())
 }
 
 // mineAsync runs mine in a goroutine and fails the spec if it does not return
@@ -47,23 +48,23 @@ func mineAsync(mine func() error) error {
 	return err
 }
 
-var _ consensus.Consensus = (*consensus.ProofOfWork)(nil)
+var _ consensus.Consensus = (*powpkg.ProofOfWork)(nil)
 
 var _ = Describe("ProofOfWork", func() {
 	Describe("Seal", func() {
-		var b *models.Block
+		var b *domain.Block
 
 		BeforeEach(func() {
-			b = &models.Block{
+			b = &domain.Block{
 				Index:        1,
 				Timestamp:    time.Date(2021, 8, 15, 14, 30, 45, 100, time.UTC),
-				Transactions: []models.Transaction{{From: "alice", To: "bob", Amount: 10}},
+				Transactions: []domain.Transaction{{From: "alice", To: "bob", Amount: 10}},
 				PrevHash:     "123",
 			}
 		})
 
 		It("should fill nonce, difficulty and hash", func() {
-			Expect(consensus.NewProofOfWork(2).Seal(context.Background(), b)).To(Succeed())
+			Expect(powpkg.NewProofOfWork(2).Seal(context.Background(), b)).To(Succeed())
 
 			Expect(b.Difficulty).To(Equal(2))
 			Expect(b.Hash).To(HavePrefix("00"))
@@ -74,7 +75,7 @@ var _ = Describe("ProofOfWork", func() {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 
-			err := consensus.NewProofOfWork(0).Seal(ctx, b)
+			err := powpkg.NewProofOfWork(0).Seal(ctx, b)
 			Expect(errors.Is(err, context.Canceled)).To(BeTrue())
 			Expect(b.Hash).To(BeEmpty())
 		})
@@ -83,7 +84,7 @@ var _ = Describe("ProofOfWork", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 			defer cancel()
 
-			err := mineAsync(func() error { return consensus.NewProofOfWork(12).Seal(ctx, b) })
+			err := mineAsync(func() error { return powpkg.NewProofOfWork(12).Seal(ctx, b) })
 			Expect(errors.Is(err, context.DeadlineExceeded)).To(BeTrue())
 			Expect(b.Hash).To(BeEmpty())
 		})
@@ -91,49 +92,49 @@ var _ = Describe("ProofOfWork", func() {
 	Describe("NewProofOfWorkFromEnv", func() {
 		It("should use the difficulty from the environment", func() {
 			pinDifficultyEnv("3")
-			Expect(consensus.NewProofOfWorkFromEnv().Difficulty).To(Equal(3))
+			Expect(powpkg.NewProofOfWorkFromEnv().Difficulty).To(Equal(3))
 		})
 	})
 	Describe("DifficultyFromEnv", func() {
 		When("the environment variable isn't set", func() {
 			It("should return the default difficulty", func() {
 				pinDifficultyEnv("")
-				Expect(consensus.DifficultyFromEnv()).To(Equal(consensus.DefaultDifficulty))
+				Expect(powpkg.DifficultyFromEnv()).To(Equal(powpkg.DefaultDifficulty))
 			})
 		})
 
 		When("the environment variable is set", func() {
 			It("should return the configured difficulty", func() {
 				pinDifficultyEnv("3")
-				Expect(consensus.DifficultyFromEnv()).To(Equal(3))
+				Expect(powpkg.DifficultyFromEnv()).To(Equal(3))
 			})
 		})
 
 		When("the environment variable is zero", func() {
 			It("should return zero instead of the default difficulty", func() {
 				pinDifficultyEnv("0")
-				Expect(consensus.DifficultyFromEnv()).To(Equal(0))
+				Expect(powpkg.DifficultyFromEnv()).To(Equal(0))
 			})
 		})
 
 		When("the environment variable isn't a valid difficulty", func() {
 			It("should return the default difficulty", func() {
 				pinDifficultyEnv("abc")
-				Expect(consensus.DifficultyFromEnv()).To(Equal(consensus.DefaultDifficulty))
+				Expect(powpkg.DifficultyFromEnv()).To(Equal(powpkg.DefaultDifficulty))
 
-				Expect(os.Setenv(consensus.DifficultyEnvVar, "-1")).To(Succeed())
-				Expect(consensus.DifficultyFromEnv()).To(Equal(consensus.DefaultDifficulty))
+				Expect(os.Setenv(powpkg.DifficultyEnvVar, "-1")).To(Succeed())
+				Expect(powpkg.DifficultyFromEnv()).To(Equal(powpkg.DefaultDifficulty))
 			})
 		})
 	})
 	Describe("MineWithContext (background context)", func() {
-		var b *models.Block
+		var b *domain.Block
 
 		BeforeEach(func() {
-			b = &models.Block{
+			b = &domain.Block{
 				Index:     1,
 				Timestamp: time.Date(2021, 8, 15, 14, 30, 45, 100, time.UTC),
-				Transactions: []models.Transaction{
+				Transactions: []domain.Transaction{
 					{From: "alice", To: "bob", Amount: 10, Signature: "sig1"},
 				},
 				PrevHash: "123",
@@ -141,7 +142,7 @@ var _ = Describe("ProofOfWork", func() {
 		})
 
 		It("should find a hash with the required leading zeros", func() {
-			Expect(consensus.MineWithContext(context.Background(), b, 3)).To(Succeed())
+			Expect(powpkg.MineWithContext(context.Background(), b, 3)).To(Succeed())
 
 			Expect(b.Difficulty).To(Equal(3))
 			Expect(b.Hash).To(HavePrefix("000"))
@@ -150,7 +151,7 @@ var _ = Describe("ProofOfWork", func() {
 		})
 
 		It("should keep the nonce that solved the proof of work", func() {
-			Expect(consensus.MineWithContext(context.Background(), b, 2)).To(Succeed())
+			Expect(powpkg.MineWithContext(context.Background(), b, 2)).To(Succeed())
 			solved := b.Hash
 
 			b.Nonce--
@@ -158,7 +159,7 @@ var _ = Describe("ProofOfWork", func() {
 		})
 
 		It("should treat a negative difficulty as zero", func() {
-			Expect(consensus.MineWithContext(context.Background(), b, -1)).To(Succeed())
+			Expect(powpkg.MineWithContext(context.Background(), b, -1)).To(Succeed())
 
 			Expect(b.Difficulty).To(Equal(0))
 			Expect(b.Nonce).To(Equal(0))
@@ -166,13 +167,13 @@ var _ = Describe("ProofOfWork", func() {
 		})
 	})
 	Describe("MineWithContext", func() {
-		var b *models.Block
+		var b *domain.Block
 
 		BeforeEach(func() {
-			b = &models.Block{
+			b = &domain.Block{
 				Index:     1,
 				Timestamp: time.Date(2021, 8, 15, 14, 30, 45, 100, time.UTC),
-				Transactions: []models.Transaction{
+				Transactions: []domain.Transaction{
 					{From: "alice", To: "bob", Amount: 10, Signature: "sig1"},
 				},
 				PrevHash: "123",
@@ -180,7 +181,7 @@ var _ = Describe("ProofOfWork", func() {
 		})
 
 		It("should find a hash with the required leading zeros and return nil error", func() {
-			err := consensus.MineWithContext(context.Background(), b, 2)
+			err := powpkg.MineWithContext(context.Background(), b, 2)
 
 			Expect(err).NotTo(HaveOccurred())
 			Expect(b.Difficulty).To(Equal(2))
@@ -190,7 +191,7 @@ var _ = Describe("ProofOfWork", func() {
 		})
 
 		It("should treat a negative difficulty as zero", func() {
-			err := consensus.MineWithContext(context.Background(), b, -1)
+			err := powpkg.MineWithContext(context.Background(), b, -1)
 
 			Expect(err).NotTo(HaveOccurred())
 			Expect(b.Difficulty).To(Equal(0))
@@ -199,7 +200,7 @@ var _ = Describe("ProofOfWork", func() {
 		})
 
 		It("should return the smallest non-negative nonce that solves the difficulty", func() {
-			Expect(consensus.MineWithContext(context.Background(), b, 2)).To(Succeed())
+			Expect(powpkg.MineWithContext(context.Background(), b, 2)).To(Succeed())
 
 			Expect(b.Nonce).To(BeNumerically(">", 0))
 
@@ -211,7 +212,7 @@ var _ = Describe("ProofOfWork", func() {
 		})
 
 		It("should handle a nil context gracefully", func() {
-			err := consensus.MineWithContext(nil, b, 1)
+			err := powpkg.MineWithContext(nil, b, 1)
 
 			Expect(err).NotTo(HaveOccurred())
 			Expect(b.Difficulty).To(Equal(1))
@@ -223,7 +224,7 @@ var _ = Describe("ProofOfWork", func() {
 				ctx, cancel := context.WithCancel(context.Background())
 				cancel()
 
-				err := consensus.MineWithContext(ctx, b, 0)
+				err := powpkg.MineWithContext(ctx, b, 0)
 
 				Expect(err).To(MatchError(context.Canceled))
 				Expect(b.Hash).To(BeEmpty())
@@ -235,7 +236,7 @@ var _ = Describe("ProofOfWork", func() {
 				ctx, cancel := context.WithCancel(context.Background())
 				cancel()
 
-				err := consensus.MineWithContext(ctx, b, 0)
+				err := powpkg.MineWithContext(ctx, b, 0)
 
 				Expect(err).To(MatchError(context.Canceled))
 				Expect(b.Hash).To(BeEmpty())
@@ -252,7 +253,7 @@ var _ = Describe("ProofOfWork", func() {
 				}()
 
 				// Use high difficulty so mining will not finish before cancel is called
-				err := mineAsync(func() error { return consensus.MineWithContext(ctx, b, 12) })
+				err := mineAsync(func() error { return powpkg.MineWithContext(ctx, b, 12) })
 
 				Expect(err).To(MatchError(context.Canceled))
 				Expect(b.Hash).To(BeEmpty())
@@ -265,7 +266,7 @@ var _ = Describe("ProofOfWork", func() {
 				defer cancel()
 
 				// Use high difficulty so mining will timeout
-				err := mineAsync(func() error { return consensus.MineWithContext(ctx, b, 12) })
+				err := mineAsync(func() error { return powpkg.MineWithContext(ctx, b, 12) })
 
 				Expect(err).To(MatchError(context.DeadlineExceeded))
 				Expect(b.Hash).To(BeEmpty())
@@ -273,22 +274,22 @@ var _ = Describe("ProofOfWork", func() {
 		})
 	})
 	Describe("Verify", func() {
-		var oldBlock, newBlock *models.Block
-		var pow *consensus.ProofOfWork
+		var oldBlock, newBlock *domain.Block
+		var pow *powpkg.ProofOfWork
 
 		BeforeEach(func() {
 			pinDifficultyEnv("2")
-			pow = consensus.NewProofOfWorkFromEnv()
+			pow = powpkg.NewProofOfWorkFromEnv()
 
-			oldBlock = &models.Block{
+			oldBlock = &domain.Block{
 				Index:        0,
 				Timestamp:    time.Date(2021, 8, 15, 14, 30, 45, 100, time.UTC),
-				Transactions: []models.Transaction{},
+				Transactions: []domain.Transaction{},
 				PrevHash:     "123",
 				Hash:         "",
 			}
 
-			newBlock = blockchain.GenerateBlock(pow, oldBlock, []models.Transaction{
+			newBlock = chain.GenerateBlock(pow, oldBlock, []domain.Transaction{
 				{From: "alice", To: "bob", Amount: 10, Signature: "sig1"},
 				{From: "carol", To: "dave", Amount: 20, Signature: "sig2"},
 			})
@@ -358,9 +359,9 @@ var _ = Describe("ProofOfWork", func() {
 
 		When("the block was mined with a difficulty lower than the current one", func() {
 			It("should validate the proof of work against the recorded difficulty", func() {
-				Expect(consensus.MineWithContext(context.Background(), newBlock, consensus.DifficultyFromEnv()-1)).To(Succeed())
+				Expect(powpkg.MineWithContext(context.Background(), newBlock, powpkg.DifficultyFromEnv()-1)).To(Succeed())
 
-				Expect(newBlock.Difficulty).To(Equal(consensus.DifficultyFromEnv() - 1))
+				Expect(newBlock.Difficulty).To(Equal(powpkg.DifficultyFromEnv() - 1))
 				Expect(pow.Verify(oldBlock, newBlock)).To(Succeed())
 			})
 		})
@@ -430,7 +431,7 @@ var _ = Describe("ProofOfWork", func() {
 
 		When("a transaction is added after mining", func() {
 			It("should return false", func() {
-				newBlock.Transactions = append(newBlock.Transactions, models.Transaction{
+				newBlock.Transactions = append(newBlock.Transactions, domain.Transaction{
 					From:   "eve",
 					To:     "frank",
 					Amount: 30,

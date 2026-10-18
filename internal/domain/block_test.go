@@ -1,4 +1,4 @@
-package models_test
+package domain_test
 
 import (
 	"time"
@@ -6,18 +6,18 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/petersonsalme/blockchain-with-go/models"
+	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 )
 
 var _ = Describe("Block", func() {
 	Describe("CalculateHash", func() {
-		var b *models.Block
+		var b *domain.Block
 
 		BeforeEach(func() {
-			b = &models.Block{
+			b = &domain.Block{
 				Index:        0,
 				Timestamp:    time.Date(2021, 8, 15, 14, 30, 45, 100, time.UTC),
-				Transactions: []models.Transaction{},
+				Transactions: []domain.Transaction{},
 				PrevHash:     "123",
 				Hash:         "",
 			}

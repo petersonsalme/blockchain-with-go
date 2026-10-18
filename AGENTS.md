@@ -12,13 +12,18 @@ Implementação didática de blockchain em Go com validação de blocos, hashing
 
 ```
 blockchain-with-go/
-├── main.go         # Inicialização do servidor e porta HTTP
-├── blockchain/     # Regras de cadeia, blocos e validação
-├── consensus/      # Interface Consensus e implementação ProofOfWork
-├── models/         # Estruturas de dados (Block, Message, etc.)
-├── server/         # Handlers e rotas HTTP (gorilla/mux)
-├── go.mod          # Módulo Go e dependências
-└── README.md       # Documentação do projeto e instruções de execução
+├── cmd/
+│   └── node/          # Ponto de entrada da aplicação (main.go)
+├── internal/
+│   ├── chain/         # Regras de cadeia, blocos e geração de blocos
+│   ├── consensus/     # Interface Consensus e erros
+│   │   └── pow/       # Implementação Proof of Work
+│   ├── domain/        # Modelos de domínio (Block, Transaction, Blockchain, regras)
+│   └── server/        # Handlers, rotas HTTP e DTOs (gorilla/mux)
+├── pkg/
+│   └── wallet/        # Chaves Ed25519, endereçamento e keystore
+├── go.mod             # Módulo Go e dependências
+└── README.md          # Documentação do projeto e instruções de execução
 ```
 
 ## Regras e Comandos
@@ -26,9 +31,10 @@ blockchain-with-go/
 1. **Validação e Testes:**
    - Executar testes e checagem de tipos: `go test ./...`
    - Formatação padrão de Go: `gofmt -s -w .` ou `goimports`
-   - Verificação de compilação: `go build -o /dev/null .`
+   - Verificação de compilação: `go build -o /dev/null ./cmd/node`
+   - Execução local do nó: `go run ./cmd/node`
    - Teste de mutação (gremlins v0.6.0) — duas formas suportadas:
-     - Por pacote: `go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --timeout-coefficient 20 ./<pacote>`
+     - Por pacote: `go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --timeout-coefficient 20 ./internal/<pacote>` (ou `./pkg/wallet`)
      - Por diff: `go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --timeout-coefficient 20 --diff <base>` (executado na raiz e **sem** pacote)
      - **Regra de execução:** nunca combinar `--diff` com um caminho de pacote (gera falso verde com todos os mutantes marcados como `Skipped`). Se `Skipped` for igual ao total, o resultado é inválido. Mutações com status `TIMED OUT` **não** contam como mortas: o gremlins não as classificou. Rode `go clean -testcache` e repita antes de aceitar o resultado. Com o cache de testes ativo, a rodada de cobertura leva milissegundos, o limite de tempo fica minúsculo e quase todo mutante vira `TIMED OUT` (falso verde).
      - **Resultados não são gravados no repositório:** cole a saída do gremlins no comentário da issue e na descrição do PR. Não crie nem atualize arquivos em `docs/` para registrá-la.

@@ -1,4 +1,4 @@
-package models
+package domain
 
 import (
 	"encoding/json"
@@ -16,24 +16,6 @@ const MaxBlockBytesEnvVar = "MAX_BLOCK_BYTES"
 
 // MaxFutureDrift is how far ahead of the current time a block timestamp may be.
 const MaxFutureDrift = 2 * time.Hour
-
-// Validation error codes.
-const (
-	CodeBlockTooLarge              = "block_too_large"
-	CodeTimestampBeforeParent      = "timestamp_before_parent"
-	CodeTimestampTooFarInTheFuture = "timestamp_too_far_in_future"
-)
-
-// ValidationError is a structured, machine-readable block rule violation.
-type ValidationError struct {
-	Code    string
-	Message string
-	Details map[string]any
-}
-
-func (e *ValidationError) Error() string {
-	return fmt.Sprintf("%s: %s", e.Code, e.Message)
-}
 
 // MaxBlockBytes returns the maximum serialized size a block may have.
 func MaxBlockBytes() int {

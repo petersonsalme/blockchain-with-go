@@ -4,7 +4,7 @@ import (
 	"log"
 
 	"github.com/joho/godotenv"
-	"github.com/petersonsalme/blockchain-with-go/server"
+	"github.com/petersonsalme/blockchain-with-go/internal/server"
 )
 
 func main() {

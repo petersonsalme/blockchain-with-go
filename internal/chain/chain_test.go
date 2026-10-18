@@ -1,4 +1,4 @@
-package blockchain_test
+package chain_test
 
 import (
 	"context"
@@ -10,16 +10,16 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	. "github.com/petersonsalme/blockchain-with-go/blockchain"
-	"github.com/petersonsalme/blockchain-with-go/consensus"
-	"github.com/petersonsalme/blockchain-with-go/models"
+	. "github.com/petersonsalme/blockchain-with-go/internal/chain"
+	powpkg "github.com/petersonsalme/blockchain-with-go/internal/consensus/pow"
+	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 )
 
 var _ = Describe("Blockchain", Ordered, func() {
-	pow := consensus.NewProofOfWork(2)
+	pow := powpkg.NewProofOfWork(2)
 
 	Describe("New", func() {
-		var b *models.Blockchain
+		var b *domain.Blockchain
 
 		BeforeAll(func() {
 			b = New()
@@ -46,19 +46,19 @@ var _ = Describe("Blockchain", Ordered, func() {
 		})
 	})
 	Describe("GenerateBlock", func() {
-		var oldBlock *models.Block
-		var newBlock *models.Block
-		var sampleTxs []models.Transaction
+		var oldBlock *domain.Block
+		var newBlock *domain.Block
+		var sampleTxs []domain.Transaction
 
 		BeforeAll(func() {
-			oldBlock = &models.Block{
+			oldBlock = &domain.Block{
 				Index:        0,
 				Timestamp:    time.Now(),
-				Transactions: []models.Transaction{},
+				Transactions: []domain.Transaction{},
 				PrevHash:     "",
 				Hash:         strings.Repeat("a", 64),
 			}
-			sampleTxs = []models.Transaction{
+			sampleTxs = []domain.Transaction{
 				{From: "alice", To: "bob", Amount: 10, Fee: 1, Nonce: 0},
 			}
 		})
@@ -83,14 +83,14 @@ var _ = Describe("Blockchain", Ordered, func() {
 		})
 
 		It("should return nil when generation fails due to size limit", func() {
-			GinkgoT().Setenv(models.MaxBlockBytesEnvVar, "50")
+			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "50")
 			result := GenerateBlock(pow, oldBlock, sampleTxs)
 			Expect(result).To(BeNil())
 		})
 
 		It("should return nil when consensus seal fails", func() {
 			failingConsensus := &mockConsensus{
-				sealFn: func(ctx context.Context, b *models.Block) error {
+				sealFn: func(ctx context.Context, b *domain.Block) error {
 					return errors.New("seal error")
 				},
 			}
@@ -99,18 +99,18 @@ var _ = Describe("Blockchain", Ordered, func() {
 		})
 	})
 	Describe("GenerateBlockWithContext", func() {
-		var oldBlock *models.Block
-		var sampleTxs []models.Transaction
+		var oldBlock *domain.Block
+		var sampleTxs []domain.Transaction
 
 		BeforeAll(func() {
-			oldBlock = &models.Block{
+			oldBlock = &domain.Block{
 				Index:        0,
 				Timestamp:    time.Now(),
-				Transactions: []models.Transaction{},
+				Transactions: []domain.Transaction{},
 				PrevHash:     "",
 				Hash:         strings.Repeat("a", 64),
 			}
-			sampleTxs = []models.Transaction{
+			sampleTxs = []domain.Transaction{
 				{From: "alice", To: "bob", Amount: 10, Fee: 1, Nonce: 0},
 			}
 		})
@@ -137,7 +137,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 
 		It("should return an error when consensus seal fails", func() {
 			failingConsensus := &mockConsensus{
-				sealFn: func(ctx context.Context, b *models.Block) error {
+				sealFn: func(ctx context.Context, b *domain.Block) error {
 					return errors.New("seal error")
 				},
 			}
@@ -149,30 +149,30 @@ var _ = Describe("Blockchain", Ordered, func() {
 
 	Describe("GenerateBlockWithContext size limit", func() {
 		It("returns a ValidationError without mining when the candidate is too large", func() {
-			GinkgoT().Setenv(models.MaxBlockBytesEnvVar, "50")
-			slowPoW := consensus.NewProofOfWork(8)
+			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "50")
+			slowPoW := powpkg.NewProofOfWork(8)
 
 			parent := New().LastBlock()
 			done := make(chan struct{})
 			var (
-				block *models.Block
+				block *domain.Block
 				err   error
 			)
 			go func() {
 				defer close(done)
-				block, err = GenerateBlockWithContext(context.Background(), slowPoW, parent, []models.Transaction{{From: "a", To: "b", Amount: 1}})
+				block, err = GenerateBlockWithContext(context.Background(), slowPoW, parent, []domain.Transaction{{From: "a", To: "b", Amount: 1}})
 			}()
 			Eventually(done, time.Second).Should(BeClosed())
 
 			Expect(block).To(BeNil())
-			var ve *models.ValidationError
+			var ve *domain.ValidationError
 			Expect(errors.As(err, &ve)).To(BeTrue())
-			Expect(ve.Code).To(Equal(models.CodeBlockTooLarge))
+			Expect(ve.Code).To(Equal(domain.CodeBlockTooLarge))
 		})
 
 		It("accounts for the 64-character hash placeholder in size estimation before mining", func() {
 			parent := New().LastBlock()
-			txs := []models.Transaction{{From: "alice", To: "bob", Amount: 1}}
+			txs := []domain.Transaction{{From: "alice", To: "bob", Amount: 1}}
 
 			spyConsensus := &mockConsensus{}
 
@@ -181,7 +181,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 
 			tested := false
 			for attempt := 0; attempt < 100; attempt++ {
-				candidate := models.Block{
+				candidate := domain.Block{
 					Index:        parent.Index + 1,
 					Timestamp:    time.Now(),
 					Transactions: txs,
@@ -196,10 +196,10 @@ var _ = Describe("Blockchain", Ordered, func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				// 1) Exactly 1 byte below required size: must reject candidate without mining
-				GinkgoT().Setenv(models.MaxBlockBytesEnvVar, strconv.Itoa(exactSize-1))
+				GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(exactSize-1))
 				miningAttempted := false
-				var capturedBlock models.Block
-				spyConsensus.sealFn = func(ctx context.Context, b *models.Block) error {
+				var capturedBlock domain.Block
+				spyConsensus.sealFn = func(ctx context.Context, b *domain.Block) error {
 					miningAttempted = true
 					capturedBlock = *b
 					return nil
@@ -217,7 +217,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 				}
 
 				Expect(block).To(BeNil())
-				var ve *models.ValidationError
+				var ve *domain.ValidationError
 				Expect(errors.As(err, &ve)).To(BeTrue())
 
 				// If estimate size is smaller than exactSize, timestamp had trailing zeroes: retry
@@ -228,10 +228,10 @@ var _ = Describe("Blockchain", Ordered, func() {
 
 				// If estimate size is greater than exactSize, mutant produced > 64 chars: must fail
 				Expect(ve.Details["size"].(int)).To(Equal(exactSize))
-				Expect(ve.Code).To(Equal(models.CodeBlockTooLarge))
+				Expect(ve.Code).To(Equal(domain.CodeBlockTooLarge))
 
 				// 2) Exact size: must accept candidate and invoke consensus seal
-				GinkgoT().Setenv(models.MaxBlockBytesEnvVar, strconv.Itoa(exactSize))
+				GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(exactSize))
 				miningAttempted = false
 				block, err = GenerateBlockWithContext(context.Background(), spyConsensus, parent, txs)
 				Expect(err).NotTo(HaveOccurred())
@@ -246,18 +246,18 @@ var _ = Describe("Blockchain", Ordered, func() {
 })
 
 type mockConsensus struct {
-	sealFn   func(ctx context.Context, b *models.Block) error
-	verifyFn func(parent, block *models.Block) error
+	sealFn   func(ctx context.Context, b *domain.Block) error
+	verifyFn func(parent, block *domain.Block) error
 }
 
-func (m *mockConsensus) Seal(ctx context.Context, b *models.Block) error {
+func (m *mockConsensus) Seal(ctx context.Context, b *domain.Block) error {
 	if m.sealFn != nil {
 		return m.sealFn(ctx, b)
 	}
 	return nil
 }
 
-func (m *mockConsensus) Verify(parent, block *models.Block) error {
+func (m *mockConsensus) Verify(parent, block *domain.Block) error {
 	if m.verifyFn != nil {
 		return m.verifyFn(parent, block)
 	}
