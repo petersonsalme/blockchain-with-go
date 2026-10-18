@@ -69,6 +69,11 @@ func (s *Service) Mine(ctx context.Context, txs []domain.Transaction) (*domain.B
 		return nil, ctx.Err()
 	}
 
+	// select picks at random when both cases are ready; do not mine for a dead ctx.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	prev, err := s.repo.Last()
 	if err != nil {
 		return nil, err
