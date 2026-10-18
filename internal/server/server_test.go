@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -260,6 +261,70 @@ var _ = Describe("Server", func() {
 
 				Expect(chainLen()).To(Equal(initialLen))
 			})
+		})
+	})
+
+	Describe("POST / concurrency", func() {
+		payload := `{"Transactions":[{"From":"alice","To":"bob","Amount":42,"Fee":1,"Nonce":0}]}`
+
+		It("serializes concurrent POSTs into a valid chain and answers 201 to all", func() {
+			const n = 12
+			codes := make(chan int, n)
+			var wg sync.WaitGroup
+			for i := 0; i < n; i++ {
+				wg.Add(1)
+				go func() {
+					defer GinkgoRecover()
+					defer wg.Done()
+					req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(payload))
+					rec := httptest.NewRecorder()
+					router.ServeHTTP(rec, req)
+					codes <- rec.Code
+				}()
+			}
+			wg.Wait()
+			close(codes)
+			for code := range codes {
+				Expect(code).To(Equal(http.StatusCreated))
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			Expect(rec.Code).To(Equal(http.StatusOK))
+			var body chainBody
+			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
+			blocks := body.Blocks
+			Expect(blocks).To(HaveLen(n + 1))
+			for i, b := range blocks {
+				Expect(b.Index).To(Equal(i))
+				if i > 0 {
+					Expect(b.PrevHash).To(Equal(blocks[i-1].Hash))
+					Expect(engine.Verify(blocks[i-1], b)).To(Succeed())
+				}
+			}
+		})
+
+		It("returns 409 chain_conflict when another writer extends the chain mid-mining", func() {
+			withGenerator(func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+				rival, err := chain.GenerateBlockWithContext(ctx, c, prev, txs)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(repo.Append(rival)).To(Succeed())
+				return chain.GenerateBlockWithContext(ctx, c, prev, txs)
+			})
+			initialLen := chainLen()
+
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(payload))
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			Expect(rec.Code).To(Equal(http.StatusConflict))
+			Expect(rec.Header().Get("Content-Type")).To(Equal("application/json"))
+			var resp errorResponse
+			Expect(json.Unmarshal(rec.Body.Bytes(), &resp)).To(Succeed())
+			Expect(resp.Code).To(Equal("chain_conflict"))
+			Expect(resp.Error).NotTo(BeEmpty())
+			Expect(chainLen()).To(Equal(initialLen + 1))
 		})
 	})
 

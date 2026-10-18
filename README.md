@@ -216,9 +216,12 @@ Content-Type: application/json
 | `422 Unprocessable Entity` | Generated block failed chain validation | `{"error": "invalid block could not be added"}` |
 | `422 Unprocessable Entity` | Block exceeds `MAX_BLOCK_BYTES` (checked before mining) | `{"error": "...", "code": "block_too_large", "details": {"size": 1200, "max": 1000}}` |
 | `422 Unprocessable Entity` | Block timestamp earlier than its parent or more than 2h in the future | `{"error": "...", "code": "timestamp_before_parent" \| "timestamp_too_far_in_future", "details": {...}}` |
+| `409 Conflict` | Another writer appended a block between reading the chain tip and appending (block no longer extends the tip) | `{"error": "...", "code": "chain_conflict"}` |
 | `413 Request Entity Too Large` | `POST /` body larger than 2× `MAX_BLOCK_BYTES` | `{"error": "...", "code": "request_too_large", "details": {"max": 2000}}` |
 | `504 Gateway Timeout` | Mining exceeded deadline set by `MINING_TIMEOUT` | `{"error": "mining timeout exceeded"}` |
 | `500 Internal Server Error` | Unexpected internal server error | `{"error": "..."}` |
+
+`POST /` requests are serialized: only one block is mined at a time, and the time a request spends waiting for its turn counts against `MINING_TIMEOUT` (so a long queue ends in `504`). `GET /` never waits for mining. The storage port appends a block only if it extends the current tip, which is what yields `409` when a second writer shares the repository.
 
 ## Wallet
 The `wallet` package provides identities based on **Ed25519** keys (`wallet.New`, `wallet.FromSeed`, `Sign`, `wallet.Verify`).

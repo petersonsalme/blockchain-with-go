@@ -3,6 +3,8 @@ package chain_test
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -219,6 +221,129 @@ var _ = Describe("Service", func() {
 			bb, _ := b.Blocks()
 			Expect(ab).To(HaveLen(2))
 			Expect(bb).To(HaveLen(1))
+		})
+
+		It("lets exactly one of two services mining on the same tip append, the other gets ErrConflict", func() {
+			var read sync.WaitGroup
+			read.Add(2)
+			barrier := func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+				read.Done()
+				read.Wait()
+				return GenerateBlockWithContext(ctx, c, prev, txs)
+			}
+			a, err := NewService(repo, eng, WithGenerator(barrier))
+			Expect(err).NotTo(HaveOccurred())
+			b, err := NewService(repo, eng, WithGenerator(barrier))
+			Expect(err).NotTo(HaveOccurred())
+
+			errs := make(chan error, 2)
+			for _, svc := range []*Service{a, b} {
+				go func() {
+					defer GinkgoRecover()
+					_, err := svc.Mine(context.Background(), sampleTx())
+					errs <- err
+				}()
+			}
+			results := []error{<-errs, <-errs}
+
+			failed := 0
+			for _, e := range results {
+				if e != nil {
+					failed++
+					Expect(errors.Is(e, storage.ErrConflict)).To(BeTrue())
+				}
+			}
+			Expect(failed).To(Equal(1))
+
+			all, _ := repo.All()
+			Expect(all).To(HaveLen(2))
+			Expect(eng.Verify(all[0], all[1])).To(Succeed())
+		})
+
+		It("serializes concurrent Mine calls into a valid chain", func() {
+			svc, _ := NewService(repo, eng)
+			const n = 10
+			var wg sync.WaitGroup
+			for i := 0; i < n; i++ {
+				wg.Add(1)
+				go func() {
+					defer GinkgoRecover()
+					defer wg.Done()
+					_, err := svc.Mine(context.Background(), sampleTx())
+					Expect(err).NotTo(HaveOccurred())
+				}()
+			}
+			wg.Wait()
+
+			all, _ := repo.All()
+			Expect(all).To(HaveLen(n + 1))
+			for i := 1; i < len(all); i++ {
+				Expect(all[i].Index).To(Equal(i))
+				Expect(eng.Verify(all[i-1], all[i])).To(Succeed())
+			}
+		})
+
+		Context("while another Mine holds the write lock", func() {
+			var (
+				svc      *Service
+				entered  chan struct{}
+				release  chan struct{}
+				holderCh chan error
+				calls    atomic.Int32
+			)
+
+			BeforeEach(func() {
+				entered = make(chan struct{})
+				release = make(chan struct{})
+				holderCh = make(chan error, 1)
+				calls.Store(0)
+				svc, _ = NewService(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+					if calls.Add(1) == 1 {
+						close(entered)
+						<-release
+					}
+					return GenerateBlockWithContext(ctx, c, prev, txs)
+				}))
+				go func() {
+					defer GinkgoRecover()
+					_, err := svc.Mine(context.Background(), sampleTx())
+					holderCh <- err
+				}()
+				Eventually(entered).Should(BeClosed())
+			})
+
+			AfterEach(func() {
+				select {
+				case <-release:
+				default:
+					close(release)
+				}
+				Eventually(holderCh).Should(Receive())
+			})
+
+			It("returns the context error to a queued Mine without appending", func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+				defer cancel()
+
+				blk, err := svc.Mine(ctx, sampleTx())
+				Expect(blk).To(BeNil())
+				Expect(errors.Is(err, context.DeadlineExceeded)).To(BeTrue())
+				Expect(calls.Load()).To(Equal(int32(1)))
+
+				all, _ := repo.All()
+				Expect(all).To(HaveLen(1))
+			})
+
+			It("does not block Blocks", func() {
+				done := make(chan []*domain.Block, 1)
+				go func() {
+					defer GinkgoRecover()
+					bs, err := svc.Blocks()
+					Expect(err).NotTo(HaveOccurred())
+					done <- bs
+				}()
+				Eventually(done, time.Second).Should(Receive(HaveLen(1)))
+			})
 		})
 	})
 })
