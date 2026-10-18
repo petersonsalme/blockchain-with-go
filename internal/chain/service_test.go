@@ -27,6 +27,11 @@ func (r rejectingConsensus) Seal(ctx context.Context, b *domain.Block) error {
 
 func (rejectingConsensus) Verify(prev, b *domain.Block) error { return errors.New("rejected") }
 
+// errOnlyCtx reports Canceled through Err but never closes Done.
+type errOnlyCtx struct{ context.Context }
+
+func (errOnlyCtx) Err() error { return context.Canceled }
+
 // failingRepo fails Append and Last on demand.
 type failingRepo struct {
 	storage.BlockRepository
@@ -235,10 +240,9 @@ var _ = Describe("Service", func() {
 				called.Store(true)
 				return GenerateBlockWithContext(ctx, c, prev, txs)
 			}))
-			ctx, cancel := context.WithCancel(context.Background())
-			cancel()
-
-			blk, err := svc.Mine(ctx, sampleTx())
+			// Done() never fires, so Mine's select always takes the free
+			// semaphore and only the post-lock ctx.Err() check can stop it.
+			blk, err := svc.Mine(errOnlyCtx{context.Background()}, sampleTx())
 			Expect(blk).To(BeNil())
 			Expect(errors.Is(err, context.Canceled)).To(BeTrue())
 			Expect(called.Load()).To(BeFalse())
