@@ -193,6 +193,59 @@ var _ = Describe("Service", func() {
 			Expect(errors.Is(err, ErrInvalidBlock)).To(BeFalse())
 		})
 
+		DescribeTable("releases the write lock when Mine fails",
+			func(failFirst func(context.Context, consensus.Consensus, *domain.Block, []domain.Transaction) (*domain.Block, error), recoverPanic bool) {
+				var calls atomic.Int32
+				svc, _ := NewService(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+					if calls.Add(1) == 1 {
+						return failFirst(ctx, c, prev, txs)
+					}
+					return GenerateBlockWithContext(ctx, c, prev, txs)
+				}))
+
+				func() {
+					if recoverPanic {
+						defer func() { Expect(recover()).NotTo(BeNil()) }()
+					}
+					_, err := svc.Mine(context.Background(), sampleTx())
+					Expect(recoverPanic).To(BeFalse())
+					Expect(err).To(HaveOccurred())
+				}()
+
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				blk, err := svc.Mine(ctx, sampleTx())
+				Expect(err).NotTo(HaveOccurred())
+				Expect(blk.Index).To(Equal(1))
+
+				all, _ := repo.All()
+				Expect(all).To(HaveLen(2))
+			},
+			Entry("generator error", func(context.Context, consensus.Consensus, *domain.Block, []domain.Transaction) (*domain.Block, error) {
+				return nil, errors.New("boom")
+			}, false),
+			Entry("generator panic", func(context.Context, consensus.Consensus, *domain.Block, []domain.Transaction) (*domain.Block, error) {
+				panic("boom")
+			}, true),
+		)
+
+		It("returns the context error without generating or appending when ctx is already done and the lock is free", func() {
+			var called atomic.Bool
+			svc, _ := NewService(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+				called.Store(true)
+				return GenerateBlockWithContext(ctx, c, prev, txs)
+			}))
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			blk, err := svc.Mine(ctx, sampleTx())
+			Expect(blk).To(BeNil())
+			Expect(errors.Is(err, context.Canceled)).To(BeTrue())
+			Expect(called.Load()).To(BeFalse())
+			all, _ := repo.All()
+			Expect(all).To(HaveLen(1))
+		})
+
 		It("propagates repository Append errors", func() {
 			boom := errors.New("boom")
 			fr := &failingRepo{BlockRepository: repo}
