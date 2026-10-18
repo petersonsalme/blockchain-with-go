@@ -36,6 +36,17 @@ func pinDifficultyEnv(value string) {
 	Expect(os.Setenv(consensus.DifficultyEnvVar, value)).To(Succeed())
 }
 
+// mineAsync runs mine in a goroutine and fails the spec if it does not return
+// within a second, so a broken cancellation fails fast instead of hanging.
+func mineAsync(mine func() error) error {
+	done := make(chan error, 1)
+	go func() { done <- mine() }()
+
+	var err error
+	Eventually(done, time.Second).Should(Receive(&err))
+	return err
+}
+
 var _ consensus.Consensus = (*consensus.ProofOfWork)(nil)
 
 var _ = Describe("ProofOfWork", func() {
@@ -63,7 +74,7 @@ var _ = Describe("ProofOfWork", func() {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 
-			err := consensus.NewProofOfWork(12).Seal(ctx, b)
+			err := consensus.NewProofOfWork(0).Seal(ctx, b)
 			Expect(errors.Is(err, context.Canceled)).To(BeTrue())
 			Expect(b.Hash).To(BeEmpty())
 		})
@@ -72,7 +83,7 @@ var _ = Describe("ProofOfWork", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 			defer cancel()
 
-			err := consensus.NewProofOfWork(12).Seal(ctx, b)
+			err := mineAsync(func() error { return consensus.NewProofOfWork(12).Seal(ctx, b) })
 			Expect(errors.Is(err, context.DeadlineExceeded)).To(BeTrue())
 			Expect(b.Hash).To(BeEmpty())
 		})
@@ -95,6 +106,13 @@ var _ = Describe("ProofOfWork", func() {
 			It("should return the configured difficulty", func() {
 				pinDifficultyEnv("3")
 				Expect(consensus.DifficultyFromEnv()).To(Equal(3))
+			})
+		})
+
+		When("the environment variable is zero", func() {
+			It("should return zero instead of the default difficulty", func() {
+				pinDifficultyEnv("0")
+				Expect(consensus.DifficultyFromEnv()).To(Equal(0))
 			})
 		})
 
@@ -180,6 +198,18 @@ var _ = Describe("ProofOfWork", func() {
 			Expect(strings.HasPrefix(b.Hash, strings.Repeat("0", b.Difficulty))).To(BeTrue())
 		})
 
+		It("should return the smallest non-negative nonce that solves the difficulty", func() {
+			Expect(consensus.MineWithContext(context.Background(), b, 2)).To(Succeed())
+
+			Expect(b.Nonce).To(BeNumerically(">", 0))
+
+			solved := b.Nonce
+			for n := 0; n < solved; n++ {
+				b.Nonce = n
+				Expect(b.CalculateHash()).NotTo(HavePrefix("00"), "nonce %d already solves the difficulty", n)
+			}
+		})
+
 		It("should handle a nil context gracefully", func() {
 			err := consensus.MineWithContext(nil, b, 1)
 
@@ -193,7 +223,19 @@ var _ = Describe("ProofOfWork", func() {
 				ctx, cancel := context.WithCancel(context.Background())
 				cancel()
 
-				err := consensus.MineWithContext(ctx, b, 12)
+				err := consensus.MineWithContext(ctx, b, 0)
+
+				Expect(err).To(MatchError(context.Canceled))
+				Expect(b.Hash).To(BeEmpty())
+			})
+		})
+
+		When("the context is already canceled and the difficulty is zero", func() {
+			It("should return context.Canceled without filling the hash", func() {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+
+				err := consensus.MineWithContext(ctx, b, 0)
 
 				Expect(err).To(MatchError(context.Canceled))
 				Expect(b.Hash).To(BeEmpty())
@@ -210,7 +252,7 @@ var _ = Describe("ProofOfWork", func() {
 				}()
 
 				// Use high difficulty so mining will not finish before cancel is called
-				err := consensus.MineWithContext(ctx, b, 12)
+				err := mineAsync(func() error { return consensus.MineWithContext(ctx, b, 12) })
 
 				Expect(err).To(MatchError(context.Canceled))
 				Expect(b.Hash).To(BeEmpty())
@@ -223,7 +265,7 @@ var _ = Describe("ProofOfWork", func() {
 				defer cancel()
 
 				// Use high difficulty so mining will timeout
-				err := consensus.MineWithContext(ctx, b, 12)
+				err := mineAsync(func() error { return consensus.MineWithContext(ctx, b, 12) })
 
 				Expect(err).To(MatchError(context.DeadlineExceeded))
 				Expect(b.Hash).To(BeEmpty())
