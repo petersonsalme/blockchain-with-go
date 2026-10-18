@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -127,11 +128,27 @@ var _ = Describe("Transaction Signing and Verification", func() {
 			}, domain.ErrMissingSignature),
 
 			// 2. ErrInvalidPublicKey (not lowercase hex of 64 chars)
-			Entry("PublicKey too short", func(tx *domain.Transaction) {
+			Entry("PublicKey too short (odd length: 63 hex)", func(tx *domain.Transaction) {
 				tx.PublicKey = strings.Repeat("a", 63)
 			}, domain.ErrInvalidPublicKey),
-			Entry("PublicKey too long", func(tx *domain.Transaction) {
+			Entry("PublicKey too short (even length: 62 hex, matching sender)", func(tx *domain.Transaction) {
+				raw31 := make([]byte, 31)
+				for i := range raw31 {
+					raw31[i] = byte(i + 1)
+				}
+				tx.PublicKey = hex.EncodeToString(raw31)
+				tx.From = wallet.AddressFromPublicKey(ed25519.PublicKey(raw31))
+			}, domain.ErrInvalidPublicKey),
+			Entry("PublicKey too long (odd length: 65 hex)", func(tx *domain.Transaction) {
 				tx.PublicKey = strings.Repeat("a", 65)
+			}, domain.ErrInvalidPublicKey),
+			Entry("PublicKey too long (even length: 66 hex, matching sender)", func(tx *domain.Transaction) {
+				raw33 := make([]byte, 33)
+				for i := range raw33 {
+					raw33[i] = byte(i + 1)
+				}
+				tx.PublicKey = hex.EncodeToString(raw33)
+				tx.From = wallet.AddressFromPublicKey(ed25519.PublicKey(raw33))
 			}, domain.ErrInvalidPublicKey),
 			Entry("PublicKey invalid hex chars", func(tx *domain.Transaction) {
 				tx.PublicKey = strings.Repeat("z", 64)
@@ -164,11 +181,17 @@ var _ = Describe("Transaction Signing and Verification", func() {
 			}, domain.ErrSenderMismatch),
 
 			// 5. ErrInvalidSignature (not hex 128 chars or wallet.Verify fails)
-			Entry("Signature too short", func(tx *domain.Transaction) {
+			Entry("Signature too short (odd length: 127 hex)", func(tx *domain.Transaction) {
 				tx.Signature = strings.Repeat("a", 127)
 			}, domain.ErrInvalidSignature),
-			Entry("Signature too long", func(tx *domain.Transaction) {
+			Entry("Signature too short (even length: 126 hex)", func(tx *domain.Transaction) {
+				tx.Signature = strings.Repeat("ab", 63)
+			}, domain.ErrInvalidSignature),
+			Entry("Signature too long (odd length: 129 hex)", func(tx *domain.Transaction) {
 				tx.Signature = strings.Repeat("a", 129)
+			}, domain.ErrInvalidSignature),
+			Entry("Signature too long (even length: 130 hex)", func(tx *domain.Transaction) {
+				tx.Signature = strings.Repeat("ab", 65)
 			}, domain.ErrInvalidSignature),
 			Entry("Signature non-hex chars", func(tx *domain.Transaction) {
 				tx.Signature = strings.Repeat("z", 128)
@@ -423,9 +446,12 @@ var _ = Describe("Transaction Signing and Verification", func() {
 				}
 
 				// Invariant to Round(0) (strips monotonic clock)
-				txRound := tx
-				txRound.Timestamp = txRound.Timestamp.Round(0)
-				if txRound.CalculateHash() != originalHash {
+				nowWithMono := time.Now().Add(time.Duration(sec%1000) * time.Second)
+				txWithMono := tx
+				txWithMono.Timestamp = nowWithMono
+				txWithoutMono := txWithMono
+				txWithoutMono.Timestamp = nowWithMono.Round(0)
+				if txWithMono.CalculateHash() != txWithoutMono.CalculateHash() {
 					return false
 				}
 
@@ -533,6 +559,7 @@ var _ = Describe("Transaction Signing and Verification", func() {
 				Expect(dep).NotTo(ContainSubstring("internal/chain"), "internal/domain must not depend on chain")
 				Expect(dep).NotTo(ContainSubstring("internal/server"), "internal/domain must not depend on server")
 				Expect(dep).NotTo(Equal("net/http"), "internal/domain must not depend on net/http")
+				Expect(dep).NotTo(Equal("os/signal"), "internal/domain must not depend on os/signal")
 			}
 
 			// Verify pkg/wallet is present in deps
