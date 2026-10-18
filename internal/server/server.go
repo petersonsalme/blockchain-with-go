@@ -6,16 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
-	"os"
 	"strconv"
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/petersonsalme/blockchain-with-go/internal/chain"
-	"github.com/petersonsalme/blockchain-with-go/internal/consensus"
-	"github.com/petersonsalme/blockchain-with-go/internal/consensus/pow"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 )
 
@@ -25,34 +20,36 @@ const DefaultMiningTimeout = 10 * time.Second
 // MiningTimeoutEnvVar overrides DefaultMiningTimeout when set.
 const MiningTimeoutEnvVar = "MINING_TIMEOUT"
 
-var blockchainInstance *domain.Blockchain
-var consensusEngine consensus.Consensus
-var generateBlock = chain.GenerateBlockWithContext
-
-type errorResponse struct {
-	Error   string         `json:"error"`
-	Code    string         `json:"code,omitempty"`
-	Details map[string]any `json:"details,omitempty"`
+// Chain is the application port the HTTP adapter drives.
+type Chain interface {
+	Blocks() ([]*domain.Block, error)
+	Mine(ctx context.Context, txs []domain.Transaction) (*domain.Block, error)
 }
 
-// requestTooLargeCode is the error code returned when the request body exceeds the allowed size.
-const requestTooLargeCode = "request_too_large"
-
-// maxRequestBodyBytes allows headroom over MaxBlockBytes() for JSON overhead of the request.
-func maxRequestBodyBytes() int64 {
-	return 2 * int64(domain.MaxBlockBytes())
+// Config holds the Server settings.
+type Config struct {
+	// MiningTimeout bounds one mining request; non-positive means DefaultMiningTimeout.
+	MiningTimeout time.Duration
 }
 
-func respondWithValidationError(w http.ResponseWriter, r *http.Request, err *domain.ValidationError) {
-	respondWithJSON(w, r, http.StatusUnprocessableEntity, errorResponse{Error: err.Message, Code: err.Code, Details: err.Details})
+// Server is the HTTP adapter over a Chain.
+type Server struct {
+	chain         Chain
+	miningTimeout time.Duration
 }
 
-func miningTimeout() time.Duration {
-	raw := os.Getenv(MiningTimeoutEnvVar)
-	if raw == "" {
-		return DefaultMiningTimeout
+// NewServer builds a Server that serves svc.
+func NewServer(svc Chain, cfg Config) *Server {
+	timeout := cfg.MiningTimeout
+	if timeout <= 0 {
+		timeout = DefaultMiningTimeout
 	}
+	return &Server{chain: svc, miningTimeout: timeout}
+}
 
+// ParseMiningTimeout reads a MINING_TIMEOUT value: a Go duration or integer seconds.
+// Empty, invalid and non-positive values yield DefaultMiningTimeout.
+func ParseMiningTimeout(raw string) time.Duration {
 	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
 		return d
 	}
@@ -64,46 +61,32 @@ func miningTimeout() time.Duration {
 	return DefaultMiningTimeout
 }
 
-// defaultConsensus is the engine used by Run: proof of work at POW_DIFFICULTY.
-func defaultConsensus() consensus.Consensus {
-	return pow.NewProofOfWorkFromEnv()
+// maxRequestBodyBytes allows headroom over MaxBlockBytes() for JSON overhead of the request.
+func maxRequestBodyBytes() int64 {
+	return 2 * int64(domain.MaxBlockBytes())
 }
 
-func Run() error {
-	return RunWithConsensus(defaultConsensus())
+// Handler returns the routes of s.
+func (s *Server) Handler() http.Handler {
+	r := mux.NewRouter()
+	r.HandleFunc("/", s.handleGetBlockchain).Methods("GET")
+	r.HandleFunc("/", s.handleWriteBlock).Methods("POST")
+	r.HandleFunc("/legacy/bpm", s.handleLegacyBPM).Methods("POST")
+	return r
 }
 
-// RunWithConsensus starts the server using c to seal and verify blocks.
-func RunWithConsensus(c consensus.Consensus) error {
-	consensusEngine = c
-	blockchainInstance = chain.New()
-	mux := makeMuxRouter()
-	httpAddr := os.Getenv("PORT")
-	log.Println("Listening on ", httpAddr)
-	s := &http.Server{
-		Addr:           ":" + httpAddr,
-		Handler:        mux,
+// HTTPServer wraps Handler in an http.Server listening on addr with the service timeouts.
+func (s *Server) HTTPServer(addr string) *http.Server {
+	return &http.Server{
+		Addr:           addr,
+		Handler:        s.Handler(),
 		ReadTimeout:    10 * time.Second,
 		WriteTimeout:   10 * time.Second,
 		MaxHeaderBytes: 1 << 20,
 	}
-
-	if err := s.ListenAndServe(); err != nil {
-		return err
-	}
-
-	return nil
 }
 
-func makeMuxRouter() http.Handler {
-	muxRouter := mux.NewRouter()
-	muxRouter.HandleFunc("/", handleGetBlockchain).Methods("GET")
-	muxRouter.HandleFunc("/", handleWriteBlock).Methods("POST")
-	muxRouter.HandleFunc("/legacy/bpm", handleLegacyBPM).Methods("POST")
-	return muxRouter
-}
-
-func respondWithJSON(w http.ResponseWriter, r *http.Request, code int, payload interface{}) {
+func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	response, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -115,8 +98,14 @@ func respondWithJSON(w http.ResponseWriter, r *http.Request, code int, payload i
 	w.Write(response)
 }
 
-func handleGetBlockchain(w http.ResponseWriter, r *http.Request) {
-	bytes, err := json.MarshalIndent(blockchainInstance, "", "  ")
+func (s *Server) handleGetBlockchain(w http.ResponseWriter, r *http.Request) {
+	blocks, err := s.chain.Blocks()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	bytes, err := json.MarshalIndent(blocksResponse{Blocks: blocks}, "", "  ")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -124,53 +113,20 @@ func handleGetBlockchain(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, string(bytes))
 }
 
-func mineAndAddBlock(w http.ResponseWriter, r *http.Request, txs []domain.Transaction) {
-	ctx, cancel := context.WithTimeout(r.Context(), miningTimeout())
+func (s *Server) mineAndRespond(w http.ResponseWriter, r *http.Request, txs []domain.Transaction) {
+	ctx, cancel := context.WithTimeout(r.Context(), s.miningTimeout)
 	defer cancel()
 
-	newBlock, err := generateBlock(ctx, consensusEngine, blockchainInstance.LastBlock(), txs)
+	newBlock, err := s.chain.Mine(ctx, txs)
 	if err != nil {
-		var validationErr *domain.ValidationError
-		if errors.As(err, &validationErr) {
-			respondWithValidationError(w, r, validationErr)
-			return
-		}
-		if errors.Is(err, context.DeadlineExceeded) {
-			respondWithJSON(w, r, http.StatusGatewayTimeout, errorResponse{Error: "tempo limite de mineração excedido"})
-			return
-		}
-		if errors.Is(err, context.Canceled) {
-			respondWithJSON(w, r, http.StatusRequestTimeout, errorResponse{Error: "mineração cancelada"})
-			return
-		}
-		respondWithJSON(w, r, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+		respondWithMineError(w, err)
 		return
 	}
 
-	if newBlock != nil {
-		if err := domain.ValidateBlockRules(newBlock, blockchainInstance.LastBlock(), time.Now()); err != nil {
-			var validationErr *domain.ValidationError
-			if errors.As(err, &validationErr) {
-				respondWithValidationError(w, r, validationErr)
-				return
-			}
-			respondWithJSON(w, r, http.StatusInternalServerError, errorResponse{Error: err.Error()})
-			return
-		}
-	}
-
-	if newBlock == nil || consensusEngine.Verify(blockchainInstance.LastBlock(), newBlock) != nil {
-		respondWithJSON(w, r, http.StatusUnprocessableEntity, errorResponse{Error: "bloco inválido não pôde ser adicionado"})
-		return
-	}
-
-	blockchainInstance.Add(newBlock)
-	blockchainInstance.Dump()
-
-	respondWithJSON(w, r, http.StatusCreated, newBlock)
+	respondWithJSON(w, http.StatusCreated, newBlock)
 }
 
-func handleWriteBlock(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleWriteBlock(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	var m Message
@@ -180,19 +136,19 @@ func handleWriteBlock(w http.ResponseWriter, r *http.Request) {
 	if err := decoder.Decode(&m); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			respondWithJSON(w, r, http.StatusRequestEntityTooLarge, errorResponse{
+			respondWithJSON(w, http.StatusRequestEntityTooLarge, errorResponse{
 				Error:   "corpo da requisição excede o tamanho máximo",
 				Code:    requestTooLargeCode,
 				Details: map[string]any{"max": tooLarge.Limit},
 			})
 			return
 		}
-		respondWithJSON(w, r, http.StatusBadRequest, errorResponse{Error: "corpo da requisição inválido"})
+		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "corpo da requisição inválido"})
 		return
 	}
 
 	if len(m.Transactions) == 0 {
-		respondWithJSON(w, r, http.StatusBadRequest, errorResponse{Error: "lista de transações não pode ser vazia"})
+		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "lista de transações não pode ser vazia"})
 		return
 	}
 
@@ -204,15 +160,15 @@ func handleWriteBlock(w http.ResponseWriter, r *http.Request) {
 			m.Transactions[i].ID = m.Transactions[i].CalculateHash()
 		}
 		if err := m.Transactions[i].Validate(); err != nil {
-			respondWithJSON(w, r, http.StatusBadRequest, errorResponse{Error: fmt.Sprintf("transação inválida: %s", err.Error())})
+			respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: fmt.Sprintf("transação inválida: %s", err.Error())})
 			return
 		}
 	}
 
-	mineAndAddBlock(w, r, m.Transactions)
+	s.mineAndRespond(w, r, m.Transactions)
 }
 
-func handleLegacyBPM(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleLegacyBPM(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	w.Header().Set("Deprecation", "true")
@@ -221,12 +177,12 @@ func handleLegacyBPM(w http.ResponseWriter, r *http.Request) {
 
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&m); err != nil {
-		respondWithJSON(w, r, http.StatusBadRequest, errorResponse{Error: "corpo da requisição inválido"})
+		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "corpo da requisição inválido"})
 		return
 	}
 
 	if m.BPM <= 0 {
-		respondWithJSON(w, r, http.StatusBadRequest, errorResponse{Error: "BPM deve ser maior que zero"})
+		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "BPM deve ser maior que zero"})
 		return
 	}
 
@@ -238,5 +194,5 @@ func handleLegacyBPM(w http.ResponseWriter, r *http.Request) {
 	}
 	tx.ID = tx.CalculateHash()
 
-	mineAndAddBlock(w, r, []domain.Transaction{tx})
+	s.mineAndRespond(w, r, []domain.Transaction{tx})
 }

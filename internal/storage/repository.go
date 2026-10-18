@@ -1,0 +1,22 @@
+// Package storage defines the port through which the chain persists blocks.
+package storage
+
+import (
+	"errors"
+
+	"github.com/petersonsalme/blockchain-with-go/internal/domain"
+)
+
+// ErrEmpty is returned by Last when the repository holds no block.
+var ErrEmpty = errors.New("storage: repository is empty")
+
+// BlockRepository stores the blocks of a chain in append order.
+// Implementations must be safe for concurrent use.
+type BlockRepository interface {
+	// Last returns the most recently appended block, or ErrEmpty.
+	Last() (*domain.Block, error)
+	// Append adds b at the end of the chain.
+	Append(b *domain.Block) error
+	// All returns a snapshot of the chain, oldest block first.
+	All() ([]*domain.Block, error)
+}

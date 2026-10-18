@@ -36,7 +36,7 @@ type Transaction struct {
 ## Architectural Trade-offs
 1. **In-Memory Storage vs. Persistence**: The blockchain state is kept entirely in memory. While this keeps the implementation simple, fast, and dependency-free, all data is lost when the server is restarted. A production system would require a persistent datastore (like LevelDB or RocksDB).
 2. **Centralization vs. P2P Network**: Currently, the blockchain runs as a single centralized HTTP server rather than a decentralized peer-to-peer network. This eliminates the complexity of network discovery, peer management, and gossip protocols, but makes the system centralized.
-3. **Sybil Protection (Proof of Work)**: A Proof of Work (PoW) mechanism is implemented to require computational effort for block creation and mitigate spam. The difficulty (number of leading zeros required in the block hash) is configured via the `POW_DIFFICULTY` environment variable, defaulting to `2`. The logic lives in the `consensus` package behind the `Consensus` interface (`Seal`/`Verify`); `consensus.ProofOfWork` is the default implementation, and `POW_DIFFICULTY` is read once at startup (`server.Run`).
+3. **Sybil Protection (Proof of Work)**: A Proof of Work (PoW) mechanism is implemented to require computational effort for block creation and mitigate spam. The difficulty (number of leading zeros required in the block hash) is configured via the `POW_DIFFICULTY` environment variable, defaulting to `2`. The logic lives in the `consensus` package behind the `Consensus` interface (`Seal`/`Verify`); `consensus.ProofOfWork` is the default implementation, and `POW_DIFFICULTY` is read once at startup (`cmd/node`).
    - **Difficulty Decoupled from Validation**: Each block records its difficulty in `b.Difficulty` at mining time, and validation checks the block's proof of work against its own recorded difficulty (which is included in the SHA-256 hash). Dynamic difficulty adjustment (e.g. retargeting) across nodes is not implemented.
    - **Context Cancellation & Timeouts**: Mining supports cooperative cancellation via `context.Context` (`consensus.MineWithContext`, `GenerateBlockWithContext`). The HTTP handler applies a configurable mining timeout via `MINING_TIMEOUT` (defaulting to 10 seconds) and aborts immediately if the client disconnects or cancels the request, preventing request processing from blocking indefinitely.
 4. **Transaction List Payload**: Blocks store a slice of transactions committed via `TransactionsHash`. Full Merkle tree support with inclusion proofs is deferred to a subsequent milestone (ENG-20).
@@ -59,16 +59,32 @@ blockchain-with-go/
 ├── cmd/
 │   └── node/          # Node binary entrypoint (main.go)
 ├── internal/
-│   ├── chain/         # Chain state, block generation and validation
+│   ├── chain/         # Chain service (genesis, mining, validation) and block generation
+│   ├── storage/       # BlockRepository port
+│   │   └── memory/    # In-memory adapter (sync.RWMutex)
 │   ├── consensus/     # Consensus port interface and errors
 │   │   └── pow/       # Proof of Work implementation
-│   ├── domain/        # Domain entities (Block, Transaction, Blockchain, rules)
+│   ├── domain/        # Domain entities (Block, Transaction, rules)
 │   └── server/        # HTTP REST API server, handlers and DTOs (gorilla/mux)
 ├── pkg/
 │   └── wallet/        # Cryptographic wallet (Ed25519), addresses, and keystore
 ├── go.mod             # Go module definition
 └── README.md          # Project documentation
 ```
+
+## Ports & Adapters
+
+| Camada | Pacote | Papel |
+| --- | --- | --- |
+| Domínio | `internal/domain` | Entidades e regras puras (`Block`, `Transaction`, `ValidateBlockRules`). Não importa nenhum outro pacote interno. |
+| Porta (saída) | `internal/storage` (`BlockRepository`) | `Last`, `Append`, `All` — onde a cadeia é guardada. |
+| Porta (saída) | `internal/consensus` (`Consensus`) | `Seal`/`Verify` — como blocos são produzidos e aceitos. |
+| Aplicação | `internal/chain` (`Service`) | `Blocks()` e `Mine(ctx, txs)`: gênesis, pré-validação, `Seal`, regras, `Verify`, `Append`. Rejeição → `chain.ErrInvalidBlock`. |
+| Adaptador (entrada) | `internal/server` (`Server`) | HTTP (gorilla/mux); mapeia erros do `Service` para status HTTP. |
+| Adaptadores (saída) | `internal/storage/memory`, `internal/consensus/pow` | Repositório em memória (`sync.RWMutex`) e Proof of Work. |
+| Composition root | `cmd/node` | Lê `.env`/ambiente, monta repo → pow → service → server e faz graceful shutdown. |
+
+**Regra de dependência:** as setas apontam para dentro (adaptadores → aplicação → domínio). `domain` não depende de `storage`, `chain`, `server`, `net/http` nem `os/signal`; `chain` não importa `server` nem `net/http`. Não há estado global: cada `Server` recebe seu `Service` por injeção.
 
 ## Running Locally
 
