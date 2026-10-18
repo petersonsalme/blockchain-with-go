@@ -1,18 +1,26 @@
 package domain
 
 import (
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
 )
 
 var (
-	ErrEmptyFrom     = errors.New("from cannot be empty")
-	ErrEmptyTo       = errors.New("to cannot be empty")
-	ErrInvalidAmount = errors.New("amount must be greater than zero")
-	ErrInvalidID     = errors.New("transaction id does not match calculated hash")
+	ErrEmptyFrom        = errors.New("from cannot be empty")
+	ErrEmptyTo          = errors.New("to cannot be empty")
+	ErrInvalidAmount    = errors.New("amount must be greater than zero")
+	ErrInvalidID        = errors.New("transaction id does not match calculated hash")
+	ErrMissingSignature = errors.New("missing signature or public key")
+	ErrInvalidPublicKey = errors.New("invalid public key")
+	ErrInvalidRecipient = errors.New("invalid recipient address")
+	ErrSenderMismatch   = errors.New("sender does not match public key")
+	ErrInvalidSignature = errors.New("invalid signature")
 )
 
 type Transaction struct {
@@ -23,6 +31,7 @@ type Transaction struct {
 	Fee       uint64
 	Nonce     uint64
 	Signature string
+	PublicKey string
 	Timestamp time.Time
 }
 
@@ -84,4 +93,65 @@ func TransactionsHash(txs []Transaction) string {
 		h.Write([]byte(tx.CalculateHash() + tx.Signature))
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+func SignTransaction(tx *Transaction, w *wallet.Wallet) error {
+	if tx == nil {
+		return errors.New("transaction is nil")
+	}
+	if w == nil {
+		return errors.New("wallet is nil")
+	}
+
+	hashHex := tx.CalculateHash()
+	hashBytes, _ := hex.DecodeString(hashHex)
+
+	pub := w.PublicKey()
+	sig := w.Sign(hashBytes)
+
+	tx.PublicKey = hex.EncodeToString(pub)
+	tx.Signature = hex.EncodeToString(sig)
+	tx.ID = hashHex
+	return nil
+}
+
+func (t *Transaction) VerifySignature() error {
+	if t == nil {
+		return errors.New("transaction is nil")
+	}
+
+	if t.Signature == "" || t.PublicKey == "" {
+		return ErrMissingSignature
+	}
+
+	if len(t.PublicKey) != 64 {
+		return ErrInvalidPublicKey
+	}
+	rawPub, err := hex.DecodeString(t.PublicKey)
+	if err != nil || hex.EncodeToString(rawPub) != t.PublicKey {
+		return ErrInvalidPublicKey
+	}
+
+	if err := wallet.ValidateAddress(t.To); err != nil {
+		return ErrInvalidRecipient
+	}
+
+	if t.From != wallet.AddressFromPublicKey(ed25519.PublicKey(rawPub)) {
+		return ErrSenderMismatch
+	}
+
+	if len(t.Signature) != 128 {
+		return ErrInvalidSignature
+	}
+	rawSig, err := hex.DecodeString(t.Signature)
+	if err != nil || hex.EncodeToString(rawSig) != t.Signature {
+		return ErrInvalidSignature
+	}
+
+	hashBytes, _ := hex.DecodeString(t.CalculateHash())
+	if !wallet.Verify(ed25519.PublicKey(rawPub), hashBytes, rawSig) {
+		return ErrInvalidSignature
+	}
+
+	return nil
 }
