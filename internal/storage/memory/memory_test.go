@@ -69,12 +69,14 @@ var _ = Describe("Repository", func() {
 		for w := 0; w < writers; w++ {
 			wg.Add(2)
 			go func() {
+				defer GinkgoRecover()
 				defer wg.Done()
 				for i := 0; i < perWriter; i++ {
 					Expect(repo.Append(&domain.Block{})).To(Succeed())
 				}
 			}()
 			go func() {
+				defer GinkgoRecover()
 				defer wg.Done()
 				for i := 0; i < perWriter; i++ {
 					_, err := repo.All()

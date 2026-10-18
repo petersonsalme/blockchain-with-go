@@ -59,7 +59,9 @@ blockchain-with-go/
 ├── cmd/
 │   └── node/          # Node binary entrypoint (main.go)
 ├── internal/
-│   ├── chain/         # Chain state, block generation and validation
+│   ├── chain/         # Chain service (genesis, mining, validation) and block generation
+│   ├── storage/       # BlockRepository port
+│   │   └── memory/    # In-memory adapter (sync.RWMutex)
 │   ├── consensus/     # Consensus port interface and errors
 │   │   └── pow/       # Proof of Work implementation
 │   ├── domain/        # Domain entities (Block, Transaction, rules)
