@@ -19,11 +19,11 @@ func respondWithMineError(w http.ResponseWriter, err error) {
 	case errors.As(err, &validationErr):
 		respondWithJSON(w, http.StatusUnprocessableEntity, errorResponse{Error: validationErr.Message, Code: validationErr.Code, Details: validationErr.Details})
 	case errors.Is(err, chain.ErrInvalidBlock):
-		respondWithJSON(w, http.StatusUnprocessableEntity, errorResponse{Error: "bloco inválido não pôde ser adicionado"})
+		respondWithJSON(w, http.StatusUnprocessableEntity, errorResponse{Error: "invalid block could not be added"})
 	case errors.Is(err, context.DeadlineExceeded):
-		respondWithJSON(w, http.StatusGatewayTimeout, errorResponse{Error: "tempo limite de mineração excedido"})
+		respondWithJSON(w, http.StatusGatewayTimeout, errorResponse{Error: "mining timeout exceeded"})
 	case errors.Is(err, context.Canceled):
-		respondWithJSON(w, http.StatusRequestTimeout, errorResponse{Error: "mineração cancelada"})
+		respondWithJSON(w, http.StatusRequestTimeout, errorResponse{Error: "mining cancelled"})
 	default:
 		respondWithJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
 	}
