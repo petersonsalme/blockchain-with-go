@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security issue privately
+    url: https://github.com/petersonsalme/blockchain-with-go/security/advisories/new
+    about: Please do not open a public issue for vulnerabilities.
