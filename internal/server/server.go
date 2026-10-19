@@ -182,15 +182,15 @@ func (s *Server) handleGetBlock(w http.ResponseWriter, r *http.Request) {
 		err   error
 	)
 	switch {
-	case isHash(ref):
-		block, err = s.chain.BlockByHash(ref)
-	case isDecimal(ref) && len(ref) < hashLen:
+	case isHeight(ref):
 		height, convErr := strconv.Atoi(ref)
 		if convErr != nil { // beyond int: no such height
 			err = storage.ErrNotFound
 			break
 		}
 		block, err = s.chain.BlockByHeight(height)
+	case isHash(ref):
+		block, err = s.chain.BlockByHash(ref)
 	default:
 		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "block reference must be a 64-character lowercase hex hash or a decimal height", Code: invalidBlockRefCode})
 		return
@@ -228,8 +228,9 @@ func isHash(ref string) bool {
 	return true
 }
 
-func isDecimal(ref string) bool {
-	if ref == "" {
+// isHeight reports whether ref is decimal digits and too short to be a hash.
+func isHeight(ref string) bool {
+	if ref == "" || len(ref) >= hashLen {
 		return false
 	}
 	for _, c := range ref {

@@ -90,14 +90,15 @@ func (r *Repository) Range(from, limit int) ([]*domain.Block, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	if from < 0 || limit <= 0 || from >= len(r.blocks) {
+	if from < 0 {
 		return []*domain.Block{}, nil
 	}
-	end := len(r.blocks)
-	if limit < end-from { // not from+limit: that overflows for a huge limit
-		end = from + limit
+	// Bounded by the chain length, not from+limit: that overflows for a huge limit.
+	n := max(0, min(limit, len(r.blocks)-from))
+	if n == 0 {
+		return []*domain.Block{}, nil
 	}
-	out := make([]*domain.Block, end-from)
-	copy(out, r.blocks[from:end])
+	out := make([]*domain.Block, n)
+	copy(out, r.blocks[from:from+n])
 	return out, nil
 }

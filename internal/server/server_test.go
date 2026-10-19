@@ -713,6 +713,10 @@ var _ = Describe("Server", func() {
 				Entry("decimal with sign", "+1"),
 			)
 
+			It("treats 64 zeros as a hash, not as height 0", func() {
+				expectError(get("/block/"+strings.Repeat("0", 64)), http.StatusNotFound, "block_not_found")
+			})
+
 			It("treats 64 decimal digits as a hash, not a height", func() {
 				expectError(get("/block/"+strings.Repeat("1", 64)), http.StatusNotFound, "block_not_found")
 			})
