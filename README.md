@@ -57,6 +57,16 @@ type Transaction struct {
    - **Context Cancellation & Timeouts**: Mining supports cooperative cancellation via `context.Context` (`consensus.MineWithContext`, `GenerateBlockWithContext`). The HTTP handler applies a configurable mining timeout via `MINING_TIMEOUT` (defaulting to 10 seconds) and aborts immediately if the client disconnects or cancels the request, preventing request processing from blocking indefinitely.
 4. **Transaction List Payload**: Blocks store a slice of transactions committed via `TransactionsHash`. Full Merkle tree support with inclusion proofs is deferred to a subsequent milestone (ENG-20).
 
+## Architecture Decision Records
+
+Design decisions live in [`docs/adr/`](docs/adr):
+
+| ADR | Decision |
+|---|---|
+| [0001](docs/adr/0001-utxo-model.md) | Transaction model: UTXO replaces account/nonce |
+| [0002](docs/adr/0002-genesis-allocations-env-var.md) | Genesis funding comes from `GENESIS_ALLOCATIONS` |
+| [0003](docs/adr/0003-learning-project-positioning.md) | Personal learning project with an AI-generated-changes disclaimer |
+
 ## Configuration & Environment Variables
 
 The application can be configured via environment variables (e.g., in a `.env` file):
