@@ -28,11 +28,12 @@ var transactionErrors = []struct {
 	{domain.ErrMissingSignature, http.StatusBadRequest, domain.CodeMissingSignature},
 	{domain.ErrInvalidSignature, http.StatusBadRequest, domain.CodeInvalidSignature},
 	{domain.ErrInvalidPublicKey, http.StatusBadRequest, domain.CodeInvalidPublicKey},
-	{domain.ErrInvalidRecipient, http.StatusBadRequest, domain.CodeInvalidRecipient},
-	{domain.ErrSenderMismatch, http.StatusBadRequest, domain.CodeSenderMismatch},
-	{domain.ErrNonceReused, http.StatusConflict, domain.CodeNonceReused},
-	{domain.ErrNonceGap, http.StatusConflict, domain.CodeNonceGap},
-	{domain.ErrDuplicateTransaction, http.StatusConflict, domain.CodeDuplicateTransaction},
+	{domain.ErrInputOwnerMismatch, http.StatusBadRequest, domain.CodeInputOwnerMismatch},
+	{domain.ErrInvalidOutput, http.StatusBadRequest, domain.CodeInvalidOutput},
+	{domain.ErrMissingInputs, http.StatusBadRequest, domain.CodeMissingInputs},
+	{domain.ErrInputMissingOrSpent, http.StatusConflict, domain.CodeInputMissingOrSpent},
+	{domain.ErrDoubleSpend, http.StatusConflict, domain.CodeDoubleSpend},
+	{domain.ErrInsufficientInputs, http.StatusUnprocessableEntity, domain.CodeInsufficientInputs},
 }
 
 // respondWithMineError maps an error from chain mining to its HTTP response.

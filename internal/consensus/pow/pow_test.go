@@ -58,7 +58,7 @@ var _ = Describe("ProofOfWork", func() {
 			b = &domain.Block{
 				Index:        1,
 				Timestamp:    time.Date(2021, 8, 15, 14, 30, 45, 100, time.UTC),
-				Transactions: []domain.Transaction{{From: "alice", To: "bob", Amount: 10}},
+				Transactions: []domain.Transaction{{Outputs: []domain.TxOut{{Amount: 10, Address: "bob"}}}},
 				PrevHash:     "123",
 			}
 		})
@@ -135,7 +135,7 @@ var _ = Describe("ProofOfWork", func() {
 				Index:     1,
 				Timestamp: time.Date(2021, 8, 15, 14, 30, 45, 100, time.UTC),
 				Transactions: []domain.Transaction{
-					{From: "alice", To: "bob", Amount: 10, Signature: "sig1"},
+					{Inputs: []domain.TxIn{{PrevTxID: "p1", Signature: "sig1"}}, Outputs: []domain.TxOut{{Amount: 10, Address: "bob"}}},
 				},
 				PrevHash: "123",
 			}
@@ -174,7 +174,7 @@ var _ = Describe("ProofOfWork", func() {
 				Index:     1,
 				Timestamp: time.Date(2021, 8, 15, 14, 30, 45, 100, time.UTC),
 				Transactions: []domain.Transaction{
-					{From: "alice", To: "bob", Amount: 10, Signature: "sig1"},
+					{Inputs: []domain.TxIn{{PrevTxID: "p1", Signature: "sig1"}}, Outputs: []domain.TxOut{{Amount: 10, Address: "bob"}}},
 				},
 				PrevHash: "123",
 			}
@@ -290,8 +290,8 @@ var _ = Describe("ProofOfWork", func() {
 			}
 
 			newBlock = chain.GenerateBlock(pow, oldBlock, []domain.Transaction{
-				{From: "alice", To: "bob", Amount: 10, Signature: "sig1"},
-				{From: "carol", To: "dave", Amount: 20, Signature: "sig2"},
+				{Inputs: []domain.TxIn{{PrevTxID: "p1", Signature: "sig1"}}, Outputs: []domain.TxOut{{Amount: 10, Address: "bob"}}},
+				{Inputs: []domain.TxIn{{PrevTxID: "p2", Signature: "sig2"}}, Outputs: []domain.TxOut{{Amount: 20, Address: "dave"}}},
 			})
 		})
 
@@ -377,43 +377,34 @@ var _ = Describe("ProofOfWork", func() {
 
 		When("transaction amount is altered after mining", func() {
 			It("should return false", func() {
-				newBlock.Transactions[0].Amount = 999
+				newBlock.Transactions[0].Outputs[0].Amount = 999
 
 				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
 				Expect(pow.Verify(oldBlock, newBlock)).To(HaveOccurred())
 			})
 		})
 
-		When("transaction sender (From) is altered after mining", func() {
+		When("transaction input is altered after mining", func() {
 			It("should return false", func() {
-				newBlock.Transactions[0].From = "mallory"
+				newBlock.Transactions[0].Inputs[0].PrevTxID = "mallory"
 
 				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
 				Expect(pow.Verify(oldBlock, newBlock)).To(HaveOccurred())
 			})
 		})
 
-		When("transaction recipient (To) is altered after mining", func() {
+		When("transaction recipient is altered after mining", func() {
 			It("should return false", func() {
-				newBlock.Transactions[0].To = "mallory"
+				newBlock.Transactions[0].Outputs[0].Address = "mallory"
 
 				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
 				Expect(pow.Verify(oldBlock, newBlock)).To(HaveOccurred())
 			})
 		})
 
-		When("transaction fee is altered after mining", func() {
+		When("transaction input index is altered after mining", func() {
 			It("should return false", func() {
-				newBlock.Transactions[0].Fee = 99
-
-				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
-				Expect(pow.Verify(oldBlock, newBlock)).To(HaveOccurred())
-			})
-		})
-
-		When("transaction nonce is altered after mining", func() {
-			It("should return false", func() {
-				newBlock.Transactions[0].Nonce = 42
+				newBlock.Transactions[0].Inputs[0].OutIndex = 99
 
 				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
 				Expect(pow.Verify(oldBlock, newBlock)).To(HaveOccurred())
@@ -432,9 +423,7 @@ var _ = Describe("ProofOfWork", func() {
 		When("a transaction is added after mining", func() {
 			It("should return false", func() {
 				newBlock.Transactions = append(newBlock.Transactions, domain.Transaction{
-					From:   "eve",
-					To:     "frank",
-					Amount: 30,
+					Outputs: []domain.TxOut{{Amount: 30, Address: "frank"}},
 				})
 
 				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
@@ -462,7 +451,7 @@ var _ = Describe("ProofOfWork", func() {
 
 		When("a transaction signature is altered after mining", func() {
 			It("should return false", func() {
-				newBlock.Transactions[0].Signature = "tampered-sig"
+				newBlock.Transactions[0].Inputs[0].Signature = "tampered-sig"
 
 				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
 				Expect(pow.Verify(oldBlock, newBlock)).To(HaveOccurred())
