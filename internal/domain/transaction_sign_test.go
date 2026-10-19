@@ -574,3 +574,131 @@ var _ = Describe("Transaction Signing and Verification", func() {
 		})
 	})
 })
+
+var _ = Describe("Weak Ed25519 public keys", func() {
+	var recipient *wallet.Wallet
+
+	BeforeEach(func() {
+		var err error
+		recipient, err = wallet.FromSeed(make([]byte, 32))
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	weakTx := func(pubHex string) domain.Transaction {
+		raw, err := hex.DecodeString(pubHex)
+		Expect(err).NotTo(HaveOccurred())
+		return domain.Transaction{
+			From:      wallet.AddressFromPublicKey(ed25519.PublicKey(raw)),
+			To:        recipient.Address(),
+			Amount:    1,
+			Timestamp: time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC),
+			PublicKey: pubHex,
+			Signature: "01" + strings.Repeat("00", 63),
+		}
+	}
+
+	// hexLE builds a 32-byte little-endian key from the first and last byte,
+	// with every middle byte equal to mid.
+	hexLE := func(first byte, mid byte, last byte) string {
+		b := make([]byte, 32)
+		for i := range b {
+			b[i] = mid
+		}
+		b[0], b[31] = first, last
+		return hex.EncodeToString(b)
+	}
+
+	smallOrder := map[string]string{
+		"y=0 sign 0":    hexLE(0x00, 0x00, 0x00),
+		"y=0 sign 1":    hexLE(0x00, 0x00, 0x80),
+		"y=1 sign 0":    hexLE(0x01, 0x00, 0x00),
+		"y=1 sign 1":    hexLE(0x01, 0x00, 0x80),
+		"y=p-1 sign 0":  hexLE(0xec, 0xff, 0x7f),
+		"y=p-1 sign 1":  hexLE(0xec, 0xff, 0xff),
+		"y=y8 sign 0":   "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+		"y=y8 sign 1":   "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85",
+		"y=p-y8 sign 0": "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",
+		"y=p-y8 sign 1": "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
+	}
+	for name, pub := range smallOrder {
+		pub := pub
+		It("rejects small-order key "+name, func() {
+			tx := weakTx(pub)
+			Expect(tx.VerifySignature()).To(MatchError(domain.ErrInvalidPublicKey))
+		})
+	}
+
+	nonCanonical := map[string]string{
+		"y=p sign 0":       hexLE(0xed, 0xff, 0x7f),
+		"y=p sign 1":       hexLE(0xed, 0xff, 0xff),
+		"y=p+1 sign 0":     hexLE(0xee, 0xff, 0x7f),
+		"y=p+1 sign 1":     hexLE(0xee, 0xff, 0xff),
+		"y=2^255-1 sign 0": hexLE(0xff, 0xff, 0x7f),
+		"y=2^255-1 sign 1": hexLE(0xff, 0xff, 0xff),
+	}
+	for name, pub := range nonCanonical {
+		pub := pub
+		It("rejects non-canonical key "+name, func() {
+			tx := weakTx(pub)
+			Expect(tx.VerifySignature()).To(MatchError(domain.ErrInvalidPublicKey))
+		})
+	}
+
+	It("does not reject the canonical neighbours of the boundary", func() {
+		// y = p-2 and y = 2 are canonical, not small order: the key check
+		// passes and the bogus signature is what fails.
+		for _, pub := range []string{hexLE(0xeb, 0xff, 0x7f), hexLE(0x02, 0x00, 0x00)} {
+			tx := weakTx(pub)
+			Expect(tx.VerifySignature()).To(MatchError(domain.ErrInvalidSignature))
+		}
+		// Same for a key with a middle byte below 0xff and y[0] >= 0xed.
+		b, _ := hex.DecodeString(hexLE(0xff, 0xff, 0x7f))
+		b[15] = 0xfe
+		tx := weakTx(hex.EncodeToString(b))
+		Expect(tx.VerifySignature()).To(MatchError(domain.ErrInvalidSignature))
+	})
+
+	It("regression ENG-76: identity key with R=identity, S=0 is rejected for any message", func() {
+		pub := "01" + strings.Repeat("00", 31)
+		for _, amt := range []uint64{1, 999999, 42} {
+			tx := weakTx(pub)
+			tx.Amount, tx.Fee, tx.Nonce = amt, amt*3, amt
+			Expect(tx.VerifySignature()).To(MatchError(domain.ErrInvalidPublicKey))
+		}
+	})
+
+	It("Invariant 1: keys from wallet.FromSeed are never rejected", func() {
+		prop := func(seed [32]byte) bool {
+			w, err := wallet.FromSeed(seed[:])
+			if err != nil {
+				return false
+			}
+			tx := domain.Transaction{
+				From: w.Address(), To: recipient.Address(), Amount: 1,
+				Timestamp: time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC),
+			}
+			return domain.SignTransaction(&tx, w) == nil && tx.VerifySignature() == nil
+		}
+		Expect(quick.Check(prop, &quick.Config{MaxCount: 1000})).To(Succeed())
+	})
+
+	It("Invariant 2: weak keys yield ErrInvalidPublicKey whatever the other fields", func() {
+		keys := []string{}
+		for _, k := range smallOrder {
+			keys = append(keys, k)
+		}
+		for _, k := range nonCanonical {
+			keys = append(keys, k)
+		}
+		prop := func(i uint8, from, to string, amount, fee, nonce uint64, ts int64, sig [64]byte) bool {
+			tx := domain.Transaction{
+				From: from, To: to, Amount: amount, Fee: fee, Nonce: nonce,
+				Timestamp: time.Unix(0, ts).UTC(),
+				PublicKey: keys[int(i)%len(keys)],
+				Signature: hex.EncodeToString(sig[:]),
+			}
+			return errors.Is(tx.VerifySignature(), domain.ErrInvalidPublicKey)
+		}
+		Expect(quick.Check(prop, &quick.Config{MaxCount: 1000})).To(Succeed())
+	})
+})
