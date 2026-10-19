@@ -12,6 +12,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
+	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 )
 
 // DefaultMiningTimeout is the default duration allowed for block mining before timing out.
@@ -20,9 +21,20 @@ const DefaultMiningTimeout = 10 * time.Second
 // MiningTimeoutEnvVar overrides DefaultMiningTimeout when set.
 const MiningTimeoutEnvVar = "MINING_TIMEOUT"
 
+const (
+	defaultPageLimit = 20
+	maxPageLimit     = 100
+	// hashLen is the length of a hex-encoded SHA-256 block hash.
+	hashLen = 64
+)
+
 // Chain is the application port the HTTP adapter drives.
 type Chain interface {
 	Blocks() ([]*domain.Block, error)
+	Tip() (*domain.Block, error)
+	BlockByHeight(h int) (*domain.Block, error)
+	BlockByHash(hash string) (*domain.Block, error)
+	BlocksRange(from, limit int) ([]*domain.Block, error)
 	Mine(ctx context.Context, txs []domain.Transaction) (*domain.Block, error)
 }
 
@@ -71,6 +83,9 @@ func (s *Server) Handler() http.Handler {
 	r := mux.NewRouter()
 	r.HandleFunc("/", s.handleGetBlockchain).Methods("GET")
 	r.HandleFunc("/", s.handleWriteBlock).Methods("POST")
+	r.HandleFunc("/blocks", s.handleGetBlocks).Methods("GET")
+	r.HandleFunc("/block/{ref}", s.handleGetBlock).Methods("GET")
+	r.HandleFunc("/health", s.handleHealth).Methods("GET")
 	r.HandleFunc("/legacy/bpm", s.handleLegacyBPM).Methods("POST")
 	return r
 }
@@ -111,6 +126,118 @@ func (s *Server) handleGetBlockchain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	io.WriteString(w, string(bytes))
+}
+
+// queryInt reads a non-negative integer query parameter, or def when absent.
+func queryInt(r *http.Request, name string, def int) (int, error) {
+	q := r.URL.Query()
+	if !q.Has(name) {
+		return def, nil
+	}
+	v, err := strconv.Atoi(q.Get(name))
+	if err != nil || v < 0 {
+		return 0, fmt.Errorf("%s must be a non-negative integer", name)
+	}
+	return v, nil
+}
+
+// handleGetBlocks serves one page of the chain; reads never wait for Mine.
+func (s *Server) handleGetBlocks(w http.ResponseWriter, r *http.Request) {
+	from, err := queryInt(r, "from", 0)
+	if err != nil {
+		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error(), Code: invalidQueryCode})
+		return
+	}
+	limit, err := queryInt(r, "limit", defaultPageLimit)
+	if err == nil && limit == 0 {
+		err = errors.New("limit must be positive")
+	}
+	if err != nil {
+		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error(), Code: invalidQueryCode})
+		return
+	}
+	limit = min(limit, maxPageLimit)
+
+	// One extra block tells whether a next page exists, atomically with the page.
+	blocks, err := s.chain.BlocksRange(from, limit+1)
+	if err != nil {
+		respondWithJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+		return
+	}
+	resp := pageResponse{Blocks: blocks, From: from, Limit: limit}
+	if len(blocks) > limit {
+		resp.Blocks = blocks[:limit]
+		next := from + limit
+		resp.Next = &next
+	}
+	respondWithJSON(w, http.StatusOK, resp)
+}
+
+// handleGetBlock serves one block by hash (64 lowercase hex) or height (decimal).
+func (s *Server) handleGetBlock(w http.ResponseWriter, r *http.Request) {
+	ref := mux.Vars(r)["ref"]
+
+	var (
+		block *domain.Block
+		err   error
+	)
+	switch {
+	case isHash(ref):
+		block, err = s.chain.BlockByHash(ref)
+	case isDecimal(ref) && len(ref) < hashLen:
+		height, convErr := strconv.Atoi(ref)
+		if convErr != nil { // beyond int: no such height
+			err = storage.ErrNotFound
+			break
+		}
+		block, err = s.chain.BlockByHeight(height)
+	default:
+		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "block reference must be a 64-character lowercase hex hash or a decimal height", Code: invalidBlockRefCode})
+		return
+	}
+
+	switch {
+	case errors.Is(err, storage.ErrNotFound):
+		respondWithJSON(w, http.StatusNotFound, errorResponse{Error: "block not found", Code: blockNotFoundCode})
+	case err != nil:
+		respondWithJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+	default:
+		respondWithJSON(w, http.StatusOK, block)
+	}
+}
+
+// handleHealth reports the chain tip, or 503 when it cannot be read.
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	tip, err := s.chain.Tip()
+	if err != nil {
+		respondWithJSON(w, http.StatusServiceUnavailable, errorResponse{Error: err.Error(), Code: unhealthyCode})
+		return
+	}
+	respondWithJSON(w, http.StatusOK, healthResponse{Status: "ok", Height: tip.Index, Tip: tip.Hash})
+}
+
+func isHash(ref string) bool {
+	if len(ref) != hashLen {
+		return false
+	}
+	for _, c := range ref {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func isDecimal(ref string) bool {
+	if ref == "" {
+		return false
+	}
+	for _, c := range ref {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) mineAndRespond(w http.ResponseWriter, r *http.Request, txs []domain.Transaction) {
