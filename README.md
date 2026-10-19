@@ -19,7 +19,7 @@
 A simple blockchain implementation in Go, created as an exercise to demonstrate core blockchain concepts.
 
 ## Features Implemented
-- **Block & Transaction Structure**: Blocks containing index, timestamp, transaction list (`Transactions`), current hash, previous hash, nonce, and difficulty. Each transaction tracks `ID`, `From`, `To`, `Amount`, `Fee`, `Nonce`, `Signature`, `PublicKey`, and `Timestamp`.
+- **Block & Transaction Structure**: Blocks containing index, timestamp, transaction list (`Transactions`), current hash, previous hash, nonce, and difficulty. Each transaction has `ID`, `Inputs` (spent outputs with key and signature), `Outputs` (amount and address) and `Timestamp`.
 - **Cryptographic Hashing**: Uses SHA-256 to ensure data integrity across all block attributes (including nonce, difficulty, and an aggregate hash of all transactions). Transaction content hashing is deterministic and independent of transaction ID, signature, and public key.
 - **Proof of Work & Context-Aware Mining**: Nonce search satisfying leading-zero difficulty, supporting graceful context cancellation and mining timeouts.
 - **Chain Validation**: Validates new blocks by checking index sequentiality, cryptographic linkage (`PrevHash`), SHA-256 hash integrity, and Proof of Work against each block's recorded difficulty.
@@ -28,33 +28,26 @@ A simple blockchain implementation in Go, created as an exercise to demonstrate 
 ## Consensus Mechanism
 This implementation utilizes a simplified **Longest Chain Rule** (represented by the `replaceChain` function). When confronted with multiple valid chains, the node will accept the longest chain as the source of truth. However, since this iteration does not implement peer-to-peer networking or block broadcasting, chain forks do not occur naturally. Block validation checks cryptographic linkage, index sequentiality, Proof of Work against the block's recorded difficulty, and transaction data integrity.
 
-## Transaction Model
-Transactions represent value transfers recorded in the blockchain:
+## Transaction Model (UTXO)
+Value lives in unspent transaction outputs (UTXOs). A transaction spends existing outputs and creates new ones:
 
 ```go
 type Transaction struct {
     ID        string
-    From      string
-    To        string
-    Amount    uint64
-    Fee       uint64
-    Nonce     uint64
-    Signature string
-    PublicKey string
+    Inputs    []TxIn  // PrevTxID, OutIndex, PublicKey, Signature
+    Outputs   []TxOut // Amount, Address
     Timestamp time.Time
 }
 ```
 
-- **ID**: SHA-256 hash over deterministic JSON serialization of `From, To, Amount, Fee, Nonce, Timestamp.UTC()`.
-- **Validation**: Requires non-empty `From` and `To`, `Amount > 0`, and ensures `ID == CalculateHash()` when `ID` is provided.
-- **TransactionsHash**: Computes a SHA-256 digest covering each transaction's content hash and signature in order, binding all transactions to the block header.
-- **Signatures & Verification**: Transactions are signed using Ed25519 (`domain.SignTransaction`). The signature signs the raw 32-byte digest of `CalculateHash()`. `Signature` is a 128-character lowercase hex string and `PublicKey` is a 64-character lowercase hex string (32-byte Ed25519 public key). `VerifySignature()` enforces that:
-  1. Both `Signature` and `PublicKey` are present (`ErrMissingSignature`).
-  2. `PublicKey` is a 64-character lowercase hex encoding (`ErrInvalidPublicKey`) that is not a weak key: its y coordinate (32 bytes little-endian, bit 255 cleared) must be canonical (`y < p = 2^255 - 19`) and must not belong to a point of order 1, 2, 4 or 8 (`y` in `{0, 1, p-1, y8, p-y8}`, with either sign bit — the 10 encodings of libsodium's `ge25519_has_small_order`). Otherwise the identity key `01 00…00` with `R = identity, S = 0` would verify for any message (`ErrInvalidPublicKey`).
-  3. `To` is a valid checksummed wallet address (`ErrInvalidRecipient`).
-  4. `From` matches the address derived from `PublicKey` via `wallet.AddressFromPublicKey` (`ErrSenderMismatch`).
-  5. `Signature` is a 128-character lowercase hex encoding that cryptographically verifies over the raw 32-byte `CalculateHash()` using `PublicKey` (`ErrInvalidSignature`).
-- **Signed Fields**: `CalculateHash()` covers `From`, `To`, `Amount`, `Fee`, `Nonce`, and `Timestamp` (UTC RFC3339Nano), guaranteeing that any modification to these fields invalidates the signature without including `ID`, `Signature`, or `PublicKey` in the signed preimage.
+- **Inputs**: each input names the output it spends by `(PrevTxID, OutIndex)`. The output must be unspent and owned by the address derived from the input's `PublicKey`.
+- **Outputs**: each output assigns `Amount > 0` to a valid checksummed wallet address.
+- **Fee**: `fee = sum(inputs) − sum(outputs)`. Outputs may not exceed inputs (`insufficient_inputs`); whatever is not assigned to an output is the fee, so send the change back to yourself.
+- **ID**: SHA-256 over the canonical JSON of the inputs (`prev_txid`, `out_index`, without key or signature), the outputs and the UTC timestamp. A non-empty `ID` must match `CalculateHash()`.
+- **Signature per input**: every input is signed with Ed25519 (`domain.SignInput`) over the raw 32-byte digest of `CalculateHash()`, so one signature commits to all inputs and outputs. `PublicKey` is 64 lowercase hex characters (non-weak key), `Signature` is 128.
+- **Double spend**: an output can be spent once; spending it twice, in one block or across blocks, is rejected (`double_spend`, `input_missing_or_spent`).
+- **TransactionsHash**: SHA-256 over each transaction's hash and its input signatures, binding them to the block header.
+- **Genesis**: the genesis block of an empty chain carries one transaction without inputs that creates the outputs listed in `GENESIS_ALLOCATIONS`; that is the only source of coins for now (no coinbase yet).
 
 ## Architectural Trade-offs
 1. **In-Memory Storage vs. Persistence**: The blockchain state is kept entirely in memory. While this keeps the implementation simple, fast, and dependency-free, all data is lost when the server is restarted. A production system would require a persistent datastore (like LevelDB or RocksDB).
@@ -73,6 +66,7 @@ The application can be configured via environment variables (e.g., in a `.env` f
 | `PORT` | HTTP server port | `8080` |
 | `POW_DIFFICULTY` | Number of leading zeros required for block hashes | `2` |
 | `MINING_TIMEOUT` | Maximum duration allowed for mining a block (e.g., `10s`, `500ms`, or integer seconds) | `10s` |
+| `GENESIS_ALLOCATIONS` | Genesis outputs as `address:amount[,address:amount...]`. Each address must be a valid wallet address and each amount an integer from 1 to 2^64−1; an invalid item stops the node at startup. Only used when the chain is empty (the genesis is created); ignored otherwise | empty (genesis without transactions) |
 | `MAX_BLOCK_BYTES` | Maximum JSON-serialized block size in bytes (positive integer; invalid values fall back to the default) | `1048576` |
 
 ## Project Structure
@@ -160,17 +154,23 @@ $ curl http://localhost:8080/
 ### POST /
 Create and mine a new block with a list of **signed** transactions. The node never changes a signed field: `Timestamp` is required (`400 missing_timestamp`), and `ID` is filled in only when empty (a wrong `ID` is `400`).
 
-A transaction is signed with Ed25519 over its hash (`domain.SignTransaction`): `PublicKey` and `Signature` are 64 and 128 lowercase hex characters, `From` must be the address of `PublicKey`, and `To` a valid address. Each sender has a `Nonce` that starts at 0 and must increase by exactly 1 per accepted transaction (consecutive nonces of one sender are allowed within a request), which makes a replay of an accepted transaction fail.
+Every input is signed with Ed25519 over the transaction hash (`domain.SignInput`). Each input spends one unspent output, and `sum(inputs) − sum(outputs)` is the fee. To have something to spend, start the node with `GENESIS_ALLOCATIONS`:
+
+```shell
+$ GENESIS_ALLOCATIONS=<sender address>:100 go run ./cmd/node
+```
+
+The genesis transaction (see `GET /`) has an `ID`; spending its output 0 (100 coins) by sending 60 to a recipient, 39 back as change, and leaving 1 as the fee:
 
 ```shell
 $ curl -X POST -H "Content-Type: application/json" \
   -d '{"Transactions":[{
-        "ID":"3a7b8c...",
-        "From":"00<sender address>",
-        "To":"00<recipient address>",
-        "Amount":10,"Fee":1,"Nonce":0,
-        "PublicKey":"<64 hex chars>",
-        "Signature":"<128 hex chars>",
+        "Inputs":[{
+          "PrevTxID":"<genesis transaction ID>","OutIndex":0,
+          "PublicKey":"<64 hex chars>","Signature":"<128 hex chars>"}],
+        "Outputs":[
+          {"Amount":60,"Address":"<recipient address>"},
+          {"Amount":39,"Address":"<sender address (change)>"}],
         "Timestamp":"2026-10-16T12:05:00Z"}]}' \
   http://localhost:8080/
 ```
@@ -183,13 +183,13 @@ $ curl -X POST -H "Content-Type: application/json" \
   "Transactions": [
     {
       "ID": "3a7b8c...",
-      "From": "00<sender address>",
-      "To": "00<recipient address>",
-      "Amount": 10,
-      "Fee": 1,
-      "Nonce": 0,
-      "Signature": "<128 hex chars>",
-      "PublicKey": "<64 hex chars>",
+      "Inputs": [
+        {"PrevTxID": "<genesis transaction ID>", "OutIndex": 0, "PublicKey": "<64 hex chars>", "Signature": "<128 hex chars>"}
+      ],
+      "Outputs": [
+        {"Amount": 60, "Address": "<recipient address>"},
+        {"Amount": 39, "Address": "<sender address (change)>"}
+      ],
       "Timestamp": "2026-10-16T12:05:00Z"
     }
   ],
@@ -209,9 +209,10 @@ BPM payloads cannot be signed, so the endpoint answers `410 Gone` (with `Depreca
 |---|---|---|
 | `200 OK` | Blockchain retrieved successfully via `GET /` | JSON array of blocks |
 | `201 Created` | Block mined and appended to the blockchain via `POST /` | JSON object of the new block |
-| `400 Bad Request` | Malformed JSON body or invalid transaction payload (e.g. empty list, missing address, zero amount) | `{"error": "invalid request body"}` |
-| `400 Bad Request` | Transaction rejected before mining | `{"error": "...", "code": "missing_signature" \| "invalid_signature" \| "invalid_public_key" \| "invalid_recipient" \| "sender_mismatch" \| "missing_timestamp"}` |
-| `409 Conflict` | Replay or wrong nonce, or the same transaction twice in one request | `{"error": "...", "code": "nonce_reused" \| "nonce_gap" \| "duplicate_transaction"}` |
+| `400 Bad Request` | Malformed JSON body or invalid transaction payload (e.g. empty list) | `{"error": "invalid request body"}` |
+| `400 Bad Request` | Transaction rejected before mining | `{"error": "...", "code": "missing_signature" \| "invalid_signature" \| "invalid_public_key" \| "input_owner_mismatch" \| "invalid_output" \| "missing_inputs" \| "missing_timestamp"}` |
+| `409 Conflict` | Input already spent or unknown, or the same output spent twice | `{"error": "...", "code": "input_missing_or_spent" \| "double_spend"}` |
+| `422 Unprocessable Entity` | Outputs exceed inputs | `{"error": "...", "code": "insufficient_inputs"}` |
 | `410 Gone` | `POST /legacy/bpm` (removed) | `{"error": "...", "code": "endpoint_gone"}` |
 | `405 Method Not Allowed` | HTTP method not allowed on endpoint (e.g. `PUT`, `DELETE`) | empty body (router-level response) |
 | `408 Request Timeout` | Client disconnected or cancelled request during mining | `{"error": "mining cancelled"}` |
