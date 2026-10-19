@@ -83,7 +83,7 @@ func BlockDelta(view UTXOView, b *Block, isGenesis bool) (UTXODelta, error) {
 			return UTXODelta{}, ErrInsufficientInputs
 		}
 
-		txid := tx.UTXOHash()
+		txid := tx.CalculateHash()
 		for j, o := range tx.Outputs {
 			op := OutPoint{TxID: txid, Index: uint32(j)}
 			if _, exists := delta.Created[op]; exists || seen[op] {

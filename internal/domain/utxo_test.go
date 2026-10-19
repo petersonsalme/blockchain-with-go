@@ -25,7 +25,7 @@ func newTx(n int, ins []domain.OutPoint, outs ...domain.TxOut) domain.Transactio
 }
 
 func outpoint(tx domain.Transaction, i uint32) domain.OutPoint {
-	return domain.OutPoint{TxID: tx.UTXOHash(), Index: i}
+	return domain.OutPoint{TxID: tx.CalculateHash(), Index: i}
 }
 
 func blockOf(index int, txs ...domain.Transaction) *domain.Block {
@@ -467,7 +467,7 @@ var _ = Describe("UTXO rules", func() {
 func lookupAmount(blocks []*domain.Block, txid string, idx uint32) uint64 {
 	for _, b := range blocks {
 		for _, tx := range b.Transactions {
-			if tx.UTXOHash() == txid && int(idx) < len(tx.Outputs) {
+			if tx.CalculateHash() == txid && int(idx) < len(tx.Outputs) {
 				return tx.Outputs[idx].Amount
 			}
 		}
