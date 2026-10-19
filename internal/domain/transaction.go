@@ -76,6 +76,29 @@ type Transaction struct {
 	Signature string
 	PublicKey string
 	Timestamp time.Time
+
+	Inputs  []TxIn
+	Outputs []TxOut
+}
+
+// OutPoint identifies a transaction output.
+type OutPoint struct {
+	TxID  string
+	Index uint32
+}
+
+// TxIn spends the output (PrevTxID, OutIndex).
+type TxIn struct {
+	PrevTxID  string
+	OutIndex  uint32
+	PublicKey string
+	Signature string
+}
+
+// TxOut assigns Amount to Address.
+type TxOut struct {
+	Amount  uint64
+	Address string
 }
 
 type txHashPayload struct {
@@ -197,6 +220,107 @@ func (t *Transaction) VerifySignature() error {
 	hashBytes, _ := hex.DecodeString(t.CalculateHash())
 	if !wallet.Verify(ed25519.PublicKey(rawPub), hashBytes, rawSig) {
 		return ErrInvalidSignature
+	}
+
+	return nil
+}
+
+type utxoInPayload struct {
+	PrevTxID string `json:"prev_txid"`
+	OutIndex uint32 `json:"out_index"`
+}
+
+type utxoOutPayload struct {
+	Amount  uint64 `json:"amount"`
+	Address string `json:"address"`
+}
+
+type utxoHashPayload struct {
+	Inputs    []utxoInPayload  `json:"inputs"`
+	Outputs   []utxoOutPayload `json:"outputs"`
+	Timestamp string           `json:"timestamp"`
+}
+
+// UTXOHash is the SHA-256 hex of the canonical JSON of the inputs (without
+// PublicKey/Signature), the outputs and the UTC timestamp.
+func (t *Transaction) UTXOHash() string {
+	if t == nil {
+		return ""
+	}
+
+	payload := utxoHashPayload{
+		Inputs:    make([]utxoInPayload, len(t.Inputs)),
+		Outputs:   make([]utxoOutPayload, len(t.Outputs)),
+		Timestamp: t.Timestamp.UTC().Format(time.RFC3339Nano),
+	}
+	for i, in := range t.Inputs {
+		payload.Inputs[i] = utxoInPayload{PrevTxID: in.PrevTxID, OutIndex: in.OutIndex}
+	}
+	for i, out := range t.Outputs {
+		payload.Outputs[i] = utxoOutPayload{Amount: out.Amount, Address: out.Address}
+	}
+
+	data, _ := json.Marshal(payload)
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
+}
+
+// SignInput signs the UTXOHash bytes with w and stores the key and signature in input i.
+func SignInput(tx *Transaction, i int, w *wallet.Wallet) error {
+	if tx == nil {
+		return errors.New("transaction is nil")
+	}
+	if w == nil {
+		return errors.New("wallet is nil")
+	}
+	if i < 0 || i >= len(tx.Inputs) {
+		return ErrInputIndex
+	}
+
+	hashBytes, _ := hex.DecodeString(tx.UTXOHash())
+	tx.Inputs[i].PublicKey = hex.EncodeToString(w.PublicKey())
+	tx.Inputs[i].Signature = hex.EncodeToString(w.Sign(hashBytes))
+	return nil
+}
+
+// VerifyInputSignature checks that input i carries a canonical, non-weak key
+// whose address owns spent, and a valid signature over UTXOHash.
+func VerifyInputSignature(tx *Transaction, i int, spent TxOut) error {
+	if tx == nil {
+		return errors.New("transaction is nil")
+	}
+	if i < 0 || i >= len(tx.Inputs) {
+		return ErrInputIndex
+	}
+	in := tx.Inputs[i]
+
+	if in.Signature == "" || in.PublicKey == "" {
+		return ErrMissingSignature
+	}
+
+	if len(in.PublicKey) != 64 {
+		return ErrInvalidPublicKey
+	}
+	rawPub, err := hex.DecodeString(in.PublicKey)
+	if err != nil || hex.EncodeToString(rawPub) != in.PublicKey || isWeakPublicKey(rawPub) {
+		return ErrInvalidPublicKey
+	}
+
+	if len(in.Signature) != 128 {
+		return ErrInvalidSignature
+	}
+	rawSig, err := hex.DecodeString(in.Signature)
+	if err != nil || hex.EncodeToString(rawSig) != in.Signature {
+		return ErrInvalidSignature
+	}
+
+	hashBytes, _ := hex.DecodeString(tx.UTXOHash())
+	if !wallet.Verify(ed25519.PublicKey(rawPub), hashBytes, rawSig) {
+		return ErrInvalidSignature
+	}
+
+	if wallet.AddressFromPublicKey(ed25519.PublicKey(rawPub)) != spent.Address {
+		return ErrInputOwnerMismatch
 	}
 
 	return nil
