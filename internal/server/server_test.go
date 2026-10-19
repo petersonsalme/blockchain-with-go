@@ -42,22 +42,69 @@ func newWallet() *wallet.Wallet {
 	return w
 }
 
-// signedTx returns a transaction from w to the given address, signed with the given nonce.
-func signedTx(w *wallet.Wallet, to string, amount, nonce uint64) domain.Transaction {
-	tx := domain.Transaction{From: w.Address(), To: to, Amount: amount, Nonce: nonce, Timestamp: time.Now()}
-	Expect(domain.SignTransaction(&tx, w)).To(Succeed())
+// bank is a funded wallet: the genesis allocates bankOutputs outputs of bankAmount to owner.
+type bank struct {
+	owner *wallet.Wallet
+	mu    sync.Mutex
+	txid  string
+	next  uint32
+}
+
+const (
+	bankOutputs = 200
+	bankAmount  = 100
+)
+
+func newBank() *bank { return &bank{owner: newWallet()} }
+
+// service builds a chain.Service over repo whose genesis, when repo is empty, funds the bank.
+func (b *bank) service(repo *memory.Repository, engine consensus.Consensus, opts ...chain.Option) (*chain.Service, error) {
+	allocs := make([]domain.TxOut, bankOutputs)
+	for i := range allocs {
+		allocs[i] = domain.TxOut{Amount: bankAmount, Address: b.owner.Address()}
+	}
+	svc, err := chain.NewService(repo, engine, append([]chain.Option{chain.WithGenesisAllocations(allocs)}, opts...)...)
+	if err != nil {
+		return nil, err
+	}
+	blocks, err := repo.All()
+	if err != nil {
+		return nil, err
+	}
+	b.txid = blocks[0].Transactions[0].CalculateHash()
+	return svc, nil
+}
+
+// spend returns a transaction signed by the owner that pays amount to to, spending output idx.
+func (b *bank) spend(idx uint32, to string, amount uint64) domain.Transaction {
+	tx := domain.Transaction{
+		Inputs:    []domain.TxIn{{PrevTxID: b.txid, OutIndex: idx}},
+		Outputs:   []domain.TxOut{{Amount: amount, Address: to}},
+		Timestamp: time.Now(),
+	}
+	tx.ID = tx.CalculateHash()
+	Expect(domain.SignInput(&tx, 0, b.owner)).To(Succeed())
 	return tx
+}
+
+// tx spends the next unused output.
+func (b *bank) tx(to string, amount uint64) domain.Transaction {
+	b.mu.Lock()
+	idx := b.next
+	b.next++
+	b.mu.Unlock()
+	return b.spend(idx, to, amount)
+}
+
+// payload is a valid request that spends a fresh output, so it never replays.
+func (b *bank) payload() string {
+	return payloadOf(b.tx(newWallet().Address(), 42))
 }
 
 func payloadOf(txs ...domain.Transaction) string {
 	b, err := json.Marshal(Message{Transactions: txs})
 	Expect(err).NotTo(HaveOccurred())
 	return string(b)
-}
-
-// freshPayload is a valid request from a brand-new sender, so it never replays.
-func freshPayload() string {
-	return payloadOf(signedTx(newWallet(), newWallet().Address(), 42, 0))
 }
 
 type chainBody struct {
@@ -75,6 +122,7 @@ func (brokenChain) Mine(context.Context, []domain.Transaction) (*domain.Block, e
 var _ = Describe("Server", func() {
 	var (
 		router http.Handler
+		funds  *bank
 		repo   *memory.Repository
 		engine consensus.Consensus
 		cfg    Config
@@ -82,7 +130,7 @@ var _ = Describe("Server", func() {
 
 	// build wires repo, engine and cfg into a fresh Server; call it again after changing them.
 	build := func(opts ...chain.Option) {
-		svc, err := chain.NewService(repo, engine, opts...)
+		svc, err := funds.service(repo, engine, opts...)
 		Expect(err).NotTo(HaveOccurred())
 		router = NewServer(svc, cfg).Handler()
 	}
@@ -99,6 +147,7 @@ var _ = Describe("Server", func() {
 	withGenerator := func(g chain.Generator) { build(chain.WithGenerator(g)) }
 
 	BeforeEach(func() {
+		funds = newBank()
 		repo = memory.New()
 		engine = pow.NewProofOfWork(1)
 		cfg = Config{}
@@ -110,8 +159,8 @@ var _ = Describe("Server", func() {
 			It("returns 201 Created, the new block with populated transaction IDs, and appends to the chain", func() {
 				initialLen := chainLen()
 
-				sender, recipient := newWallet(), newWallet()
-				sent := signedTx(sender, recipient.Address(), 42, 0)
+				recipient := newWallet()
+				sent := funds.tx(recipient.Address(), 42)
 				payload := []byte(payloadOf(sent))
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
 				req.Header.Set("Content-Type", "application/json")
@@ -125,9 +174,8 @@ var _ = Describe("Server", func() {
 				var createdBlock domain.Block
 				Expect(json.Unmarshal(rec.Body.Bytes(), &createdBlock)).To(Succeed())
 				Expect(createdBlock.Transactions).To(HaveLen(1))
-				Expect(createdBlock.Transactions[0].From).To(Equal(sender.Address()))
-				Expect(createdBlock.Transactions[0].To).To(Equal(recipient.Address()))
-				Expect(createdBlock.Transactions[0].Amount).To(Equal(uint64(42)))
+				Expect(createdBlock.Transactions[0].Inputs).To(Equal(sent.Inputs))
+				Expect(createdBlock.Transactions[0].Outputs).To(Equal([]domain.TxOut{{Amount: 42, Address: recipient.Address()}}))
 				Expect(createdBlock.Transactions[0].ID).NotTo(BeEmpty())
 				Expect(createdBlock.Transactions[0].ID).To(Equal(createdBlock.Transactions[0].CalculateHash()))
 				Expect(createdBlock.Transactions[0].Timestamp.Equal(sent.Timestamp)).To(BeTrue())
@@ -152,7 +200,7 @@ var _ = Describe("Server", func() {
 
 				initialLen := chainLen()
 
-				payload := []byte(freshPayload())
+				payload := []byte(funds.payload())
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
 				req.Header.Set("Content-Type", "application/json")
 				rec := httptest.NewRecorder()
@@ -180,7 +228,7 @@ var _ = Describe("Server", func() {
 
 				initialLen := chainLen()
 
-				payload := []byte(freshPayload())
+				payload := []byte(funds.payload())
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
 				req.Header.Set("Content-Type", "application/json")
 				rec := httptest.NewRecorder()
@@ -208,7 +256,7 @@ var _ = Describe("Server", func() {
 
 				initialLen := chainLen()
 
-				payload := []byte(freshPayload())
+				payload := []byte(funds.payload())
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
 				req.Header.Set("Content-Type", "application/json")
 				rec := httptest.NewRecorder()
@@ -235,7 +283,7 @@ var _ = Describe("Server", func() {
 
 				initialLen := chainLen()
 
-				payload := []byte(freshPayload())
+				payload := []byte(funds.payload())
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload)).WithContext(ctx)
 				req.Header.Set("Content-Type", "application/json")
 				rec := httptest.NewRecorder()
@@ -255,7 +303,7 @@ var _ = Describe("Server", func() {
 
 				initialLen := chainLen()
 
-				payload := []byte(freshPayload())
+				payload := []byte(funds.payload())
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
 				req.Header.Set("Content-Type", "application/json")
 				rec := httptest.NewRecorder()
@@ -302,7 +350,7 @@ var _ = Describe("Server", func() {
 				go func() {
 					defer GinkgoRecover()
 					defer wg.Done()
-					req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(freshPayload()))
+					req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(funds.payload()))
 					rec := httptest.NewRecorder()
 					router.ServeHTTP(rec, req)
 					codes <- rec.Code
@@ -340,7 +388,7 @@ var _ = Describe("Server", func() {
 			})
 			initialLen := chainLen()
 
-			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(freshPayload()))
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(funds.payload()))
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, req)
 
@@ -361,12 +409,10 @@ var _ = Describe("Server", func() {
 			router.ServeHTTP(rec, req)
 			return rec
 		}
-		payload := freshPayload()
-
 		It("returns 422 block_too_large when transactions exceed the limit", func() {
 			// a signed transaction is ~450 bytes: stay under the 2x request body limit
 			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "300")
-			rec := post(payload)
+			rec := post(funds.payload())
 
 			Expect(rec.Code).To(Equal(http.StatusUnprocessableEntity))
 			var body map[string]any
@@ -386,7 +432,7 @@ var _ = Describe("Server", func() {
 				}
 				return b, err
 			})
-			rec := post(payload)
+			rec := post(funds.payload())
 
 			Expect(rec.Code).To(Equal(http.StatusUnprocessableEntity))
 			var body map[string]any
@@ -403,7 +449,7 @@ var _ = Describe("Server", func() {
 				}
 				return b, err
 			})
-			rec := post(payload)
+			rec := post(funds.payload())
 
 			Expect(rec.Code).To(Equal(http.StatusUnprocessableEntity))
 			var body map[string]any
@@ -413,7 +459,7 @@ var _ = Describe("Server", func() {
 
 		It("returns 413 request_too_large for a giant body", func() {
 			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "100")
-			rec := post(`{"Transactions":[{"From":"` + strings.Repeat("a", 1000) + `"}]}`)
+			rec := post(`{"Transactions":[{"ID":"` + strings.Repeat("a", 1000) + `"}]}`)
 
 			Expect(rec.Code).To(Equal(http.StatusRequestEntityTooLarge))
 			var body map[string]any
@@ -424,7 +470,7 @@ var _ = Describe("Server", func() {
 		})
 
 		It("still returns 201 on the happy path", func() {
-			Expect(post(payload).Code).To(Equal(http.StatusCreated))
+			Expect(post(funds.payload()).Code).To(Equal(http.StatusCreated))
 		})
 	})
 
@@ -447,10 +493,7 @@ var _ = Describe("Server", func() {
 			Entry("wrong Transactions type", `{"Transactions":"abc"}`, "invalid request body"),
 			Entry("missing Transactions field", `{}`, "transaction list cannot be empty"),
 			Entry("empty Transactions list", `{"Transactions":[]}`, "transaction list cannot be empty"),
-			Entry("transaction with zero Amount", `{"Transactions":[{"From":"alice","To":"bob","Amount":0}]}`, "invalid transaction: amount must be greater than zero"),
-			Entry("transaction with empty From", `{"Transactions":[{"From":"","To":"bob","Amount":10}]}`, "invalid transaction: from cannot be empty"),
-			Entry("transaction with empty To", `{"Transactions":[{"From":"alice","To":"","Amount":10}]}`, "invalid transaction: to cannot be empty"),
-			Entry("transaction with divergent ID", `{"Transactions":[{"ID":"invalid-id","From":"alice","To":"bob","Amount":10}]}`, "invalid transaction: transaction id does not match calculated hash"),
+			Entry("transaction with divergent ID", `{"Transactions":[{"ID":"invalid-id","Outputs":[{"Amount":1,"Address":"bob"}]}]}`, "invalid transaction: transaction id does not match calculated hash"),
 		)
 
 		It("rejects blocks with 422 when the injected consensus fails verification", func() {
@@ -458,7 +501,7 @@ var _ = Describe("Server", func() {
 			build()
 			initialLen := chainLen()
 
-			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(freshPayload()))
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(funds.payload()))
 			rec := httptest.NewRecorder()
 
 			router.ServeHTTP(rec, req)
@@ -474,7 +517,7 @@ var _ = Describe("Server", func() {
 			})
 			initialLen := chainLen()
 
-			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(freshPayload()))
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(funds.payload()))
 			rec := httptest.NewRecorder()
 
 			router.ServeHTTP(rec, req)
@@ -550,12 +593,13 @@ var _ = Describe("Server", func() {
 		})
 
 		It("isolates state between two servers in the same process", func() {
-			svcA, _ := chain.NewService(memory.New(), engine)
+			bankA := newBank()
+			svcA, _ := bankA.service(memory.New(), engine)
 			svcB, _ := chain.NewService(memory.New(), engine)
 			a, b := NewServer(svcA, Config{}).Handler(), NewServer(svcB, Config{}).Handler()
 
 			rec := httptest.NewRecorder()
-			a.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(freshPayload())))
+			a.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(bankA.payload())))
 			Expect(rec.Code).To(Equal(http.StatusCreated))
 
 			count := func(h http.Handler) int {
@@ -683,7 +727,7 @@ var _ = Describe("Server", func() {
 
 			client := &http.Client{Timeout: 20 * time.Second}
 			_, postErr := client.Post("http://"+addr+"/", "application/json",
-				strings.NewReader(freshPayload()))
+				strings.NewReader(funds.payload()))
 			Expect(postErr).To(HaveOccurred())
 			var netErr net.Error
 			Expect(errors.As(postErr, &netErr) && netErr.Timeout()).To(BeFalse(), "reply was not dropped by WriteTimeout")
@@ -695,7 +739,7 @@ var _ = Describe("Server", func() {
 	})
 
 	Describe("GET / (handleGetBlockchain)", func() {
-		It("returns 200 OK with only the valid genesis block", func() {
+		It("returns 200 OK with only the genesis block, holding the allocation", func() {
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
 			rec := httptest.NewRecorder()
 
@@ -707,12 +751,14 @@ var _ = Describe("Server", func() {
 			Expect(json.Unmarshal(rec.Body.Bytes(), &bc)).To(Succeed())
 			Expect(bc.Blocks).To(HaveLen(1))
 			Expect(bc.Blocks[0].Index).To(Equal(0))
-			Expect(bc.Blocks[0].Transactions).To(BeEmpty())
+			Expect(bc.Blocks[0].Transactions).To(HaveLen(1))
+			Expect(bc.Blocks[0].Transactions[0].Inputs).To(BeEmpty())
+			Expect(bc.Blocks[0].Transactions[0].Outputs).To(HaveLen(bankOutputs))
 			Expect(bc.Blocks[0].PrevHash).To(BeEmpty())
 		})
 
 		It("returns 2 linked blocks after a valid POST", func() {
-			post := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(payloadOf(signedTx(newWallet(), newWallet().Address(), 77, 0))))
+			post := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(payloadOf(funds.tx(newWallet().Address(), 77))))
 			postRec := httptest.NewRecorder()
 			router.ServeHTTP(postRec, post)
 			Expect(postRec.Code).To(Equal(http.StatusCreated))
@@ -727,11 +773,11 @@ var _ = Describe("Server", func() {
 			Expect(bc.Blocks[1].Index).To(Equal(1))
 			Expect(bc.Blocks[1].PrevHash).To(Equal(bc.Blocks[0].Hash))
 			Expect(bc.Blocks[1].Transactions).To(HaveLen(1))
-			Expect(bc.Blocks[1].Transactions[0].Amount).To(Equal(uint64(77)))
+			Expect(bc.Blocks[1].Transactions[0].Outputs[0].Amount).To(Equal(uint64(77)))
 		})
 	})
 
-	Describe("POST / signed transactions", func() {
+	Describe("POST / UTXO transactions", func() {
 		post := func(body string) *httptest.ResponseRecorder {
 			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 			rec := httptest.NewRecorder()
@@ -747,26 +793,32 @@ var _ = Describe("Server", func() {
 			Expect(resp.Error).NotTo(BeEmpty())
 		}
 
-		DescribeTable("returns 400 with a code and leaves the chain unchanged",
-			func(mutate func(tx *domain.Transaction), code string) {
+		DescribeTable("maps a rejection to its status and code and leaves the chain unchanged",
+			func(mutate func(tx *domain.Transaction), status int, code string) {
 				initialLen := chainLen()
-				tx := signedTx(newWallet(), newWallet().Address(), 5, 0)
+				tx := funds.tx(newWallet().Address(), 5)
 				mutate(&tx)
 
-				expectError(post(payloadOf(tx)), http.StatusBadRequest, code)
+				expectError(post(payloadOf(tx)), status, code)
 				Expect(chainLen()).To(Equal(initialLen))
 			},
-			Entry("unsigned", func(tx *domain.Transaction) { tx.Signature = "" }, "missing_signature"),
-			Entry("missing public key", func(tx *domain.Transaction) { tx.PublicKey = "" }, "missing_signature"),
-			Entry("tampered amount", func(tx *domain.Transaction) { tx.Amount++; tx.ID = "" }, "invalid_signature"),
-			Entry("invalid public key", func(tx *domain.Transaction) { tx.PublicKey = "abcd" }, "invalid_public_key"),
-			Entry("invalid recipient", func(tx *domain.Transaction) { tx.To = "bob"; tx.ID = "" }, "invalid_recipient"),
-			Entry("sender mismatch", func(tx *domain.Transaction) { tx.From = newWallet().Address(); tx.ID = "" }, "sender_mismatch"),
+			Entry("unsigned", func(tx *domain.Transaction) { tx.Inputs[0].Signature = "" }, http.StatusBadRequest, "missing_signature"),
+			Entry("missing public key", func(tx *domain.Transaction) { tx.Inputs[0].PublicKey = "" }, http.StatusBadRequest, "missing_signature"),
+			Entry("tampered amount", func(tx *domain.Transaction) { tx.Outputs[0].Amount++; tx.ID = "" }, http.StatusBadRequest, "invalid_signature"),
+			Entry("invalid public key", func(tx *domain.Transaction) { tx.Inputs[0].PublicKey = "abcd" }, http.StatusBadRequest, "invalid_public_key"),
+			Entry("input owned by another key", func(tx *domain.Transaction) {
+				Expect(domain.SignInput(tx, 0, newWallet())).To(Succeed())
+			}, http.StatusBadRequest, "input_owner_mismatch"),
+			Entry("zero-amount output", func(tx *domain.Transaction) { tx.Outputs[0].Amount = 0; tx.ID = "" }, http.StatusBadRequest, "invalid_output"),
+			Entry("no outputs", func(tx *domain.Transaction) { tx.Outputs = nil; tx.ID = "" }, http.StatusBadRequest, "invalid_output"),
+			Entry("no inputs", func(tx *domain.Transaction) { tx.Inputs = nil; tx.ID = "" }, http.StatusBadRequest, "missing_inputs"),
+			Entry("outputs exceed inputs", func(tx *domain.Transaction) { tx.Outputs[0].Amount = bankAmount + 1; tx.ID = "" }, http.StatusUnprocessableEntity, "insufficient_inputs"),
+			Entry("unknown input", func(tx *domain.Transaction) { tx.Inputs[0].PrevTxID = "unknown"; tx.ID = "" }, http.StatusConflict, "input_missing_or_spent"),
 		)
 
 		It("never fills the signed Timestamp: a zero timestamp is 400 missing_timestamp", func() {
 			initialLen := chainLen()
-			tx := signedTx(newWallet(), newWallet().Address(), 5, 0)
+			tx := funds.tx(newWallet().Address(), 5)
 			tx.Timestamp = time.Time{}
 			tx.ID = ""
 
@@ -775,7 +827,7 @@ var _ = Describe("Server", func() {
 		})
 
 		It("fills an empty ID without touching signed fields", func() {
-			tx := signedTx(newWallet(), newWallet().Address(), 5, 0)
+			tx := funds.tx(newWallet().Address(), 5)
 			tx.ID = ""
 
 			rec := post(payloadOf(tx))
@@ -787,48 +839,45 @@ var _ = Describe("Server", func() {
 		})
 
 		It("keeps a wrong ID as 400", func() {
-			tx := signedTx(newWallet(), newWallet().Address(), 5, 0)
+			tx := funds.tx(newWallet().Address(), 5)
 			tx.ID = "wrong"
 			Expect(post(payloadOf(tx)).Code).To(Equal(http.StatusBadRequest))
 		})
 
-		It("returns 409 nonce_reused for a lower nonce and 409 nonce_gap for a higher one", func() {
-			w, to := newWallet(), newWallet().Address()
-			Expect(post(payloadOf(signedTx(w, to, 1, 0))).Code).To(Equal(http.StatusCreated))
+		It("returns 409 double_spend for two transactions spending the same outpoint in one request", func() {
+			to := newWallet().Address()
 			initialLen := chainLen()
-
-			expectError(post(payloadOf(signedTx(w, to, 2, 0))), http.StatusConflict, "nonce_reused")
-			expectError(post(payloadOf(signedTx(w, to, 2, 5))), http.StatusConflict, "nonce_gap")
-			Expect(chainLen()).To(Equal(initialLen))
-			Expect(post(payloadOf(signedTx(w, to, 2, 1))).Code).To(Equal(http.StatusCreated))
-		})
-
-		It("accepts consecutive nonces of one sender in one request", func() {
-			w, to := newWallet(), newWallet().Address()
-			Expect(post(payloadOf(signedTx(w, to, 1, 0), signedTx(w, to, 2, 1))).Code).To(Equal(http.StatusCreated))
-		})
-
-		It("returns 409 duplicate_transaction for a repeated transaction in one request", func() {
-			tx := signedTx(newWallet(), newWallet().Address(), 1, 0)
-			initialLen := chainLen()
-			expectError(post(payloadOf(tx, tx)), http.StatusConflict, "duplicate_transaction")
+			expectError(post(payloadOf(funds.spend(0, to, 5), funds.spend(0, to, 6))), http.StatusConflict, "double_spend")
 			Expect(chainLen()).To(Equal(initialLen))
 		})
 
-		It("rejects a byte-for-byte replay with 409 nonce_reused", func() {
-			body := payloadOf(signedTx(newWallet(), newWallet().Address(), 1, 0))
+		It("returns 409 input_missing_or_spent for a resend of a mined transaction", func() {
+			body := payloadOf(funds.tx(newWallet().Address(), 1))
 			Expect(post(body).Code).To(Equal(http.StatusCreated))
 			initialLen := chainLen()
-			expectError(post(body), http.StatusConflict, "nonce_reused")
+			expectError(post(body), http.StatusConflict, "input_missing_or_spent")
 			Expect(chainLen()).To(Equal(initialLen))
 		})
 
-		It("accepts exactly one of 50 concurrent submissions of the same transaction", func() {
-			body := payloadOf(signedTx(newWallet(), newWallet().Address(), 1, 0))
+		It("returns 409 input_missing_or_spent for another transaction spending a mined outpoint", func() {
+			to := newWallet().Address()
+			Expect(post(payloadOf(funds.spend(0, to, 1))).Code).To(Equal(http.StatusCreated))
+			initialLen := chainLen()
+			expectError(post(payloadOf(funds.spend(0, to, 2))), http.StatusConflict, "input_missing_or_spent")
+			Expect(chainLen()).To(Equal(initialLen))
+		})
+
+		It("accepts exactly one of 50 concurrent transactions spending the same outpoint", func() {
 			const n = 50
+			to := newWallet().Address()
+			bodies := make([]string, n)
+			for i := range bodies {
+				bodies[i] = payloadOf(funds.spend(0, to, uint64(1+i)))
+			}
 			codes := make(chan int, n)
 			var wg sync.WaitGroup
 			for i := 0; i < n; i++ {
+				body := bodies[i]
 				wg.Add(1)
 				go func() {
 					defer GinkgoRecover()
