@@ -8,6 +8,7 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
+	"github.com/petersonsalme/blockchain-with-go/internal/storage/memory"
 )
 
 // ErrInvalidBlock is returned by Mine when the sealed block is nil or fails consensus verification.
@@ -24,30 +25,48 @@ func WithGenerator(g Generator) Option {
 	return func(s *Service) { s.generate = g }
 }
 
-// Service mines blocks onto the chain held by a storage.BlockRepository.
-type Service struct {
-	repo      storage.BlockRepository
-	consensus consensus.Consensus
-	generate  Generator
-	// writeSem serializes Mine; a buffered channel lets waiters honour ctx.
-	writeSem chan struct{}
-	// nonces holds the next expected nonce per sender; only touched under writeSem
-	// (and in NewService, before the Service is shared).
-	nonces map[string]uint64
+// WithUTXOSet replaces the default in-memory UTXO set. NewService rebuilds it
+// from the chain, so it must start empty.
+func WithUTXOSet(u storage.UTXOSet) Option {
+	return func(s *Service) { s.utxos = u }
 }
 
-// NewService builds a Service over repo and stores the genesis block when repo is empty.
+// WithGenesisAllocations makes the genesis block of an empty repository carry
+// one transaction without inputs that creates outs.
+func WithGenesisAllocations(outs []domain.TxOut) Option {
+	return func(s *Service) { s.allocations = outs }
+}
+
+// Service mines blocks onto the chain held by a storage.BlockRepository.
+type Service struct {
+	repo        storage.BlockRepository
+	consensus   consensus.Consensus
+	generate    Generator
+	utxos       storage.UTXOSet
+	allocations []domain.TxOut
+	// writeSem serializes Mine; a buffered channel lets waiters honour ctx.
+	writeSem chan struct{}
+}
+
+// NewService builds a Service over repo, stores the genesis block when repo is
+// empty and rebuilds the UTXO set from the chain.
 func NewService(repo storage.BlockRepository, c consensus.Consensus, opts ...Option) (*Service, error) {
-	s := &Service{repo: repo, consensus: c, generate: GenerateBlockWithContext, writeSem: make(chan struct{}, 1), nonces: map[string]uint64{}}
+	s := &Service{repo: repo, consensus: c, generate: GenerateBlockWithContext, writeSem: make(chan struct{}, 1)}
 	for _, opt := range opts {
 		opt(s)
+	}
+	if s.utxos == nil {
+		s.utxos = memory.NewUTXOSet()
 	}
 
 	if _, err := repo.Last(); err != nil {
 		if !errors.Is(err, storage.ErrEmpty) {
 			return nil, err
 		}
-		genesis := &domain.Block{Timestamp: time.Now(), Transactions: []domain.Transaction{}}
+		genesis := s.genesis()
+		if _, err := domain.BlockDelta(s.utxos, genesis, true); err != nil {
+			return nil, err
+		}
 		if err := repo.Append(genesis); err != nil {
 			return nil, err
 		}
@@ -57,45 +76,54 @@ func NewService(repo storage.BlockRepository, c consensus.Consensus, opts ...Opt
 	if err != nil {
 		return nil, err
 	}
-	for _, b := range blocks {
-		for _, tx := range b.Transactions {
-			s.nonces[tx.From]++
+	for i, b := range blocks {
+		delta, err := domain.BlockDelta(s.utxos, b, i == 0 && b.Index == 0)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.utxos.Apply(delta); err != nil {
+			return nil, err
 		}
 	}
 
 	return s, nil
 }
 
-// checkTransactions verifies every signature and, per sender, that nonces are
-// consecutive from the sender's next expected nonce. It returns the nonces to
-// commit once the block is appended and never modifies s.nonces.
-func (s *Service) checkTransactions(txs []domain.Transaction) (map[string]uint64, error) {
-	next := map[string]uint64{}
-	seen := make(map[string]struct{}, len(txs))
+// genesis builds the first block, with an allocation transaction when configured.
+func (s *Service) genesis() *domain.Block {
+	now := time.Now()
+	block := &domain.Block{Timestamp: now, Transactions: []domain.Transaction{}}
+	if len(s.allocations) > 0 {
+		alloc := domain.Transaction{Outputs: s.allocations, Timestamp: now}
+		alloc.ID = alloc.CalculateHash()
+		block.Transactions = append(block.Transactions, alloc)
+	}
+	return block
+}
+
+// verifyInputs checks the signature of every input against the output it
+// spends. It must run after a successful BlockDelta over txs, so every
+// input resolves either in the set or in an earlier transaction of txs.
+func (s *Service) verifyInputs(txs []domain.Transaction) error {
+	created := map[domain.OutPoint]domain.TxOut{}
 	for i := range txs {
 		tx := &txs[i]
-		if err := tx.VerifySignature(); err != nil {
-			return nil, err
+		for j, in := range tx.Inputs {
+			op := domain.OutPoint{TxID: in.PrevTxID, Index: in.OutIndex}
+			spent, ok := created[op]
+			if !ok {
+				spent, _ = s.utxos.Lookup(op)
+			}
+			if err := domain.VerifyInputSignature(tx, j, spent); err != nil {
+				return err
+			}
 		}
-		hash := tx.CalculateHash()
-		if _, dup := seen[hash]; dup {
-			return nil, domain.ErrDuplicateTransaction
+		txid := tx.CalculateHash()
+		for j, out := range tx.Outputs {
+			created[domain.OutPoint{TxID: txid, Index: uint32(j)}] = out
 		}
-		seen[hash] = struct{}{}
-
-		want, ok := next[tx.From]
-		if !ok {
-			want = s.nonces[tx.From]
-		}
-		if tx.Nonce < want {
-			return nil, domain.ErrNonceReused
-		}
-		if tx.Nonce > want {
-			return nil, domain.ErrNonceGap
-		}
-		next[tx.From] = want + 1
 	}
-	return next, nil
+	return nil
 }
 
 // Blocks returns a snapshot of the chain, genesis first.
@@ -104,10 +132,11 @@ func (s *Service) Blocks() ([]*domain.Block, error) {
 }
 
 // Mine seals txs into a new block and appends it to the chain.
-// Transactions must be signed by their From address and carry consecutive
-// nonces per sender, otherwise the matching domain error is returned and
-// nothing changes. Calls are serialized; waiting for the turn is bounded by ctx. A rejected
-// block leaves the repository untouched, and Blocks never waits for Mine.
+// Every transaction must spend existing, unspent outputs it owns and cover its
+// outputs, otherwise the matching domain error is returned and nothing
+// changes. Calls are serialized; waiting for the turn is bounded by ctx. A
+// rejected block leaves the repository and the UTXO set untouched, and Blocks
+// never waits for Mine.
 func (s *Service) Mine(ctx context.Context, txs []domain.Transaction) (*domain.Block, error) {
 	select {
 	case s.writeSem <- struct{}{}:
@@ -121,13 +150,16 @@ func (s *Service) Mine(ctx context.Context, txs []domain.Transaction) (*domain.B
 		return nil, err
 	}
 
-	pending, err := s.checkTransactions(txs)
+	prev, err := s.repo.Last()
 	if err != nil {
 		return nil, err
 	}
 
-	prev, err := s.repo.Last()
+	delta, err := domain.BlockDelta(s.utxos, &domain.Block{Index: prev.Index + 1, Transactions: txs}, false)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.verifyInputs(txs); err != nil {
 		return nil, err
 	}
 
@@ -150,8 +182,8 @@ func (s *Service) Mine(ctx context.Context, txs []domain.Transaction) (*domain.B
 		return nil, err
 	}
 
-	for from, n := range pending {
-		s.nonces[from] = n
+	if err := s.utxos.Apply(delta); err != nil {
+		return nil, err
 	}
 
 	return block, nil

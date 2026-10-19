@@ -1,7 +1,6 @@
 package chain_test
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"sync"
@@ -17,7 +16,6 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/memory"
-	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
 )
 
 // rejectingConsensus seals with PoW but never accepts a block.
@@ -61,22 +59,6 @@ func (f *failingRepo) Last() (*domain.Block, error) {
 		return nil, f.lastErr
 	}
 	return f.BlockRepository.Last()
-}
-
-// signedTx returns a transaction from w to a fixed recipient, signed with the given nonce.
-func signedTx(w *wallet.Wallet, nonce uint64) domain.Transaction {
-	to, err := wallet.FromSeed(bytes.Repeat([]byte{7}, 32))
-	Expect(err).NotTo(HaveOccurred())
-	tx := domain.Transaction{From: w.Address(), To: to.Address(), Amount: 1, Nonce: nonce, Timestamp: time.Now()}
-	Expect(domain.SignTransaction(&tx, w)).To(Succeed())
-	return tx
-}
-
-// sampleTx returns a valid signed transaction from a fresh sender, so repeated calls never replay.
-func sampleTx() []domain.Transaction {
-	w, err := wallet.New()
-	Expect(err).NotTo(HaveOccurred())
-	return []domain.Transaction{signedTx(w, 0)}
 }
 
 var _ = Describe("Service", func() {
@@ -138,7 +120,7 @@ var _ = Describe("Service", func() {
 
 	Describe("Blocks", func() {
 		It("returns the repository chain", func() {
-			svc, _ := NewService(repo, eng)
+			svc, _ := funded(repo, eng)
 			blocks, err := svc.Blocks()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(blocks).To(HaveLen(1))
@@ -147,8 +129,8 @@ var _ = Describe("Service", func() {
 
 	Describe("Mine", func() {
 		It("seals, validates and appends a linked block", func() {
-			svc, _ := NewService(repo, eng)
-			blk, err := svc.Mine(context.Background(), sampleTx())
+			svc, f := funded(repo, eng)
+			blk, err := svc.Mine(context.Background(), f.tx())
 			Expect(err).NotTo(HaveOccurred())
 			Expect(blk.Index).To(Equal(1))
 
@@ -160,8 +142,8 @@ var _ = Describe("Service", func() {
 		})
 
 		It("returns ErrInvalidBlock when Verify rejects, leaving the chain unchanged", func() {
-			svc, _ := NewService(repo, rejectingConsensus{inner: eng})
-			blk, err := svc.Mine(context.Background(), sampleTx())
+			svc, f := funded(repo, rejectingConsensus{inner: eng})
+			blk, err := svc.Mine(context.Background(), f.tx())
 			Expect(err).To(MatchError(ErrInvalidBlock))
 			Expect(blk).To(BeNil())
 
@@ -170,22 +152,22 @@ var _ = Describe("Service", func() {
 		})
 
 		It("returns ErrInvalidBlock for a nil block", func() {
-			svc, _ := NewService(repo, eng, WithGenerator(func(context.Context, consensus.Consensus, *domain.Block, []domain.Transaction) (*domain.Block, error) {
+			svc, f := funded(repo, eng, WithGenerator(func(context.Context, consensus.Consensus, *domain.Block, []domain.Transaction) (*domain.Block, error) {
 				return nil, nil
 			}))
-			_, err := svc.Mine(context.Background(), sampleTx())
+			_, err := svc.Mine(context.Background(), f.tx())
 			Expect(err).To(MatchError(ErrInvalidBlock))
 			all, _ := repo.All()
 			Expect(all).To(HaveLen(1))
 		})
 
 		It("propagates a ValidationError from ValidateBlockRules, leaving the chain unchanged", func() {
-			svc, _ := NewService(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+			svc, f := funded(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 				b, err := GenerateBlockWithContext(ctx, c, prev, txs)
 				b.Timestamp = prev.Timestamp.Add(-time.Second)
 				return b, err
 			}))
-			_, err := svc.Mine(context.Background(), sampleTx())
+			_, err := svc.Mine(context.Background(), f.tx())
 			var ve *domain.ValidationError
 			Expect(errors.As(err, &ve)).To(BeTrue())
 			Expect(ve.Code).To(Equal("timestamp_before_parent"))
@@ -195,8 +177,8 @@ var _ = Describe("Service", func() {
 
 		It("propagates a ValidationError from the size pre-check", func() {
 			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "100")
-			svc, _ := NewService(repo, eng)
-			_, err := svc.Mine(context.Background(), sampleTx())
+			svc, f := funded(repo, eng)
+			_, err := svc.Mine(context.Background(), f.tx())
 			var ve *domain.ValidationError
 			Expect(errors.As(err, &ve)).To(BeTrue())
 			Expect(ve.Code).To(Equal("block_too_large"))
@@ -204,10 +186,10 @@ var _ = Describe("Service", func() {
 
 		DescribeTable("propagates context errors",
 			func(e error) {
-				svc, _ := NewService(repo, eng, WithGenerator(func(context.Context, consensus.Consensus, *domain.Block, []domain.Transaction) (*domain.Block, error) {
+				svc, f := funded(repo, eng, WithGenerator(func(context.Context, consensus.Consensus, *domain.Block, []domain.Transaction) (*domain.Block, error) {
 					return nil, e
 				}))
-				_, err := svc.Mine(context.Background(), sampleTx())
+				_, err := svc.Mine(context.Background(), f.tx())
 				Expect(errors.Is(err, e)).To(BeTrue())
 				all, _ := repo.All()
 				Expect(all).To(HaveLen(1))
@@ -218,10 +200,10 @@ var _ = Describe("Service", func() {
 
 		It("propagates a generic generator error unchanged", func() {
 			boom := errors.New("boom")
-			svc, _ := NewService(repo, eng, WithGenerator(func(context.Context, consensus.Consensus, *domain.Block, []domain.Transaction) (*domain.Block, error) {
+			svc, f := funded(repo, eng, WithGenerator(func(context.Context, consensus.Consensus, *domain.Block, []domain.Transaction) (*domain.Block, error) {
 				return nil, boom
 			}))
-			_, err := svc.Mine(context.Background(), sampleTx())
+			_, err := svc.Mine(context.Background(), f.tx())
 			Expect(err).To(MatchError(boom))
 			Expect(errors.Is(err, ErrInvalidBlock)).To(BeFalse())
 		})
@@ -229,7 +211,7 @@ var _ = Describe("Service", func() {
 		DescribeTable("releases the write lock when Mine fails",
 			func(failFirst func(context.Context, consensus.Consensus, *domain.Block, []domain.Transaction) (*domain.Block, error), recoverPanic bool) {
 				var calls atomic.Int32
-				svc, _ := NewService(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+				svc, f := funded(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 					if calls.Add(1) == 1 {
 						return failFirst(ctx, c, prev, txs)
 					}
@@ -240,14 +222,14 @@ var _ = Describe("Service", func() {
 					if recoverPanic {
 						defer func() { Expect(recover()).NotTo(BeNil()) }()
 					}
-					_, err := svc.Mine(context.Background(), sampleTx())
+					_, err := svc.Mine(context.Background(), f.tx())
 					Expect(recoverPanic).To(BeFalse())
 					Expect(err).To(HaveOccurred())
 				}()
 
 				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 				defer cancel()
-				blk, err := svc.Mine(ctx, sampleTx())
+				blk, err := svc.Mine(ctx, f.tx())
 				Expect(err).NotTo(HaveOccurred())
 				Expect(blk.Index).To(Equal(1))
 
@@ -264,13 +246,13 @@ var _ = Describe("Service", func() {
 
 		It("returns the context error without generating or appending when ctx is already done and the lock is free", func() {
 			var called atomic.Bool
-			svc, _ := NewService(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+			svc, f := funded(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 				called.Store(true)
 				return GenerateBlockWithContext(ctx, c, prev, txs)
 			}))
 			// Done() never fires, so Mine's select always takes the free
 			// semaphore and only the post-lock ctx.Err() check can stop it.
-			blk, err := svc.Mine(errOnlyCtx{context.Background()}, sampleTx())
+			blk, err := svc.Mine(errOnlyCtx{context.Background()}, f.tx())
 			Expect(blk).To(BeNil())
 			Expect(errors.Is(err, context.Canceled)).To(BeTrue())
 			Expect(called.Load()).To(BeFalse())
@@ -281,25 +263,25 @@ var _ = Describe("Service", func() {
 		It("propagates repository Append errors", func() {
 			boom := errors.New("boom")
 			fr := &failingRepo{BlockRepository: repo}
-			svc, _ := NewService(fr, eng)
+			svc, f := funded(fr, eng)
 			fr.appendErr = boom
-			_, err := svc.Mine(context.Background(), sampleTx())
+			_, err := svc.Mine(context.Background(), f.tx())
 			Expect(err).To(MatchError(boom))
 		})
 
 		It("propagates repository Last errors", func() {
 			boom := errors.New("boom")
 			fr := &failingRepo{BlockRepository: repo}
-			svc, _ := NewService(fr, eng)
+			svc, f := funded(fr, eng)
 			fr.lastErr = boom
-			_, err := svc.Mine(context.Background(), sampleTx())
+			_, err := svc.Mine(context.Background(), f.tx())
 			Expect(err).To(MatchError(boom))
 		})
 
 		It("keeps services over separate repositories independent", func() {
-			a, _ := NewService(memory.New(), eng)
-			b, _ := NewService(memory.New(), eng)
-			_, err := a.Mine(context.Background(), sampleTx())
+			a, fa := funded(memory.New(), eng)
+			b, _ := funded(memory.New(), eng)
+			_, err := a.Mine(context.Background(), fa.tx())
 			Expect(err).NotTo(HaveOccurred())
 
 			ab, _ := a.Blocks()
@@ -316,18 +298,19 @@ var _ = Describe("Service", func() {
 				read.Wait()
 				return GenerateBlockWithContext(ctx, c, prev, txs)
 			}
-			a, err := NewService(repo, eng, WithGenerator(barrier))
-			Expect(err).NotTo(HaveOccurred())
+			a, f := funded(repo, eng, WithGenerator(barrier))
 			b, err := NewService(repo, eng, WithGenerator(barrier))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(a).NotTo(BeNil())
 			Expect(b).NotTo(BeNil())
 
 			errs := make(chan error, 2)
-			for _, svc := range []*Service{a, b} {
+			txs := [][]domain.Transaction{f.tx(), f.tx()}
+			for i, svc := range []*Service{a, b} {
+				i, svc := i, svc
 				go func() {
 					defer GinkgoRecover()
-					_, err := svc.Mine(context.Background(), sampleTx())
+					_, err := svc.Mine(context.Background(), txs[i])
 					errs <- err
 				}()
 			}
@@ -348,15 +331,16 @@ var _ = Describe("Service", func() {
 		})
 
 		It("serializes concurrent Mine calls into a valid chain", func() {
-			svc, _ := NewService(repo, eng)
+			svc, f := funded(repo, eng)
 			const n = 10
 			var wg sync.WaitGroup
 			for i := 0; i < n; i++ {
+				txs := f.tx()
 				wg.Add(1)
 				go func() {
 					defer GinkgoRecover()
 					defer wg.Done()
-					_, err := svc.Mine(context.Background(), sampleTx())
+					_, err := svc.Mine(context.Background(), txs)
 					Expect(err).NotTo(HaveOccurred())
 				}()
 			}
@@ -373,6 +357,7 @@ var _ = Describe("Service", func() {
 		Context("while another Mine holds the write lock", func() {
 			var (
 				svc      *Service
+				f        *funding
 				entered  chan struct{}
 				release  chan struct{}
 				holderCh chan error
@@ -384,7 +369,7 @@ var _ = Describe("Service", func() {
 				release = make(chan struct{})
 				holderCh = make(chan error, 1)
 				calls.Store(0)
-				svc, _ = NewService(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+				svc, f = funded(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 					if calls.Add(1) == 1 {
 						close(entered)
 						<-release
@@ -393,7 +378,7 @@ var _ = Describe("Service", func() {
 				}))
 				go func() {
 					defer GinkgoRecover()
-					_, err := svc.Mine(context.Background(), sampleTx())
+					_, err := svc.Mine(context.Background(), f.tx())
 					holderCh <- err
 				}()
 				Eventually(entered).Should(BeClosed())
@@ -412,7 +397,7 @@ var _ = Describe("Service", func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 				defer cancel()
 
-				blk, err := svc.Mine(ctx, sampleTx())
+				blk, err := svc.Mine(ctx, f.tx())
 				Expect(blk).To(BeNil())
 				Expect(errors.Is(err, context.DeadlineExceeded)).To(BeTrue())
 				Expect(calls.Load()).To(Equal(int32(1)))
