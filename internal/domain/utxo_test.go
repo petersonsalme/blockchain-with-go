@@ -162,6 +162,13 @@ var _ = Describe("UTXO rules", func() {
 			Expect(err).To(MatchError(domain.ErrDoubleSpend))
 		})
 
+		It("rejects re-creating an outpoint created and spent earlier in the same genesis block", func() {
+			t1 := newTx(5, nil, domain.TxOut{Amount: 5, Address: alice})
+			t2 := newTx(6, []domain.OutPoint{outpoint(t1, 0)}, domain.TxOut{Amount: 5, Address: bob})
+			_, err := domain.BlockDelta(domain.UTXOSet{}, blockOf(0, t1, t2, t1), true)
+			Expect(err).To(MatchError(domain.ErrDoubleSpend))
+		})
+
 		It("rejects the same transaction twice in one block", func() {
 			_, err := domain.BlockDelta(domain.UTXOSet{}, blockOf(0, genesisTx, genesisTx), true)
 			Expect(err).To(MatchError(domain.ErrDoubleSpend))

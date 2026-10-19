@@ -170,15 +170,13 @@ var _ = Describe("UTXO transaction", func() {
 			},
 			Entry("short", "abcd"),
 			Entry("not hex", "zz"+hex.EncodeToString(make([]byte, 63))),
-			Entry("uppercase hex", func() string {
-				t := domain.Transaction{Inputs: []domain.TxIn{{}}, Outputs: []domain.TxOut{{Amount: 1}}}
-				if err := domain.SignInput(&t, 0, seededWallet(9)); err != nil {
-					panic(err)
-				}
-				return upper(t.Inputs[0].Signature)
-			}()),
 			Entry("wrong bytes", hex.EncodeToString(make([]byte, 64))),
 		)
+
+		It("rejects an otherwise valid signature in uppercase hex", func() {
+			tx.Inputs[0].Signature = upper(tx.Inputs[0].Signature)
+			Expect(domain.VerifyInputSignature(&tx, 0, spent)).To(MatchError(domain.ErrInvalidSignature))
+		})
 
 		It("rejects a signature after a committed field changed", func() {
 			tx.Outputs[0].Amount++
