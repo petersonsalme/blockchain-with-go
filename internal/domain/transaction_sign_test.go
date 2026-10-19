@@ -651,11 +651,14 @@ var _ = Describe("Weak Ed25519 public keys", func() {
 			tx := weakTx(pub)
 			Expect(tx.VerifySignature()).To(MatchError(domain.ErrInvalidSignature))
 		}
-		// Same for a key with a middle byte below 0xff and y[0] >= 0xed.
-		b, _ := hex.DecodeString(hexLE(0xff, 0xff, 0x7f))
-		b[15] = 0xfe
-		tx := weakTx(hex.EncodeToString(b))
-		Expect(tx.VerifySignature()).To(MatchError(domain.ErrInvalidSignature))
+		// Same for a key with a middle byte below 0xff and y[0] >= 0xed,
+		// including the first and last middle bytes (bounds of y[1:31]).
+		for _, i := range []int{1, 15, 30} {
+			b, _ := hex.DecodeString(hexLE(0xff, 0xff, 0x7f))
+			b[i] = 0xfe
+			tx := weakTx(hex.EncodeToString(b))
+			Expect(tx.VerifySignature()).To(MatchError(domain.ErrInvalidSignature), "middle byte %d", i)
+		}
 	})
 
 	It("regression ENG-76: identity key with R=identity, S=0 is rejected for any message", func() {
