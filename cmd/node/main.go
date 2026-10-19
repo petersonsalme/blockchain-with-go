@@ -101,6 +101,7 @@ func run(ctx context.Context) error {
 
 	srv := server.NewServer(svc, server.Config{
 		MiningTimeout: server.ParseMiningTimeout(os.Getenv(server.MiningTimeoutEnvVar)),
+		RateLimit:     server.ParseRateLimit(os.Getenv(server.RateLimitEnvVar)),
 	})
 
 	addr := ":" + os.Getenv("PORT")

@@ -30,12 +30,17 @@ type Chain interface {
 type Config struct {
 	// MiningTimeout bounds one mining request; non-positive means DefaultMiningTimeout.
 	MiningTimeout time.Duration
+	// RateLimit is requests per minute per IP; non-positive means disabled.
+	RateLimit int
+	// Now returns the current time; nil means time.Now.
+	Now func() time.Time
 }
 
 // Server is the HTTP adapter over a Chain.
 type Server struct {
 	chain         Chain
 	miningTimeout time.Duration
+	limiter       *rateLimiter
 }
 
 // NewServer builds a Server that serves svc.
@@ -44,7 +49,11 @@ func NewServer(svc Chain, cfg Config) *Server {
 	if timeout <= 0 {
 		timeout = DefaultMiningTimeout
 	}
-	return &Server{chain: svc, miningTimeout: timeout}
+	var limiter *rateLimiter
+	if cfg.RateLimit > 0 {
+		limiter = newRateLimiter(cfg.RateLimit, cfg.Now)
+	}
+	return &Server{chain: svc, miningTimeout: timeout, limiter: limiter}
 }
 
 // ParseMiningTimeout reads a MINING_TIMEOUT value: a Go duration or integer seconds.
@@ -72,6 +81,9 @@ func (s *Server) Handler() http.Handler {
 	r.HandleFunc("/", s.handleGetBlockchain).Methods("GET")
 	r.HandleFunc("/", s.handleWriteBlock).Methods("POST")
 	r.HandleFunc("/legacy/bpm", s.handleLegacyBPM).Methods("POST")
+	if s.limiter != nil {
+		return s.limiter.middleware(r)
+	}
 	return r
 }
 

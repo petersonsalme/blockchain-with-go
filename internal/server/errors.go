@@ -19,6 +19,9 @@ const chainConflictCode = "chain_conflict"
 // endpointGoneCode is the error code returned by the removed POST /legacy/bpm.
 const endpointGoneCode = "endpoint_gone"
 
+// rateLimitedCode is the error code returned when requests exceed the rate limit.
+const rateLimitedCode = "rate_limited"
+
 // transactionErrors maps transaction rejections to their HTTP status and code.
 var transactionErrors = []struct {
 	err    error
