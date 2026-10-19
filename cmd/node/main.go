@@ -3,18 +3,25 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/petersonsalme/blockchain-with-go/internal/chain"
+	"github.com/petersonsalme/blockchain-with-go/internal/consensus"
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus/pow"
+	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/internal/server"
+	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/memory"
+	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
 )
 
 func main() {
@@ -44,12 +51,50 @@ func shutdownContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 10*time.Second)
 }
 
+// genesisAllocationsEnvVar lists the genesis outputs as address:amount[,address:amount...].
+const genesisAllocationsEnvVar = "GENESIS_ALLOCATIONS"
+
+// newService builds the chain service, funding the genesis block of an empty
+// repository from GENESIS_ALLOCATIONS.
+func newService(repo storage.BlockRepository, engine consensus.Consensus) (*chain.Service, error) {
+	outs, err := parseGenesisAllocations(os.Getenv(genesisAllocationsEnvVar))
+	if err != nil {
+		return nil, err
+	}
+	return chain.NewService(repo, engine, chain.WithGenesisAllocations(outs))
+}
+
+// parseGenesisAllocations parses address:amount items separated by commas. A
+// blank value yields no outputs; any invalid item fails the whole list.
+func parseGenesisAllocations(raw string) ([]domain.TxOut, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	var outs []domain.TxOut
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimSpace(item)
+		addr, value, ok := strings.Cut(item, ":")
+		if !ok {
+			return nil, fmt.Errorf("%s: invalid item %q: want address:amount", genesisAllocationsEnvVar, item)
+		}
+		if err := wallet.ValidateAddress(addr); err != nil {
+			return nil, fmt.Errorf("%s: invalid item %q: %w", genesisAllocationsEnvVar, item, err)
+		}
+		amount, err := strconv.ParseUint(value, 10, 64)
+		if err != nil || amount == 0 {
+			return nil, fmt.Errorf("%s: invalid item %q: amount must be an integer in [1, 2^64-1]", genesisAllocationsEnvVar, item)
+		}
+		outs = append(outs, domain.TxOut{Amount: amount, Address: addr})
+	}
+	return outs, nil
+}
+
 // run wires repository, consensus, service and server, then serves until ctx is done.
 func run(ctx context.Context) error {
 	repo := memory.New()
 	engine := pow.NewProofOfWorkFromEnv()
 
-	svc, err := chain.NewService(repo, engine)
+	svc, err := newService(repo, engine)
 	if err != nil {
 		return err
 	}
