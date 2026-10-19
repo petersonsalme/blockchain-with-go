@@ -31,11 +31,14 @@ type Service struct {
 	generate  Generator
 	// writeSem serializes Mine; a buffered channel lets waiters honour ctx.
 	writeSem chan struct{}
+	// nonces holds the next expected nonce per sender; only touched under writeSem
+	// (and in NewService, before the Service is shared).
+	nonces map[string]uint64
 }
 
 // NewService builds a Service over repo and stores the genesis block when repo is empty.
 func NewService(repo storage.BlockRepository, c consensus.Consensus, opts ...Option) (*Service, error) {
-	s := &Service{repo: repo, consensus: c, generate: GenerateBlockWithContext, writeSem: make(chan struct{}, 1)}
+	s := &Service{repo: repo, consensus: c, generate: GenerateBlockWithContext, writeSem: make(chan struct{}, 1), nonces: map[string]uint64{}}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -50,7 +53,49 @@ func NewService(repo storage.BlockRepository, c consensus.Consensus, opts ...Opt
 		}
 	}
 
+	blocks, err := repo.All()
+	if err != nil {
+		return nil, err
+	}
+	for _, b := range blocks {
+		for _, tx := range b.Transactions {
+			s.nonces[tx.From]++
+		}
+	}
+
 	return s, nil
+}
+
+// checkTransactions verifies every signature and, per sender, that nonces are
+// consecutive from the sender's next expected nonce. It returns the nonces to
+// commit once the block is appended and never modifies s.nonces.
+func (s *Service) checkTransactions(txs []domain.Transaction) (map[string]uint64, error) {
+	next := map[string]uint64{}
+	seen := make(map[string]struct{}, len(txs))
+	for i := range txs {
+		tx := &txs[i]
+		if err := tx.VerifySignature(); err != nil {
+			return nil, err
+		}
+		hash := tx.CalculateHash()
+		if _, dup := seen[hash]; dup {
+			return nil, domain.ErrDuplicateTransaction
+		}
+		seen[hash] = struct{}{}
+
+		want, ok := next[tx.From]
+		if !ok {
+			want = s.nonces[tx.From]
+		}
+		if tx.Nonce < want {
+			return nil, domain.ErrNonceReused
+		}
+		if tx.Nonce > want {
+			return nil, domain.ErrNonceGap
+		}
+		next[tx.From] = want + 1
+	}
+	return next, nil
 }
 
 // Blocks returns a snapshot of the chain, genesis first.
@@ -59,7 +104,9 @@ func (s *Service) Blocks() ([]*domain.Block, error) {
 }
 
 // Mine seals txs into a new block and appends it to the chain.
-// Calls are serialized; waiting for the turn is bounded by ctx. A rejected
+// Transactions must be signed by their From address and carry consecutive
+// nonces per sender, otherwise the matching domain error is returned and
+// nothing changes. Calls are serialized; waiting for the turn is bounded by ctx. A rejected
 // block leaves the repository untouched, and Blocks never waits for Mine.
 func (s *Service) Mine(ctx context.Context, txs []domain.Transaction) (*domain.Block, error) {
 	select {
@@ -71,6 +118,11 @@ func (s *Service) Mine(ctx context.Context, txs []domain.Transaction) (*domain.B
 
 	// select picks at random when both cases are ready; do not mine for a dead ctx.
 	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	pending, err := s.checkTransactions(txs)
+	if err != nil {
 		return nil, err
 	}
 
@@ -96,6 +148,10 @@ func (s *Service) Mine(ctx context.Context, txs []domain.Transaction) (*domain.B
 
 	if err := s.repo.Append(block); err != nil {
 		return nil, err
+	}
+
+	for from, n := range pending {
+		s.nonces[from] = n
 	}
 
 	return block, nil

@@ -143,11 +143,20 @@ $ curl http://localhost:8080/
 ```
 
 ### POST /
-Create and mine a new block with a list of transactions. If `Timestamp` or `ID` are omitted on any transaction, the server populates them automatically before validation.
+Create and mine a new block with a list of **signed** transactions. The node never changes a signed field: `Timestamp` is required (`400 missing_timestamp`), and `ID` is filled in only when empty (a wrong `ID` is `400`).
+
+A transaction is signed with Ed25519 over its hash (`domain.SignTransaction`): `PublicKey` and `Signature` are 64 and 128 lowercase hex characters, `From` must be the address of `PublicKey`, and `To` a valid address. Each sender has a `Nonce` that starts at 0 and must increase by exactly 1 per accepted transaction (consecutive nonces of one sender are allowed within a request), which makes a replay of an accepted transaction fail.
 
 ```shell
 $ curl -X POST -H "Content-Type: application/json" \
-  -d '{"Transactions":[{"From":"alice","To":"bob","Amount":10,"Fee":1,"Nonce":0}]}' \
+  -d '{"Transactions":[{
+        "ID":"3a7b8c...",
+        "From":"00<sender address>",
+        "To":"00<recipient address>",
+        "Amount":10,"Fee":1,"Nonce":0,
+        "PublicKey":"<64 hex chars>",
+        "Signature":"<128 hex chars>",
+        "Timestamp":"2026-10-16T12:05:00Z"}]}' \
   http://localhost:8080/
 ```
 
@@ -159,12 +168,13 @@ $ curl -X POST -H "Content-Type: application/json" \
   "Transactions": [
     {
       "ID": "3a7b8c...",
-      "From": "alice",
-      "To": "bob",
+      "From": "00<sender address>",
+      "To": "00<recipient address>",
       "Amount": 10,
       "Fee": 1,
       "Nonce": 0,
-      "Signature": "",
+      "Signature": "<128 hex chars>",
+      "PublicKey": "<64 hex chars>",
       "Timestamp": "2026-10-16T12:05:00Z"
     }
   ],
@@ -175,50 +185,19 @@ $ curl -X POST -H "Content-Type: application/json" \
 }
 ```
 
-### POST /legacy/bpm (Deprecated)
-Compatibility endpoint that accepts legacy BPM payloads and converts them into a single transaction (`{From: "legacy", To: "legacy", Amount: BPM}`). Responses include the `Deprecation: true` HTTP header.
-
-```shell
-$ curl -X POST -H "Content-Type: application/json" \
-  -d '{"BPM":10}' \
-  http://localhost:8080/legacy/bpm
-```
-
-**Success Response (`201 Created`):**
-```
-Deprecation: true
-Content-Type: application/json
-```
-```json
-{
-  "Index": 1,
-  "Timestamp": "2026-10-16T12:05:00Z",
-  "Transactions": [
-    {
-      "ID": "f1e2d3...",
-      "From": "legacy",
-      "To": "legacy",
-      "Amount": 10,
-      "Fee": 0,
-      "Nonce": 0,
-      "Signature": "",
-      "Timestamp": "2026-10-16T12:05:00Z"
-    }
-  ],
-  "Hash": "00f4a8b1...",
-  "PrevHash": "00a1b2c3...",
-  "Nonce": 128,
-  "Difficulty": 2
-}
-```
+### POST /legacy/bpm (Removed)
+BPM payloads cannot be signed, so the endpoint answers `410 Gone` (with `Deprecation: true`) and `{"error": "endpoint removed; send signed transactions to POST /", "code": "endpoint_gone"}` for any body.
 
 ### HTTP Status Codes & Error Responses
 
 | Status Code | Description | Example Response Body |
 |---|---|---|
 | `200 OK` | Blockchain retrieved successfully via `GET /` | JSON array of blocks |
-| `201 Created` | Block mined and appended to the blockchain via `POST /` or `POST /legacy/bpm` | JSON object of the new block |
+| `201 Created` | Block mined and appended to the blockchain via `POST /` | JSON object of the new block |
 | `400 Bad Request` | Malformed JSON body or invalid transaction payload (e.g. empty list, missing address, zero amount) | `{"error": "invalid request body"}` |
+| `400 Bad Request` | Transaction rejected before mining | `{"error": "...", "code": "missing_signature" \| "invalid_signature" \| "invalid_public_key" \| "invalid_recipient" \| "sender_mismatch" \| "missing_timestamp"}` |
+| `409 Conflict` | Replay or wrong nonce, or the same transaction twice in one request | `{"error": "...", "code": "nonce_reused" \| "nonce_gap" \| "duplicate_transaction"}` |
+| `410 Gone` | `POST /legacy/bpm` (removed) | `{"error": "...", "code": "endpoint_gone"}` |
 | `405 Method Not Allowed` | HTTP method not allowed on endpoint (e.g. `PUT`, `DELETE`) | empty body (router-level response) |
 | `408 Request Timeout` | Client disconnected or cancelled request during mining | `{"error": "mining cancelled"}` |
 | `422 Unprocessable Entity` | Generated block failed chain validation | `{"error": "invalid block could not be added"}` |
