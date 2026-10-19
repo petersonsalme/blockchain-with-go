@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -196,6 +197,9 @@ func TestParseGenesisAllocations(t *testing.T) {
 			if err == nil || outs != nil {
 				t.Fatalf("parse(%q) = %v, %v, want error", in, outs, err)
 			}
+			if bad := invalidItem(in); !strings.Contains(err.Error(), fmt.Sprintf("%q", bad)) {
+				t.Fatalf("error %v does not cite the invalid item %q", err, bad)
+			}
 		})
 	}
 
@@ -203,6 +207,13 @@ func TestParseGenesisAllocations(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "bad:5") {
 		t.Fatalf("error %v does not cite the invalid item", err)
 	}
+}
+
+// invalidItem returns the offending item of an invalid list: the last one,
+// since every case puts the bad item last (or is a single item).
+func invalidItem(list string) string {
+	items := strings.Split(list, ",")
+	return strings.TrimSpace(items[len(items)-1])
 }
 
 func TestRunFailsOnInvalidGenesisAllocations(t *testing.T) {
