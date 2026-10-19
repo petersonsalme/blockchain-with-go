@@ -294,6 +294,30 @@ var _ = Describe("UTXO rules", func() {
 			Expect(err).To(MatchError(domain.ErrMissingInputs))
 		})
 
+		It("returns an error, without panicking, for a nil first block", func() {
+			var s domain.UTXOSet
+			var err error
+			Expect(func() { s, err = domain.BuildUTXOSet([]*domain.Block{nil}) }).NotTo(Panic())
+			Expect(err).To(HaveOccurred())
+			Expect(s).To(BeNil())
+		})
+
+		It("does not treat a first block with Index other than 0 as genesis", func() {
+			first := blockOf(1, newTx(1, nil, domain.TxOut{Amount: 1, Address: bob}))
+			s, err := domain.BuildUTXOSet([]*domain.Block{first})
+			Expect(err).To(MatchError(domain.ErrMissingInputs))
+			Expect(s).To(BeNil())
+		})
+
+		It("treats a repeated Index 0 block past the first as non-genesis, so an allocation cannot be re-spent", func() {
+			spend1 := newTx(1, []domain.OutPoint{g0}, domain.TxOut{Amount: 100, Address: bob})
+			spend2 := newTx(2, []domain.OutPoint{g0}, domain.TxOut{Amount: 100, Address: alice})
+			blocks := []*domain.Block{genesis, blockOf(1, spend1), blockOf(0, genesisTx), blockOf(1, spend2)}
+			s, err := domain.BuildUTXOSet(blocks)
+			Expect(err).To(MatchError(domain.ErrMissingInputs))
+			Expect(s).To(BeNil())
+		})
+
 		It("wraps nothing: a failing block returns its sentinel", func() {
 			bad := blockOf(1, newTx(1, []domain.OutPoint{{TxID: "q"}}, domain.TxOut{Amount: 1, Address: bob}))
 			s, err := domain.BuildUTXOSet([]*domain.Block{genesis, bad})

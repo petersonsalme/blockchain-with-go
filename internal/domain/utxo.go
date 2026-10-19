@@ -128,11 +128,13 @@ func (s UTXOSet) Revert(d UTXODelta) {
 	}
 }
 
-// BuildUTXOSet replays blocks in order; the block with Index 0 is the genesis.
+// BuildUTXOSet replays blocks in order; only the first block, and only when
+// its Index is 0, is the genesis, so a later Index 0 block cannot re-create
+// allocations that were already spent.
 func BuildUTXOSet(blocks []*Block) (UTXOSet, error) {
 	set := UTXOSet{}
-	for _, b := range blocks {
-		d, err := BlockDelta(set, b, b != nil && b.Index == 0)
+	for i, b := range blocks {
+		d, err := BlockDelta(set, b, i == 0 && b != nil && b.Index == 0)
 		if err != nil {
 			return nil, err
 		}
