@@ -43,6 +43,13 @@ func (r *Repository) Append(b *domain.Block) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if n := len(r.blocks); n > 0 {
+		last := r.blocks[n-1]
+		if b.Index != last.Index+1 || b.PrevHash != last.Hash {
+			return storage.ErrConflict
+		}
+	}
+
 	r.blocks = append(r.blocks, b)
 	return nil
 }
