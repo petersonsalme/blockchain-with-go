@@ -31,6 +31,16 @@ func (f *failingUTXOSet) Apply(d domain.UTXODelta) error {
 	return f.UTXOSet.Apply(d)
 }
 
+// stubRepo returns a fixed chain, bypassing the append-order checks of the
+// in-memory repository.
+type stubRepo struct{ blocks []*domain.Block }
+
+func (s *stubRepo) Last() (*domain.Block, error) { return s.blocks[len(s.blocks)-1], nil }
+func (s *stubRepo) Append(*domain.Block) error   { return storage.ErrConflict }
+func (s *stubRepo) All() ([]*domain.Block, error) {
+	return s.blocks, nil
+}
+
 var _ = Describe("Service UTXO rules", func() {
 	var (
 		repo  *memory.Repository
@@ -172,6 +182,26 @@ var _ = Describe("Service UTXO rules", func() {
 				{Outputs: []domain.TxOut{{Amount: 1, Address: other.Address()}}},
 			}})).To(Succeed())
 			_, err := NewService(bad, eng)
+			Expect(err).To(MatchError(domain.ErrMissingInputs))
+		})
+
+		It("treats a first block with Index 5 as a regular block, not the genesis", func() {
+			bad := memory.New()
+			Expect(bad.Append(&domain.Block{Index: 5, Transactions: []domain.Transaction{
+				{Outputs: []domain.TxOut{{Amount: 1, Address: other.Address()}}},
+			}})).To(Succeed())
+			_, err := NewService(bad, eng)
+			Expect(err).To(MatchError(domain.ErrMissingInputs))
+		})
+
+		It("treats an Index 0 block at position 1 as a regular block, not the genesis", func() {
+			stub := &stubRepo{blocks: []*domain.Block{
+				{Index: 0},
+				{Index: 0, Transactions: []domain.Transaction{
+					{Outputs: []domain.TxOut{{Amount: 1, Address: other.Address()}}},
+				}},
+			}}
+			_, err := NewService(stub, eng)
 			Expect(err).To(MatchError(domain.ErrMissingInputs))
 		})
 
