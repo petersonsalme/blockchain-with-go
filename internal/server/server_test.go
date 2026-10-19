@@ -22,6 +22,7 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus/pow"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/memory"
+	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
 )
 
 // rejectingConsensus seals with inner but never accepts a block.
@@ -33,6 +34,30 @@ func (r rejectingConsensus) Seal(ctx context.Context, b *domain.Block) error {
 
 func (rejectingConsensus) Verify(prev, b *domain.Block) error {
 	return errors.New("rejected by fake consensus")
+}
+
+func newWallet() *wallet.Wallet {
+	w, err := wallet.New()
+	Expect(err).NotTo(HaveOccurred())
+	return w
+}
+
+// signedTx returns a transaction from w to the given address, signed with the given nonce.
+func signedTx(w *wallet.Wallet, to string, amount, nonce uint64) domain.Transaction {
+	tx := domain.Transaction{From: w.Address(), To: to, Amount: amount, Nonce: nonce, Timestamp: time.Now()}
+	Expect(domain.SignTransaction(&tx, w)).To(Succeed())
+	return tx
+}
+
+func payloadOf(txs ...domain.Transaction) string {
+	b, err := json.Marshal(Message{Transactions: txs})
+	Expect(err).NotTo(HaveOccurred())
+	return string(b)
+}
+
+// freshPayload is a valid request from a brand-new sender, so it never replays.
+func freshPayload() string {
+	return payloadOf(signedTx(newWallet(), newWallet().Address(), 42, 0))
 }
 
 type chainBody struct {
@@ -85,7 +110,9 @@ var _ = Describe("Server", func() {
 			It("returns 201 Created, the new block with populated transaction IDs, and appends to the chain", func() {
 				initialLen := chainLen()
 
-				payload := []byte(`{"Transactions":[{"From":"alice","To":"bob","Amount":42,"Fee":1,"Nonce":0}]}`)
+				sender, recipient := newWallet(), newWallet()
+				sent := signedTx(sender, recipient.Address(), 42, 0)
+				payload := []byte(payloadOf(sent))
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
 				req.Header.Set("Content-Type", "application/json")
 				rec := httptest.NewRecorder()
@@ -98,12 +125,12 @@ var _ = Describe("Server", func() {
 				var createdBlock domain.Block
 				Expect(json.Unmarshal(rec.Body.Bytes(), &createdBlock)).To(Succeed())
 				Expect(createdBlock.Transactions).To(HaveLen(1))
-				Expect(createdBlock.Transactions[0].From).To(Equal("alice"))
-				Expect(createdBlock.Transactions[0].To).To(Equal("bob"))
+				Expect(createdBlock.Transactions[0].From).To(Equal(sender.Address()))
+				Expect(createdBlock.Transactions[0].To).To(Equal(recipient.Address()))
 				Expect(createdBlock.Transactions[0].Amount).To(Equal(uint64(42)))
 				Expect(createdBlock.Transactions[0].ID).NotTo(BeEmpty())
 				Expect(createdBlock.Transactions[0].ID).To(Equal(createdBlock.Transactions[0].CalculateHash()))
-				Expect(createdBlock.Transactions[0].Timestamp.IsZero()).To(BeFalse())
+				Expect(createdBlock.Transactions[0].Timestamp.Equal(sent.Timestamp)).To(BeTrue())
 
 				Expect(chainLen()).To(Equal(initialLen + 1))
 				Expect(lastBlock().Transactions).To(HaveLen(1))
@@ -125,7 +152,7 @@ var _ = Describe("Server", func() {
 
 				initialLen := chainLen()
 
-				payload := []byte(`{"Transactions":[{"From":"alice","To":"bob","Amount":42}]}`)
+				payload := []byte(freshPayload())
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
 				req.Header.Set("Content-Type", "application/json")
 				rec := httptest.NewRecorder()
@@ -153,7 +180,7 @@ var _ = Describe("Server", func() {
 
 				initialLen := chainLen()
 
-				payload := []byte(`{"Transactions":[{"From":"alice","To":"bob","Amount":42}]}`)
+				payload := []byte(freshPayload())
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
 				req.Header.Set("Content-Type", "application/json")
 				rec := httptest.NewRecorder()
@@ -181,7 +208,7 @@ var _ = Describe("Server", func() {
 
 				initialLen := chainLen()
 
-				payload := []byte(`{"Transactions":[{"From":"alice","To":"bob","Amount":42}]}`)
+				payload := []byte(freshPayload())
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
 				req.Header.Set("Content-Type", "application/json")
 				rec := httptest.NewRecorder()
@@ -208,7 +235,7 @@ var _ = Describe("Server", func() {
 
 				initialLen := chainLen()
 
-				payload := []byte(`{"Transactions":[{"From":"alice","To":"bob","Amount":42}]}`)
+				payload := []byte(freshPayload())
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload)).WithContext(ctx)
 				req.Header.Set("Content-Type", "application/json")
 				rec := httptest.NewRecorder()
@@ -228,7 +255,7 @@ var _ = Describe("Server", func() {
 
 				initialLen := chainLen()
 
-				payload := []byte(`{"Transactions":[{"From":"alice","To":"bob","Amount":42}]}`)
+				payload := []byte(freshPayload())
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
 				req.Header.Set("Content-Type", "application/json")
 				rec := httptest.NewRecorder()
@@ -265,7 +292,6 @@ var _ = Describe("Server", func() {
 	})
 
 	Describe("POST / concurrency", func() {
-		payload := `{"Transactions":[{"From":"alice","To":"bob","Amount":42,"Fee":1,"Nonce":0}]}`
 
 		It("serializes concurrent POSTs into a valid chain and answers 201 to all", func() {
 			const n = 12
@@ -276,7 +302,7 @@ var _ = Describe("Server", func() {
 				go func() {
 					defer GinkgoRecover()
 					defer wg.Done()
-					req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(payload))
+					req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(freshPayload()))
 					rec := httptest.NewRecorder()
 					router.ServeHTTP(rec, req)
 					codes <- rec.Code
@@ -314,7 +340,7 @@ var _ = Describe("Server", func() {
 			})
 			initialLen := chainLen()
 
-			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(payload))
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(freshPayload()))
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, req)
 
@@ -335,10 +361,11 @@ var _ = Describe("Server", func() {
 			router.ServeHTTP(rec, req)
 			return rec
 		}
-		payload := `{"Transactions":[{"From":"alice","To":"bob","Amount":42,"Fee":1,"Nonce":0}]}`
+		payload := freshPayload()
 
 		It("returns 422 block_too_large when transactions exceed the limit", func() {
-			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "100")
+			// a signed transaction is ~450 bytes: stay under the 2x request body limit
+			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "300")
 			rec := post(payload)
 
 			Expect(rec.Code).To(Equal(http.StatusUnprocessableEntity))
@@ -347,7 +374,7 @@ var _ = Describe("Server", func() {
 			Expect(body).To(HaveKey("error"))
 			Expect(body["code"]).To(Equal("block_too_large"))
 			Expect(body["details"]).To(HaveKey("size"))
-			Expect(body["details"]).To(HaveKeyWithValue("max", BeNumerically("==", 100)))
+			Expect(body["details"]).To(HaveKeyWithValue("max", BeNumerically("==", 300)))
 			Expect(chainLen()).To(Equal(1))
 		})
 
@@ -431,7 +458,7 @@ var _ = Describe("Server", func() {
 			build()
 			initialLen := chainLen()
 
-			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"Transactions":[{"From":"alice","To":"bob","Amount":42}]}`))
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(freshPayload()))
 			rec := httptest.NewRecorder()
 
 			router.ServeHTTP(rec, req)
@@ -447,7 +474,7 @@ var _ = Describe("Server", func() {
 			})
 			initialLen := chainLen()
 
-			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"Transactions":[{"From":"alice","To":"bob","Amount":42}]}`))
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(freshPayload()))
 			rec := httptest.NewRecorder()
 
 			router.ServeHTTP(rec, req)
@@ -459,56 +486,25 @@ var _ = Describe("Server", func() {
 	})
 
 	Describe("POST /legacy/bpm", func() {
-		Context("when receiving a valid BPM payload", func() {
-			It("returns 201 Created with Deprecation header and creates block with legacy transaction", func() {
+		DescribeTable("returns 410 Gone with Deprecation header and leaves the chain unchanged",
+			func(body string) {
 				initialLen := chainLen()
 
-				payload := []byte(`{"BPM": 42}`)
-				req := httptest.NewRequest(http.MethodPost, "/legacy/bpm", bytes.NewReader(payload))
-				req.Header.Set("Content-Type", "application/json")
+				req := httptest.NewRequest(http.MethodPost, "/legacy/bpm", strings.NewReader(body))
 				rec := httptest.NewRecorder()
 
 				router.ServeHTTP(rec, req)
 
-				Expect(rec.Code).To(Equal(http.StatusCreated))
+				Expect(rec.Code).To(Equal(http.StatusGone))
 				Expect(rec.Header().Get("Deprecation")).To(Equal("true"))
 				Expect(rec.Header().Get("Content-Type")).To(Equal("application/json"))
-
-				var createdBlock domain.Block
-				Expect(json.Unmarshal(rec.Body.Bytes(), &createdBlock)).To(Succeed())
-				Expect(createdBlock.Transactions).To(HaveLen(1))
-				Expect(createdBlock.Transactions[0].From).To(Equal("legacy"))
-				Expect(createdBlock.Transactions[0].To).To(Equal("legacy"))
-				Expect(createdBlock.Transactions[0].Amount).To(Equal(uint64(42)))
-				Expect(createdBlock.Transactions[0].ID).NotTo(BeEmpty())
-				Expect(createdBlock.Transactions[0].ID).To(Equal(createdBlock.Transactions[0].CalculateHash()))
-
-				Expect(chainLen()).To(Equal(initialLen + 1))
-				Expect(lastBlock().Transactions[0].Amount).To(Equal(uint64(42)))
-			})
-		})
-
-		Context("when BPM is invalid or body is malformed", func() {
-			DescribeTable("returns 400 Bad Request with Deprecation header and leaves chain unchanged",
-				func(body string, expectedMsg string) {
-					initialLen := chainLen()
-
-					req := httptest.NewRequest(http.MethodPost, "/legacy/bpm", strings.NewReader(body))
-					rec := httptest.NewRecorder()
-
-					router.ServeHTTP(rec, req)
-
-					Expect(rec.Code).To(Equal(http.StatusBadRequest))
-					Expect(rec.Header().Get("Deprecation")).To(Equal("true"))
-					Expect(rec.Body.String()).To(MatchJSON(`{"error": "` + expectedMsg + `"}`))
-					Expect(chainLen()).To(Equal(initialLen))
-				},
-				Entry("BPM is zero", `{"BPM": 0}`, "BPM must be greater than zero"),
-				Entry("BPM is negative", `{"BPM": -10}`, "BPM must be greater than zero"),
-				Entry("BPM is wrong type", `{"BPM": "abc"}`, "invalid request body"),
-				Entry("empty body", "", "invalid request body"),
-			)
-		})
+				Expect(rec.Body.String()).To(MatchJSON(`{"error": "endpoint removed; send signed transactions to POST /", "code": "endpoint_gone"}`))
+				Expect(chainLen()).To(Equal(initialLen))
+			},
+			Entry("valid BPM", `{"BPM": 42}`),
+			Entry("invalid BPM", `{"BPM": 0}`),
+			Entry("empty body", ""),
+		)
 	})
 
 	DescribeTable("unsupported methods on / return 405",
@@ -559,7 +555,7 @@ var _ = Describe("Server", func() {
 			a, b := NewServer(svcA, Config{}).Handler(), NewServer(svcB, Config{}).Handler()
 
 			rec := httptest.NewRecorder()
-			a.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"Transactions":[{"From":"alice","To":"bob","Amount":1}]}`)))
+			a.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(freshPayload())))
 			Expect(rec.Code).To(Equal(http.StatusCreated))
 
 			count := func(h http.Handler) int {
@@ -687,7 +683,7 @@ var _ = Describe("Server", func() {
 
 			client := &http.Client{Timeout: 20 * time.Second}
 			_, postErr := client.Post("http://"+addr+"/", "application/json",
-				strings.NewReader(`{"Transactions":[{"From":"alice","To":"bob","Amount":1}]}`))
+				strings.NewReader(freshPayload()))
 			Expect(postErr).To(HaveOccurred())
 			var netErr net.Error
 			Expect(errors.As(postErr, &netErr) && netErr.Timeout()).To(BeFalse(), "reply was not dropped by WriteTimeout")
@@ -716,7 +712,7 @@ var _ = Describe("Server", func() {
 		})
 
 		It("returns 2 linked blocks after a valid POST", func() {
-			post := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"Transactions":[{"From":"alice","To":"bob","Amount":77}]}`))
+			post := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(payloadOf(signedTx(newWallet(), newWallet().Address(), 77, 0))))
 			postRec := httptest.NewRecorder()
 			router.ServeHTTP(postRec, post)
 			Expect(postRec.Code).To(Equal(http.StatusCreated))
@@ -732,6 +728,129 @@ var _ = Describe("Server", func() {
 			Expect(bc.Blocks[1].PrevHash).To(Equal(bc.Blocks[0].Hash))
 			Expect(bc.Blocks[1].Transactions).To(HaveLen(1))
 			Expect(bc.Blocks[1].Transactions[0].Amount).To(Equal(uint64(77)))
+		})
+	})
+
+	Describe("POST / signed transactions", func() {
+		post := func(body string) *httptest.ResponseRecorder {
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			return rec
+		}
+		expectError := func(rec *httptest.ResponseRecorder, status int, code string) {
+			Expect(rec.Code).To(Equal(status))
+			Expect(rec.Header().Get("Content-Type")).To(Equal("application/json"))
+			var resp errorResponse
+			Expect(json.Unmarshal(rec.Body.Bytes(), &resp)).To(Succeed())
+			Expect(resp.Code).To(Equal(code))
+			Expect(resp.Error).NotTo(BeEmpty())
+		}
+
+		DescribeTable("returns 400 with a code and leaves the chain unchanged",
+			func(mutate func(tx *domain.Transaction), code string) {
+				initialLen := chainLen()
+				tx := signedTx(newWallet(), newWallet().Address(), 5, 0)
+				mutate(&tx)
+
+				expectError(post(payloadOf(tx)), http.StatusBadRequest, code)
+				Expect(chainLen()).To(Equal(initialLen))
+			},
+			Entry("unsigned", func(tx *domain.Transaction) { tx.Signature = "" }, "missing_signature"),
+			Entry("missing public key", func(tx *domain.Transaction) { tx.PublicKey = "" }, "missing_signature"),
+			Entry("tampered amount", func(tx *domain.Transaction) { tx.Amount++; tx.ID = "" }, "invalid_signature"),
+			Entry("invalid public key", func(tx *domain.Transaction) { tx.PublicKey = "abcd" }, "invalid_public_key"),
+			Entry("invalid recipient", func(tx *domain.Transaction) { tx.To = "bob"; tx.ID = "" }, "invalid_recipient"),
+			Entry("sender mismatch", func(tx *domain.Transaction) { tx.From = newWallet().Address(); tx.ID = "" }, "sender_mismatch"),
+		)
+
+		It("never fills the signed Timestamp: a zero timestamp is 400 missing_timestamp", func() {
+			initialLen := chainLen()
+			tx := signedTx(newWallet(), newWallet().Address(), 5, 0)
+			tx.Timestamp = time.Time{}
+			tx.ID = ""
+
+			expectError(post(payloadOf(tx)), http.StatusBadRequest, "missing_timestamp")
+			Expect(chainLen()).To(Equal(initialLen))
+		})
+
+		It("fills an empty ID without touching signed fields", func() {
+			tx := signedTx(newWallet(), newWallet().Address(), 5, 0)
+			tx.ID = ""
+
+			rec := post(payloadOf(tx))
+			Expect(rec.Code).To(Equal(http.StatusCreated))
+			var blk domain.Block
+			Expect(json.Unmarshal(rec.Body.Bytes(), &blk)).To(Succeed())
+			Expect(blk.Transactions[0].ID).To(Equal(blk.Transactions[0].CalculateHash()))
+			Expect(blk.Transactions[0].Timestamp.Equal(tx.Timestamp)).To(BeTrue())
+		})
+
+		It("keeps a wrong ID as 400", func() {
+			tx := signedTx(newWallet(), newWallet().Address(), 5, 0)
+			tx.ID = "wrong"
+			Expect(post(payloadOf(tx)).Code).To(Equal(http.StatusBadRequest))
+		})
+
+		It("returns 409 nonce_reused for a lower nonce and 409 nonce_gap for a higher one", func() {
+			w, to := newWallet(), newWallet().Address()
+			Expect(post(payloadOf(signedTx(w, to, 1, 0))).Code).To(Equal(http.StatusCreated))
+			initialLen := chainLen()
+
+			expectError(post(payloadOf(signedTx(w, to, 2, 0))), http.StatusConflict, "nonce_reused")
+			expectError(post(payloadOf(signedTx(w, to, 2, 5))), http.StatusConflict, "nonce_gap")
+			Expect(chainLen()).To(Equal(initialLen))
+			Expect(post(payloadOf(signedTx(w, to, 2, 1))).Code).To(Equal(http.StatusCreated))
+		})
+
+		It("accepts consecutive nonces of one sender in one request", func() {
+			w, to := newWallet(), newWallet().Address()
+			Expect(post(payloadOf(signedTx(w, to, 1, 0), signedTx(w, to, 2, 1))).Code).To(Equal(http.StatusCreated))
+		})
+
+		It("returns 409 duplicate_transaction for a repeated transaction in one request", func() {
+			tx := signedTx(newWallet(), newWallet().Address(), 1, 0)
+			initialLen := chainLen()
+			expectError(post(payloadOf(tx, tx)), http.StatusConflict, "duplicate_transaction")
+			Expect(chainLen()).To(Equal(initialLen))
+		})
+
+		It("rejects a byte-for-byte replay with 409 nonce_reused", func() {
+			body := payloadOf(signedTx(newWallet(), newWallet().Address(), 1, 0))
+			Expect(post(body).Code).To(Equal(http.StatusCreated))
+			initialLen := chainLen()
+			expectError(post(body), http.StatusConflict, "nonce_reused")
+			Expect(chainLen()).To(Equal(initialLen))
+		})
+
+		It("accepts exactly one of 50 concurrent submissions of the same transaction", func() {
+			body := payloadOf(signedTx(newWallet(), newWallet().Address(), 1, 0))
+			const n = 50
+			codes := make(chan int, n)
+			var wg sync.WaitGroup
+			for i := 0; i < n; i++ {
+				wg.Add(1)
+				go func() {
+					defer GinkgoRecover()
+					defer wg.Done()
+					codes <- post(body).Code
+				}()
+			}
+			wg.Wait()
+			close(codes)
+
+			created, conflict := 0, 0
+			for c := range codes {
+				switch c {
+				case http.StatusCreated:
+					created++
+				case http.StatusConflict:
+					conflict++
+				}
+			}
+			Expect(created).To(Equal(1))
+			Expect(conflict).To(Equal(n - 1))
+			Expect(chainLen()).To(Equal(2))
 		})
 	})
 })
