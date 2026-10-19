@@ -1,6 +1,7 @@
 package memory_test
 
 import (
+	"fmt"
 	"sync"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -63,7 +64,30 @@ var _ = Describe("Repository", func() {
 		Expect(again[0]).NotTo(BeNil())
 	})
 
-	It("is safe under concurrent Append and All", func() {
+	DescribeTable("rejects a block that does not extend the last one with ErrConflict and keeps the chain",
+		func(b *domain.Block) {
+			genesis := &domain.Block{Index: 0, Hash: "h0"}
+			Expect(repo.Append(genesis)).To(Succeed())
+
+			Expect(repo.Append(b)).To(MatchError(storage.ErrConflict))
+
+			all, _ := repo.All()
+			Expect(all).To(HaveLen(1))
+			Expect(all[0]).To(BeIdenticalTo(genesis))
+		},
+		Entry("wrong PrevHash", &domain.Block{Index: 1, PrevHash: "other"}),
+		Entry("duplicate Index", &domain.Block{Index: 0, PrevHash: "h0"}),
+		Entry("skipped Index", &domain.Block{Index: 2, PrevHash: "h0"}),
+	)
+
+	It("accepts a block that extends the last one", func() {
+		Expect(repo.Append(&domain.Block{Index: 0, Hash: "h0"})).To(Succeed())
+		Expect(repo.Append(&domain.Block{Index: 1, PrevHash: "h0", Hash: "h1"})).To(Succeed())
+		all, _ := repo.All()
+		Expect(all).To(HaveLen(2))
+	})
+
+	It("keeps the chain linked under concurrent Append and All", func() {
 		const writers, perWriter = 8, 50
 		var wg sync.WaitGroup
 		for w := 0; w < writers; w++ {
@@ -71,8 +95,21 @@ var _ = Describe("Repository", func() {
 			go func() {
 				defer GinkgoRecover()
 				defer wg.Done()
-				for i := 0; i < perWriter; i++ {
-					Expect(repo.Append(&domain.Block{})).To(Succeed())
+				// Bounded so a repository that rejects valid appends fails the test instead of hanging it.
+				for i, attempts := 0, 0; i < perWriter; attempts++ {
+					Expect(attempts).To(BeNumerically("<", 100000), "writer starved: valid appends keep being rejected")
+					last, err := repo.Last()
+					if err != nil {
+						Expect(repo.Append(&domain.Block{Hash: "h0"})).To(Or(Succeed(), MatchError(storage.ErrConflict)))
+						continue
+					}
+					next := &domain.Block{Index: last.Index + 1, PrevHash: last.Hash, Hash: fmt.Sprintf("h%d", last.Index+1)}
+					err = repo.Append(next)
+					if err == nil {
+						i++
+					} else {
+						Expect(err).To(MatchError(storage.ErrConflict))
+					}
 				}
 			}()
 			go func() {
@@ -88,6 +125,12 @@ var _ = Describe("Repository", func() {
 		wg.Wait()
 
 		all, _ := repo.All()
-		Expect(all).To(HaveLen(writers * perWriter))
+		Expect(all).To(HaveLen(writers*perWriter + 1))
+		for i, b := range all {
+			Expect(b.Index).To(Equal(i))
+			if i > 0 {
+				Expect(b.PrevHash).To(Equal(all[i-1].Hash))
+			}
+		}
 	})
 })
