@@ -318,6 +318,13 @@ var _ = Describe("UTXO rules", func() {
 			Expect(s).To(BeNil())
 		})
 
+		It("treats an Index 0 block right after the genesis as non-genesis, so it cannot mint an allocation", func() {
+			mint := blockOf(0, newTx(7, nil, domain.TxOut{Amount: 1000, Address: bob}))
+			s, err := domain.BuildUTXOSet([]*domain.Block{genesis, mint})
+			Expect(err).To(MatchError(domain.ErrMissingInputs))
+			Expect(s).To(BeNil())
+		})
+
 		It("wraps nothing: a failing block returns its sentinel", func() {
 			bad := blockOf(1, newTx(1, []domain.OutPoint{{TxID: "q"}}, domain.TxOut{Amount: 1, Address: bob}))
 			s, err := domain.BuildUTXOSet([]*domain.Block{genesis, bad})
