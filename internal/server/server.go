@@ -153,9 +153,6 @@ func (s *Server) handleWriteBlock(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for i := range m.Transactions {
-		if m.Transactions[i].Timestamp.IsZero() {
-			m.Transactions[i].Timestamp = time.Now()
-		}
 		if m.Transactions[i].ID == "" {
 			m.Transactions[i].ID = m.Transactions[i].CalculateHash()
 		}
@@ -163,36 +160,20 @@ func (s *Server) handleWriteBlock(w http.ResponseWriter, r *http.Request) {
 			respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: fmt.Sprintf("invalid transaction: %s", err.Error())})
 			return
 		}
+		// Timestamp is signed, so the node must not fill it in.
+		if m.Transactions[i].Timestamp.IsZero() {
+			respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "transaction timestamp is required", Code: domain.CodeMissingTimestamp})
+			return
+		}
 	}
 
 	s.mineAndRespond(w, r, m.Transactions)
 }
 
+// handleLegacyBPM answers 410 Gone: BPM payloads cannot be signed, so the node can no longer accept them.
 func (s *Server) handleLegacyBPM(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	w.Header().Set("Deprecation", "true")
-
-	var m LegacyMessage
-
-	decoder := json.NewDecoder(r.Body)
-	if err := decoder.Decode(&m); err != nil {
-		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid request body"})
-		return
-	}
-
-	if m.BPM <= 0 {
-		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "BPM must be greater than zero"})
-		return
-	}
-
-	tx := domain.Transaction{
-		From:      "legacy",
-		To:        "legacy",
-		Amount:    uint64(m.BPM),
-		Timestamp: time.Now(),
-	}
-	tx.ID = tx.CalculateHash()
-
-	s.mineAndRespond(w, r, []domain.Transaction{tx})
+	respondWithJSON(w, http.StatusGone, errorResponse{Error: "endpoint removed; send signed transactions to POST /", Code: endpointGoneCode})
 }

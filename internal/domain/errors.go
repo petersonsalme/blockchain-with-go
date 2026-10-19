@@ -9,6 +9,19 @@ const (
 	CodeTimestampTooFarInTheFuture = "timestamp_too_far_in_future"
 )
 
+// Transaction error codes.
+const (
+	CodeMissingSignature     = "missing_signature"
+	CodeInvalidSignature     = "invalid_signature"
+	CodeInvalidPublicKey     = "invalid_public_key"
+	CodeInvalidRecipient     = "invalid_recipient"
+	CodeSenderMismatch       = "sender_mismatch"
+	CodeMissingTimestamp     = "missing_timestamp"
+	CodeNonceReused          = "nonce_reused"
+	CodeNonceGap             = "nonce_gap"
+	CodeDuplicateTransaction = "duplicate_transaction"
+)
+
 // ValidationError is a structured, machine-readable block rule violation.
 type ValidationError struct {
 	Code    string

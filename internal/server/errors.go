@@ -16,8 +16,34 @@ const requestTooLargeCode = "request_too_large"
 // chainConflictCode is the error code returned when another block was appended while mining.
 const chainConflictCode = "chain_conflict"
 
+// endpointGoneCode is the error code returned by the removed POST /legacy/bpm.
+const endpointGoneCode = "endpoint_gone"
+
+// transactionErrors maps transaction rejections to their HTTP status and code.
+var transactionErrors = []struct {
+	err    error
+	status int
+	code   string
+}{
+	{domain.ErrMissingSignature, http.StatusBadRequest, domain.CodeMissingSignature},
+	{domain.ErrInvalidSignature, http.StatusBadRequest, domain.CodeInvalidSignature},
+	{domain.ErrInvalidPublicKey, http.StatusBadRequest, domain.CodeInvalidPublicKey},
+	{domain.ErrInvalidRecipient, http.StatusBadRequest, domain.CodeInvalidRecipient},
+	{domain.ErrSenderMismatch, http.StatusBadRequest, domain.CodeSenderMismatch},
+	{domain.ErrNonceReused, http.StatusConflict, domain.CodeNonceReused},
+	{domain.ErrNonceGap, http.StatusConflict, domain.CodeNonceGap},
+	{domain.ErrDuplicateTransaction, http.StatusConflict, domain.CodeDuplicateTransaction},
+}
+
 // respondWithMineError maps an error from chain mining to its HTTP response.
 func respondWithMineError(w http.ResponseWriter, err error) {
+	for _, m := range transactionErrors {
+		if errors.Is(err, m.err) {
+			respondWithJSON(w, m.status, errorResponse{Error: err.Error(), Code: m.code})
+			return
+		}
+	}
+
 	var validationErr *domain.ValidationError
 	switch {
 	case errors.As(err, &validationErr):

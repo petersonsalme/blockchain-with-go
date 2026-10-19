@@ -6,10 +6,6 @@ type Message struct {
 	Transactions []domain.Transaction
 }
 
-type LegacyMessage struct {
-	BPM int
-}
-
 type errorResponse struct {
 	Error   string         `json:"error"`
 	Code    string         `json:"code,omitempty"`
