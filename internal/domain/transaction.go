@@ -12,19 +12,10 @@ import (
 )
 
 var (
-	ErrEmptyFrom        = errors.New("from cannot be empty")
-	ErrEmptyTo          = errors.New("to cannot be empty")
-	ErrInvalidAmount    = errors.New("amount must be greater than zero")
 	ErrInvalidID        = errors.New("transaction id does not match calculated hash")
 	ErrMissingSignature = errors.New("missing signature or public key")
 	ErrInvalidPublicKey = errors.New("invalid public key")
-	ErrInvalidRecipient = errors.New("invalid recipient address")
-	ErrSenderMismatch   = errors.New("sender does not match public key")
 	ErrInvalidSignature = errors.New("invalid signature")
-
-	ErrNonceReused          = errors.New("nonce already used by this sender")
-	ErrNonceGap             = errors.New("nonce skips ahead of the sender's next expected nonce")
-	ErrDuplicateTransaction = errors.New("duplicate transaction in request")
 )
 
 // smallOrderY lists the y coordinates (32 bytes little-endian, sign bit
@@ -66,19 +57,12 @@ func isWeakPublicKey(pub []byte) bool {
 	return true
 }
 
+// Transaction moves value by spending Inputs and creating Outputs.
 type Transaction struct {
 	ID        string
-	From      string
-	To        string
-	Amount    uint64
-	Fee       uint64
-	Nonce     uint64
-	Signature string
-	PublicKey string
+	Inputs    []TxIn
+	Outputs   []TxOut
 	Timestamp time.Time
-
-	Inputs  []TxIn
-	Outputs []TxOut
 }
 
 // OutPoint identifies a transaction output.
@@ -101,49 +85,10 @@ type TxOut struct {
 	Address string
 }
 
-type txHashPayload struct {
-	From      string `json:"from"`
-	To        string `json:"to"`
-	Amount    uint64 `json:"amount"`
-	Fee       uint64 `json:"fee"`
-	Nonce     uint64 `json:"nonce"`
-	Timestamp string `json:"timestamp"`
-}
-
-func (t *Transaction) CalculateHash() string {
-	if t == nil {
-		return ""
-	}
-
-	payload := txHashPayload{
-		From:      t.From,
-		To:        t.To,
-		Amount:    t.Amount,
-		Fee:       t.Fee,
-		Nonce:     t.Nonce,
-		Timestamp: t.Timestamp.UTC().Format(time.RFC3339Nano),
-	}
-
-	data, _ := json.Marshal(payload)
-	h := sha256.Sum256(data)
-	return hex.EncodeToString(h[:])
-}
-
+// Validate checks that a non-empty ID matches CalculateHash.
 func (t *Transaction) Validate() error {
 	if t == nil {
 		return errors.New("transaction is nil")
-	}
-
-	if t.From == "" {
-		return ErrEmptyFrom
-	}
-
-	if t.To == "" {
-		return ErrEmptyTo
-	}
-
-	if t.Amount == 0 {
-		return ErrInvalidAmount
 	}
 
 	if t.ID != "" && t.ID != t.CalculateHash() {
@@ -153,76 +98,16 @@ func (t *Transaction) Validate() error {
 	return nil
 }
 
+// TransactionsHash commits to every transaction and to the signatures of all its inputs.
 func TransactionsHash(txs []Transaction) string {
 	h := sha256.New()
 	for _, tx := range txs {
-		h.Write([]byte(tx.CalculateHash() + tx.Signature))
+		h.Write([]byte(tx.CalculateHash()))
+		for _, in := range tx.Inputs {
+			h.Write([]byte(in.Signature))
+		}
 	}
 	return hex.EncodeToString(h.Sum(nil))
-}
-
-func SignTransaction(tx *Transaction, w *wallet.Wallet) error {
-	if tx == nil {
-		return errors.New("transaction is nil")
-	}
-	if w == nil {
-		return errors.New("wallet is nil")
-	}
-
-	hashHex := tx.CalculateHash()
-	hashBytes, _ := hex.DecodeString(hashHex)
-
-	pub := w.PublicKey()
-	sig := w.Sign(hashBytes)
-
-	tx.PublicKey = hex.EncodeToString(pub)
-	tx.Signature = hex.EncodeToString(sig)
-	tx.ID = hashHex
-	return nil
-}
-
-func (t *Transaction) VerifySignature() error {
-	if t == nil {
-		return errors.New("transaction is nil")
-	}
-
-	if t.Signature == "" || t.PublicKey == "" {
-		return ErrMissingSignature
-	}
-
-	if len(t.PublicKey) != 64 {
-		return ErrInvalidPublicKey
-	}
-	rawPub, err := hex.DecodeString(t.PublicKey)
-	if err != nil || hex.EncodeToString(rawPub) != t.PublicKey {
-		return ErrInvalidPublicKey
-	}
-	if isWeakPublicKey(rawPub) {
-		return ErrInvalidPublicKey
-	}
-
-	if err := wallet.ValidateAddress(t.To); err != nil {
-		return ErrInvalidRecipient
-	}
-
-	if t.From != wallet.AddressFromPublicKey(ed25519.PublicKey(rawPub)) {
-		return ErrSenderMismatch
-	}
-
-	if len(t.Signature) != 128 {
-		return ErrInvalidSignature
-	}
-	rawSig, err := hex.DecodeString(t.Signature)
-	if err != nil || hex.EncodeToString(rawSig) != t.Signature {
-		return ErrInvalidSignature
-	}
-
-	hashBytes, _ := hex.DecodeString(t.CalculateHash())
-	if !wallet.Verify(ed25519.PublicKey(rawPub), hashBytes, rawSig) {
-		return ErrInvalidSignature
-	}
-
-	return nil
 }
 
 type utxoInPayload struct {
@@ -241,9 +126,9 @@ type utxoHashPayload struct {
 	Timestamp string           `json:"timestamp"`
 }
 
-// UTXOHash is the SHA-256 hex of the canonical JSON of the inputs (without
+// CalculateHash is the SHA-256 hex of the canonical JSON of the inputs (without
 // PublicKey/Signature), the outputs and the UTC timestamp.
-func (t *Transaction) UTXOHash() string {
+func (t *Transaction) CalculateHash() string {
 	if t == nil {
 		return ""
 	}
@@ -265,7 +150,7 @@ func (t *Transaction) UTXOHash() string {
 	return hex.EncodeToString(h[:])
 }
 
-// SignInput signs the UTXOHash bytes with w and stores the key and signature in input i.
+// SignInput signs the CalculateHash bytes with w and stores the key and signature in input i.
 func SignInput(tx *Transaction, i int, w *wallet.Wallet) error {
 	if tx == nil {
 		return errors.New("transaction is nil")
@@ -277,14 +162,14 @@ func SignInput(tx *Transaction, i int, w *wallet.Wallet) error {
 		return ErrInputIndex
 	}
 
-	hashBytes, _ := hex.DecodeString(tx.UTXOHash())
+	hashBytes, _ := hex.DecodeString(tx.CalculateHash())
 	tx.Inputs[i].PublicKey = hex.EncodeToString(w.PublicKey())
 	tx.Inputs[i].Signature = hex.EncodeToString(w.Sign(hashBytes))
 	return nil
 }
 
 // VerifyInputSignature checks that input i carries a canonical, non-weak key
-// whose address owns spent, and a valid signature over UTXOHash.
+// whose address owns spent, and a valid signature over CalculateHash.
 func VerifyInputSignature(tx *Transaction, i int, spent TxOut) error {
 	if tx == nil {
 		return errors.New("transaction is nil")
@@ -314,7 +199,7 @@ func VerifyInputSignature(tx *Transaction, i int, spent TxOut) error {
 		return ErrInvalidSignature
 	}
 
-	hashBytes, _ := hex.DecodeString(tx.UTXOHash())
+	hashBytes, _ := hex.DecodeString(tx.CalculateHash())
 	if !wallet.Verify(ed25519.PublicKey(rawPub), hashBytes, rawSig) {
 		return ErrInvalidSignature
 	}

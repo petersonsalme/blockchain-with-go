@@ -15,109 +15,29 @@ var _ = Describe("Transaction", func() {
 
 	BeforeEach(func() {
 		baseTx = domain.Transaction{
-			ID:        "",
-			From:      "alice",
-			To:        "bob",
-			Amount:    100,
-			Fee:       5,
-			Nonce:     1,
-			Signature: "sig-alice-123",
+			Inputs:    []domain.TxIn{{PrevTxID: "aa", OutIndex: 0, PublicKey: "pk", Signature: "sig-1"}},
+			Outputs:   []domain.TxOut{{Amount: 100, Address: "bob"}},
 			Timestamp: fixedTime,
 		}
 	})
 
 	Describe("CalculateHash", func() {
-		It("is deterministic across multiple calls", func() {
-			hash1 := baseTx.CalculateHash()
-			hash2 := baseTx.CalculateHash()
-
-			Expect(hash1).To(HaveLen(64))
-			Expect(hash1).To(Equal(hash2))
-		})
-
-		It("changes when From changes", func() {
-			original := baseTx.CalculateHash()
-			modified := baseTx
-			modified.From = "charlie"
-			Expect(modified.CalculateHash()).NotTo(Equal(original))
-		})
-
-		It("changes when To changes", func() {
-			original := baseTx.CalculateHash()
-			modified := baseTx
-			modified.To = "dave"
-			Expect(modified.CalculateHash()).NotTo(Equal(original))
-		})
-
-		It("changes when Amount changes", func() {
-			original := baseTx.CalculateHash()
-			modified := baseTx
-			modified.Amount = 200
-			Expect(modified.CalculateHash()).NotTo(Equal(original))
-		})
-
-		It("changes when Fee changes", func() {
-			original := baseTx.CalculateHash()
-			modified := baseTx
-			modified.Fee = 10
-			Expect(modified.CalculateHash()).NotTo(Equal(original))
-		})
-
-		It("changes when Nonce changes", func() {
-			original := baseTx.CalculateHash()
-			modified := baseTx
-			modified.Nonce = 2
-			Expect(modified.CalculateHash()).NotTo(Equal(original))
-		})
-
-		It("changes when Timestamp changes", func() {
-			original := baseTx.CalculateHash()
-			modified := baseTx
-			modified.Timestamp = fixedTime.Add(time.Second)
-			Expect(modified.CalculateHash()).NotTo(Equal(original))
-		})
-
 		It("does NOT change when ID changes", func() {
 			original := baseTx.CalculateHash()
-			modified := baseTx
-			modified.ID = "some-prefilled-id"
-			Expect(modified.CalculateHash()).To(Equal(original))
+			baseTx.ID = "some-prefilled-id"
+			Expect(baseTx.CalculateHash()).To(Equal(original))
 		})
 
-		It("does NOT change when Signature changes", func() {
+		It("does NOT change when an input signature or key changes", func() {
 			original := baseTx.CalculateHash()
-			modified := baseTx
-			modified.Signature = "different-signature"
-			Expect(modified.CalculateHash()).To(Equal(original))
-		})
-
-		It("does NOT change when PublicKey changes", func() {
-			original := baseTx.CalculateHash()
-			modified := baseTx
-			modified.PublicKey = "different-public-key"
-			Expect(modified.CalculateHash()).To(Equal(original))
-		})
-
-		It("provides unambiguous encoding across adjacent field boundaries", func() {
-			tx1 := baseTx
-			tx1.From = "ab"
-			tx1.To = "c"
-
-			tx2 := baseTx
-			tx2.From = "a"
-			tx2.To = "bc"
-
-			Expect(tx1.CalculateHash()).NotTo(Equal(tx2.CalculateHash()))
-		})
-
-		It("returns empty string when called on nil", func() {
-			var nilTx *domain.Transaction
-			Expect(nilTx.CalculateHash()).To(BeEmpty())
+			baseTx.Inputs[0].Signature = "other"
+			baseTx.Inputs[0].PublicKey = "other"
+			Expect(baseTx.CalculateHash()).To(Equal(original))
 		})
 	})
 
 	Describe("Validate", func() {
-		It("succeeds for a valid transaction with empty ID", func() {
+		It("succeeds for a transaction with empty ID", func() {
 			Expect(baseTx.Validate()).To(Succeed())
 		})
 
@@ -126,28 +46,9 @@ var _ = Describe("Transaction", func() {
 			Expect(baseTx.Validate()).To(Succeed())
 		})
 
-		It("fails when From is empty", func() {
-			baseTx.From = ""
-			err := baseTx.Validate()
-			Expect(err).To(MatchError(domain.ErrEmptyFrom))
-		})
-
-		It("fails when To is empty", func() {
-			baseTx.To = ""
-			err := baseTx.Validate()
-			Expect(err).To(MatchError(domain.ErrEmptyTo))
-		})
-
-		It("fails when Amount is zero", func() {
-			baseTx.Amount = 0
-			err := baseTx.Validate()
-			Expect(err).To(MatchError(domain.ErrInvalidAmount))
-		})
-
 		It("fails when ID is non-empty and does not match CalculateHash()", func() {
 			baseTx.ID = "tampered-or-divergent-id"
-			err := baseTx.Validate()
-			Expect(err).To(MatchError(domain.ErrInvalidID))
+			Expect(baseTx.Validate()).To(MatchError(domain.ErrInvalidID))
 		})
 
 		It("fails when transaction is nil", func() {
@@ -166,37 +67,37 @@ var _ = Describe("Transaction", func() {
 		})
 
 		It("is sensitive to the order of transactions", func() {
-			tx1 := baseTx
-			tx1.Nonce = 1
 			tx2 := baseTx
-			tx2.Nonce = 2
+			tx2.Timestamp = fixedTime.Add(time.Second)
 
-			order1 := domain.TransactionsHash([]domain.Transaction{tx1, tx2})
-			order2 := domain.TransactionsHash([]domain.Transaction{tx2, tx1})
+			order1 := domain.TransactionsHash([]domain.Transaction{baseTx, tx2})
+			order2 := domain.TransactionsHash([]domain.Transaction{tx2, baseTx})
 
 			Expect(order1).NotTo(Equal(order2))
 		})
 
 		It("is sensitive to transaction content", func() {
-			tx1 := baseTx
-			hashOriginal := domain.TransactionsHash([]domain.Transaction{tx1})
-
-			txModified := baseTx
-			txModified.Amount = 999
-			hashModified := domain.TransactionsHash([]domain.Transaction{txModified})
-
-			Expect(hashModified).NotTo(Equal(hashOriginal))
+			original := domain.TransactionsHash([]domain.Transaction{baseTx})
+			modified := baseTx
+			modified.Outputs = []domain.TxOut{{Amount: 999, Address: "bob"}}
+			Expect(domain.TransactionsHash([]domain.Transaction{modified})).NotTo(Equal(original))
 		})
 
-		It("is sensitive to transaction signature", func() {
-			tx1 := baseTx
-			hashOriginal := domain.TransactionsHash([]domain.Transaction{tx1})
+		It("is sensitive to the signature of the first input", func() {
+			original := domain.TransactionsHash([]domain.Transaction{baseTx})
+			modified := baseTx
+			modified.Inputs = []domain.TxIn{{PrevTxID: "aa", OutIndex: 0, PublicKey: "pk", Signature: "changed"}}
+			Expect(domain.TransactionsHash([]domain.Transaction{modified})).NotTo(Equal(original))
+		})
 
-			txModified := baseTx
-			txModified.Signature = "modified-signature"
-			hashModified := domain.TransactionsHash([]domain.Transaction{txModified})
+		It("is sensitive to the signature of every input, not just the first", func() {
+			baseTx.Inputs = append(baseTx.Inputs, domain.TxIn{PrevTxID: "bb", OutIndex: 1, PublicKey: "pk", Signature: "sig-2"})
+			original := domain.TransactionsHash([]domain.Transaction{baseTx})
 
-			Expect(hashModified).NotTo(Equal(hashOriginal))
+			modified := baseTx
+			modified.Inputs = append([]domain.TxIn(nil), baseTx.Inputs...)
+			modified.Inputs[1].Signature = "changed"
+			Expect(domain.TransactionsHash([]domain.Transaction{modified})).NotTo(Equal(original))
 		})
 	})
 })

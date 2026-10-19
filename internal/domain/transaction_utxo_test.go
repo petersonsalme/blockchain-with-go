@@ -45,32 +45,32 @@ var _ = Describe("UTXO transaction", func() {
 		}
 	})
 
-	Describe("UTXOHash", func() {
+	Describe("CalculateHash", func() {
 		It("is a 64-char hex SHA-256 and deterministic", func() {
-			Expect(tx.UTXOHash()).To(HaveLen(64))
-			Expect(tx.UTXOHash()).To(Equal(tx.UTXOHash()))
+			Expect(tx.CalculateHash()).To(HaveLen(64))
+			Expect(tx.CalculateHash()).To(Equal(tx.CalculateHash()))
 		})
 
 		It("matches the canonical JSON vector", func() {
 			// sha256 of the canonical JSON; fixes field names, order and timestamp format.
 			const payload = `{"inputs":[{"prev_txid":"aa","out_index":1},{"prev_txid":"bb","out_index":2}],` +
 				`"outputs":[{"amount":7,"address":"` + "%s" + `"}],"timestamp":"2026-10-19T12:00:00.000000005Z"}`
-			Expect(tx.UTXOHash()).To(Equal(sha256Hex(sprintf(payload, other.Address()))))
+			Expect(tx.CalculateHash()).To(Equal(sha256Hex(sprintf(payload, other.Address()))))
 		})
 
 		It("returns an empty string for a nil transaction", func() {
 			var nilTx *domain.Transaction
-			Expect(nilTx.UTXOHash()).To(BeEmpty())
+			Expect(nilTx.CalculateHash()).To(BeEmpty())
 		})
 
 		DescribeTable("changes when a committed field changes",
 			func(mutate func(t *domain.Transaction)) {
-				before := tx.UTXOHash()
+				before := tx.CalculateHash()
 				m := tx
 				m.Inputs = append([]domain.TxIn(nil), tx.Inputs...)
 				m.Outputs = append([]domain.TxOut(nil), tx.Outputs...)
 				mutate(&m)
-				Expect(m.UTXOHash()).NotTo(Equal(before))
+				Expect(m.CalculateHash()).NotTo(Equal(before))
 			},
 			Entry("PrevTxID", func(t *domain.Transaction) { t.Inputs[0].PrevTxID = "cc" }),
 			Entry("OutIndex", func(t *domain.Transaction) { t.Inputs[1].OutIndex = 3 }),
@@ -82,32 +82,26 @@ var _ = Describe("UTXO transaction", func() {
 		)
 
 		It("ignores input PublicKey and Signature", func() {
-			before := tx.UTXOHash()
+			before := tx.CalculateHash()
 			tx.Inputs[0].PublicKey = "pk"
 			tx.Inputs[0].Signature = "sig"
-			Expect(tx.UTXOHash()).To(Equal(before))
-		})
-
-		It("ignores the account fields", func() {
-			before := tx.UTXOHash()
-			tx.From, tx.To, tx.Amount, tx.Fee, tx.Nonce = "a", "b", 1, 2, 3
-			Expect(tx.UTXOHash()).To(Equal(before))
+			Expect(tx.CalculateHash()).To(Equal(before))
 		})
 
 		It("normalises the timestamp to UTC", func() {
-			before := tx.UTXOHash()
+			before := tx.CalculateHash()
 			tx.Timestamp = tx.Timestamp.In(time.FixedZone("x", 3*3600))
-			Expect(tx.UTXOHash()).To(Equal(before))
+			Expect(tx.CalculateHash()).To(Equal(before))
 		})
 	})
 
 	Describe("SignInput", func() {
-		It("signs the UTXOHash bytes and fills PublicKey/Signature", func() {
+		It("signs the CalculateHash bytes and fills PublicKey/Signature", func() {
 			Expect(domain.SignInput(&tx, 1, owner)).To(Succeed())
 			Expect(tx.Inputs[1].PublicKey).To(Equal(hex.EncodeToString(owner.PublicKey())))
 			sig, err := hex.DecodeString(tx.Inputs[1].Signature)
 			Expect(err).NotTo(HaveOccurred())
-			hash, _ := hex.DecodeString(tx.UTXOHash())
+			hash, _ := hex.DecodeString(tx.CalculateHash())
 			Expect(ed25519.Verify(owner.PublicKey(), hash, sig)).To(BeTrue())
 			Expect(tx.Inputs[0].Signature).To(BeEmpty())
 		})
