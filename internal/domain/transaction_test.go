@@ -91,6 +91,13 @@ var _ = Describe("Transaction", func() {
 			Expect(modified.CalculateHash()).To(Equal(original))
 		})
 
+		It("does NOT change when PublicKey changes", func() {
+			original := baseTx.CalculateHash()
+			modified := baseTx
+			modified.PublicKey = "different-public-key"
+			Expect(modified.CalculateHash()).To(Equal(original))
+		})
+
 		It("provides unambiguous encoding across adjacent field boundaries", func() {
 			tx1 := baseTx
 			tx1.From = "ab"

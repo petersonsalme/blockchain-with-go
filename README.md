@@ -4,8 +4,8 @@
 A simple blockchain implementation in Go, created as an exercise to demonstrate core blockchain concepts.
 
 ## Features Implemented
-- **Block & Transaction Structure**: Blocks containing index, timestamp, transaction list (`Transactions`), current hash, previous hash, nonce, and difficulty. Each transaction tracks `ID`, `From`, `To`, `Amount`, `Fee`, `Nonce`, `Signature`, and `Timestamp`.
-- **Cryptographic Hashing**: Uses SHA-256 to ensure data integrity across all block attributes (including nonce, difficulty, and an aggregate hash of all transactions). Transaction content hashing is deterministic and independent of transaction ID and signature.
+- **Block & Transaction Structure**: Blocks containing index, timestamp, transaction list (`Transactions`), current hash, previous hash, nonce, and difficulty. Each transaction tracks `ID`, `From`, `To`, `Amount`, `Fee`, `Nonce`, `Signature`, `PublicKey`, and `Timestamp`.
+- **Cryptographic Hashing**: Uses SHA-256 to ensure data integrity across all block attributes (including nonce, difficulty, and an aggregate hash of all transactions). Transaction content hashing is deterministic and independent of transaction ID, signature, and public key.
 - **Proof of Work & Context-Aware Mining**: Nonce search satisfying leading-zero difficulty, supporting graceful context cancellation and mining timeouts.
 - **Chain Validation**: Validates new blocks by checking index sequentiality, cryptographic linkage (`PrevHash`), SHA-256 hash integrity, and Proof of Work against each block's recorded difficulty.
 - **HTTP API**: A RESTful API built with `gorilla/mux` to view the blockchain, append new blocks with transactions, and report structured errors with appropriate HTTP status codes.
@@ -25,6 +25,7 @@ type Transaction struct {
     Fee       uint64
     Nonce     uint64
     Signature string
+    PublicKey string
     Timestamp time.Time
 }
 ```
@@ -32,6 +33,13 @@ type Transaction struct {
 - **ID**: SHA-256 hash over deterministic JSON serialization of `From, To, Amount, Fee, Nonce, Timestamp.UTC()`.
 - **Validation**: Requires non-empty `From` and `To`, `Amount > 0`, and ensures `ID == CalculateHash()` when `ID` is provided.
 - **TransactionsHash**: Computes a SHA-256 digest covering each transaction's content hash and signature in order, binding all transactions to the block header.
+- **Signatures & Verification**: Transactions are signed using Ed25519 (`domain.SignTransaction`). The signature signs the raw 32-byte digest of `CalculateHash()`. `Signature` is a 128-character lowercase hex string and `PublicKey` is a 64-character lowercase hex string (32-byte Ed25519 public key). `VerifySignature()` enforces that:
+  1. Both `Signature` and `PublicKey` are present (`ErrMissingSignature`).
+  2. `PublicKey` is a 64-character lowercase hex encoding (`ErrInvalidPublicKey`).
+  3. `To` is a valid checksummed wallet address (`ErrInvalidRecipient`).
+  4. `From` matches the address derived from `PublicKey` via `wallet.AddressFromPublicKey` (`ErrSenderMismatch`).
+  5. `Signature` is a 128-character lowercase hex encoding that cryptographically verifies over the raw 32-byte `CalculateHash()` using `PublicKey` (`ErrInvalidSignature`).
+- **Signed Fields**: `CalculateHash()` covers `From`, `To`, `Amount`, `Fee`, `Nonce`, and `Timestamp` (UTC RFC3339Nano), guaranteeing that any modification to these fields invalidates the signature without including `ID`, `Signature`, or `PublicKey` in the signed preimage.
 
 ## Architectural Trade-offs
 1. **In-Memory Storage vs. Persistence**: The blockchain state is kept entirely in memory. While this keeps the implementation simple, fast, and dependency-free, all data is lost when the server is restarted. A production system would require a persistent datastore (like LevelDB or RocksDB).
