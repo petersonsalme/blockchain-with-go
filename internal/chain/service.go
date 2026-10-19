@@ -87,10 +87,10 @@ func (s *Service) checkTransactions(txs []domain.Transaction) (map[string]uint64
 		if !ok {
 			want = s.nonces[tx.From]
 		}
-		switch {
-		case tx.Nonce < want:
+		if tx.Nonce < want {
 			return nil, domain.ErrNonceReused
-		case tx.Nonce > want:
+		}
+		if tx.Nonce > want {
 			return nil, domain.ErrNonceGap
 		}
 		next[tx.From] = want + 1

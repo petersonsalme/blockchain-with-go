@@ -39,6 +39,14 @@ type failingRepo struct {
 	storage.BlockRepository
 	appendErr error
 	lastErr   error
+	allErr    error
+}
+
+func (f *failingRepo) All() ([]*domain.Block, error) {
+	if f.allErr != nil {
+		return nil, f.allErr
+	}
+	return f.BlockRepository.All()
 }
 
 func (f *failingRepo) Append(b *domain.Block) error {
@@ -112,6 +120,12 @@ var _ = Describe("Service", func() {
 		It("fails when the repository cannot be read", func() {
 			boom := errors.New("boom")
 			_, err := NewService(&failingRepo{BlockRepository: repo, lastErr: boom}, eng)
+			Expect(err).To(MatchError(boom))
+		})
+
+		It("fails when the chain cannot be scanned for nonces", func() {
+			boom := errors.New("boom")
+			_, err := NewService(&failingRepo{BlockRepository: repo, allErr: boom}, eng)
 			Expect(err).To(MatchError(boom))
 		})
 
