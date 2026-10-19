@@ -17,6 +17,8 @@ blockchain-with-go/
 ├── internal/
 │   ├── chain/         # chain.Service (Blocks/Mine), block generation, ErrInvalidBlock
 │   ├── consensus/     # Consensus port and errors
+│   │   ├── consensustest/ # Shared acceptance suite for Consensus adapters
+│   │   ├── poa/       # Proof of Authority adapter (fixed Ed25519 validator set)
 │   │   └── pow/       # Proof of Work adapter
 │   ├── domain/        # Domain models (Block, Transaction, rules) — no internal dependencies
 │   ├── server/        # HTTP adapter: server.Server (DI), handlers, DTOs and error mapping
