@@ -196,14 +196,15 @@ func (s *Server) handleGetBlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	switch {
-	case errors.Is(err, storage.ErrNotFound):
+	if errors.Is(err, storage.ErrNotFound) {
 		respondWithJSON(w, http.StatusNotFound, errorResponse{Error: "block not found", Code: blockNotFoundCode})
-	case err != nil:
-		respondWithJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
-	default:
-		respondWithJSON(w, http.StatusOK, block)
+		return
 	}
+	if err != nil {
+		respondWithJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+		return
+	}
+	respondWithJSON(w, http.StatusOK, block)
 }
 
 // handleHealth reports the chain tip, or 503 when it cannot be read.
