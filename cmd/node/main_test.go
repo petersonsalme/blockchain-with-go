@@ -3,12 +3,20 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/petersonsalme/blockchain-with-go/internal/consensus/pow"
+	"github.com/petersonsalme/blockchain-with-go/internal/domain"
+	"github.com/petersonsalme/blockchain-with-go/internal/storage/memory"
+	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
 )
 
 func freePort(t *testing.T) string {
@@ -141,4 +149,127 @@ func TestBootstrapLoadsDotEnvAndRuns(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("bootstrap returned %v, want nil", err)
 	}
+}
+
+func newAddress(t *testing.T) string {
+	t.Helper()
+	w, err := wallet.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return w.Address()
+}
+
+func TestParseGenesisAllocations(t *testing.T) {
+	a, b := newAddress(t), newAddress(t)
+
+	for _, empty := range []string{"", "   "} {
+		outs, err := parseGenesisAllocations(empty)
+		if err != nil || len(outs) != 0 {
+			t.Fatalf("parse(%q) = %v, %v, want no outputs", empty, outs, err)
+		}
+	}
+
+	outs, err := parseGenesisAllocations(a + ":10, " + b + ":20")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []domain.TxOut{{Amount: 10, Address: a}, {Amount: 20, Address: b}}
+	if !reflect.DeepEqual(outs, want) {
+		t.Fatalf("outs = %v, want %v", outs, want)
+	}
+
+	invalid := map[string]string{
+		"bad address":  "nothex:5",
+		"zero":         a + ":0",
+		"non numeric":  a + ":abc",
+		"negative":     a + ":-1",
+		"overflow":     a + ":18446744073709551616",
+		"no colon":     a,
+		"empty value":  a + ":",
+		"empty item":   a + ":5,",
+		"second bad":   a + ":5,bad:5",
+		"empty amount": ":5",
+	}
+	for name, in := range invalid {
+		t.Run(name, func(t *testing.T) {
+			outs, err := parseGenesisAllocations(in)
+			if err == nil || outs != nil {
+				t.Fatalf("parse(%q) = %v, %v, want error", in, outs, err)
+			}
+			if bad := invalidItem(in); !strings.Contains(err.Error(), fmt.Sprintf("%q", bad)) {
+				t.Fatalf("error %v does not cite the invalid item %q", err, bad)
+			}
+		})
+	}
+
+	_, err = parseGenesisAllocations(a + ":5,bad:5")
+	if err == nil || !strings.Contains(err.Error(), "bad:5") {
+		t.Fatalf("error %v does not cite the invalid item", err)
+	}
+}
+
+// invalidItem returns the offending item of an invalid list: the last one,
+// since every case puts the bad item last (or is a single item).
+func invalidItem(list string) string {
+	items := strings.Split(list, ",")
+	return strings.TrimSpace(items[len(items)-1])
+}
+
+func TestRunFailsOnInvalidGenesisAllocations(t *testing.T) {
+	t.Setenv("PORT", freePort(t))
+	t.Setenv("POW_DIFFICULTY", "1")
+	t.Setenv(genesisAllocationsEnvVar, "bad:5")
+
+	err := run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "bad:5") {
+		t.Fatalf("run = %v, want error citing bad:5", err)
+	}
+}
+
+func TestBuildServiceGenesisAllocations(t *testing.T) {
+	t.Setenv("POW_DIFFICULTY", "1")
+	a := newAddress(t)
+	eng := pow.NewProofOfWorkFromEnv()
+
+	t.Run("applied on empty repository", func(t *testing.T) {
+		t.Setenv(genesisAllocationsEnvVar, a+":7")
+		repo := memory.New()
+		if _, err := newService(repo, eng); err != nil {
+			t.Fatal(err)
+		}
+		blocks, _ := repo.All()
+		if len(blocks) != 1 || len(blocks[0].Transactions) != 1 || blocks[0].Transactions[0].Outputs[0].Amount != 7 {
+			t.Fatalf("genesis = %+v, want one tx with 7", blocks)
+		}
+	})
+
+	t.Run("unset leaves genesis empty", func(t *testing.T) {
+		t.Setenv(genesisAllocationsEnvVar, "")
+		repo := memory.New()
+		if _, err := newService(repo, eng); err != nil {
+			t.Fatal(err)
+		}
+		blocks, _ := repo.All()
+		if len(blocks) != 1 || len(blocks[0].Transactions) != 0 {
+			t.Fatalf("genesis = %+v, want no transactions", blocks)
+		}
+	})
+
+	t.Run("ignored on populated repository", func(t *testing.T) {
+		t.Setenv(genesisAllocationsEnvVar, "")
+		repo := memory.New()
+		if _, err := newService(repo, eng); err != nil {
+			t.Fatal(err)
+		}
+		before, _ := repo.All()
+		t.Setenv(genesisAllocationsEnvVar, a+":7")
+		if _, err := newService(repo, eng); err != nil {
+			t.Fatal(err)
+		}
+		after, _ := repo.All()
+		if !reflect.DeepEqual(before, after) {
+			t.Fatalf("chain changed: %+v -> %+v", before, after)
+		}
+	})
 }
