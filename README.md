@@ -35,7 +35,7 @@ type Transaction struct {
 - **TransactionsHash**: Computes a SHA-256 digest covering each transaction's content hash and signature in order, binding all transactions to the block header.
 - **Signatures & Verification**: Transactions are signed using Ed25519 (`domain.SignTransaction`). The signature signs the raw 32-byte digest of `CalculateHash()`. `Signature` is a 128-character lowercase hex string and `PublicKey` is a 64-character lowercase hex string (32-byte Ed25519 public key). `VerifySignature()` enforces that:
   1. Both `Signature` and `PublicKey` are present (`ErrMissingSignature`).
-  2. `PublicKey` is a 64-character lowercase hex encoding (`ErrInvalidPublicKey`).
+  2. `PublicKey` is a 64-character lowercase hex encoding (`ErrInvalidPublicKey`) that is not a weak key: its y coordinate (32 bytes little-endian, bit 255 cleared) must be canonical (`y < p = 2^255 - 19`) and must not belong to a point of order 1, 2, 4 or 8 (`y` in `{0, 1, p-1, y8, p-y8}`, with either sign bit — the 10 encodings of libsodium's `ge25519_has_small_order`). Otherwise the identity key `01 00…00` with `R = identity, S = 0` would verify for any message (`ErrInvalidPublicKey`).
   3. `To` is a valid checksummed wallet address (`ErrInvalidRecipient`).
   4. `From` matches the address derived from `PublicKey` via `wallet.AddressFromPublicKey` (`ErrSenderMismatch`).
   5. `Signature` is a 128-character lowercase hex encoding that cryptographically verifies over the raw 32-byte `CalculateHash()` using `PublicKey` (`ErrInvalidSignature`).
