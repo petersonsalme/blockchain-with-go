@@ -469,6 +469,26 @@ var _ = Describe("Server", func() {
 			Expect(body["details"]).To(HaveKeyWithValue("max", BeNumerically("==", 200)))
 		})
 
+		It("returns 413 request_too_large for a giant body with rate limiting enabled and unexhausted", func() {
+			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "100")
+			repo := memory.New()
+			engine := pow.NewProofOfWorkFromEnv()
+			svc, err := funds.service(repo, engine)
+			Expect(err).NotTo(HaveOccurred())
+			s := NewServer(svc, Config{RateLimit: 10})
+
+			req := httptest.NewRequest("POST", "/", strings.NewReader(`{"Transactions":[{"ID":"`+strings.Repeat("a", 1000)+`"}]}`))
+			rec := httptest.NewRecorder()
+			s.Handler().ServeHTTP(rec, req)
+
+			Expect(rec.Code).To(Equal(http.StatusRequestEntityTooLarge))
+			var body map[string]any
+			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
+			Expect(body["code"]).To(Equal("request_too_large"))
+			Expect(body["error"]).To(Equal("request body exceeds the maximum size"))
+			Expect(body["details"]).To(HaveKeyWithValue("max", BeNumerically("==", 200)))
+		})
+
 		It("still returns 201 on the happy path", func() {
 			Expect(post(funds.payload()).Code).To(Equal(http.StatusCreated))
 		})
