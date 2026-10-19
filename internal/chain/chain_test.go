@@ -32,7 +32,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 				Hash:         strings.Repeat("a", 64),
 			}
 			sampleTxs = []domain.Transaction{
-				{From: "alice", To: "bob", Amount: 10, Fee: 1, Nonce: 0},
+				{Outputs: []domain.TxOut{{Amount: 10, Address: "bob"}}},
 			}
 		})
 
@@ -84,7 +84,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 				Hash:         strings.Repeat("a", 64),
 			}
 			sampleTxs = []domain.Transaction{
-				{From: "alice", To: "bob", Amount: 10, Fee: 1, Nonce: 0},
+				{Outputs: []domain.TxOut{{Amount: 10, Address: "bob"}}},
 			}
 		})
 
@@ -133,7 +133,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 			)
 			go func() {
 				defer close(done)
-				block, err = GenerateBlockWithContext(context.Background(), slowPoW, parent, []domain.Transaction{{From: "a", To: "b", Amount: 1}})
+				block, err = GenerateBlockWithContext(context.Background(), slowPoW, parent, []domain.Transaction{{Outputs: []domain.TxOut{{Amount: 1, Address: "b"}}}})
 			}()
 			Eventually(done, time.Second).Should(BeClosed())
 
@@ -145,7 +145,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 
 		It("accounts for the 64-character hash placeholder in size estimation before mining", func() {
 			parent := genesisBlock()
-			txs := []domain.Transaction{{From: "alice", To: "bob", Amount: 1}}
+			txs := []domain.Transaction{{Outputs: []domain.TxOut{{Amount: 1, Address: "bob"}}}}
 
 			spyConsensus := &mockConsensus{}
 
