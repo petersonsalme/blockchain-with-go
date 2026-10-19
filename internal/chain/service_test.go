@@ -1,6 +1,7 @@
 package chain_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"sync"
@@ -16,6 +17,7 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/memory"
+	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
 )
 
 // rejectingConsensus seals with PoW but never accepts a block.
@@ -53,8 +55,20 @@ func (f *failingRepo) Last() (*domain.Block, error) {
 	return f.BlockRepository.Last()
 }
 
+// signedTx returns a transaction from w to a fixed recipient, signed with the given nonce.
+func signedTx(w *wallet.Wallet, nonce uint64) domain.Transaction {
+	to, err := wallet.FromSeed(bytes.Repeat([]byte{7}, 32))
+	Expect(err).NotTo(HaveOccurred())
+	tx := domain.Transaction{From: w.Address(), To: to.Address(), Amount: 1, Nonce: nonce, Timestamp: time.Now()}
+	Expect(domain.SignTransaction(&tx, w)).To(Succeed())
+	return tx
+}
+
+// sampleTx returns a valid signed transaction from a fresh sender, so repeated calls never replay.
 func sampleTx() []domain.Transaction {
-	return []domain.Transaction{{From: "alice", To: "bob", Amount: 1}}
+	w, err := wallet.New()
+	Expect(err).NotTo(HaveOccurred())
+	return []domain.Transaction{signedTx(w, 0)}
 }
 
 var _ = Describe("Service", func() {

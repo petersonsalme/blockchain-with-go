@@ -21,6 +21,10 @@ var (
 	ErrInvalidRecipient = errors.New("invalid recipient address")
 	ErrSenderMismatch   = errors.New("sender does not match public key")
 	ErrInvalidSignature = errors.New("invalid signature")
+
+	ErrNonceReused          = errors.New("nonce already used by this sender")
+	ErrNonceGap             = errors.New("nonce skips ahead of the sender's next expected nonce")
+	ErrDuplicateTransaction = errors.New("duplicate transaction in request")
 )
 
 type Transaction struct {
