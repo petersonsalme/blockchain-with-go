@@ -1,6 +1,21 @@
 # GoBlockchain
 [![Go CI](https://github.com/petersonsalme/blockchain-with-go/actions/workflows/go-ci.yml/badge.svg)](https://github.com/petersonsalme/blockchain-with-go/actions/workflows/go-ci.yml)
 
+> # ⚠️ IMPORTANT DISCLAIMER
+>
+> **This is an old, personal learning project about blockchain.** It is an educational exercise only.
+>
+> **Today, it is being used as a pilot project to evaluate the adoption of [Paperclip](https://github.com/paperclipai/paperclip) with AI agents.** Every improvement, refactor, test, document and architectural change made to this repository since then is **purely an AI-generated suggestion** and nothing more.
+>
+> - ❌ It is **NOT** production-ready, audited, or secure. **Do not use it to hold, move or represent real value.**
+> - ❌ It is **NOT** an official product, reference implementation, or statement of any company.
+> - ❌ It is **NOT** affiliated with, endorsed by, or related to the work, products, or views of the author's employer, clients, or any other organization.
+> - ❌ The AI-suggested changes do **NOT** represent professional advice, engineering recommendations, or best practices vetted by the author's employer or clients.
+>
+> This repository is maintained by an individual, on personal time, for learning and experimentation purposes only.
+
+---
+
 A simple blockchain implementation in Go, created as an exercise to demonstrate core blockchain concepts.
 
 ## Features Implemented
