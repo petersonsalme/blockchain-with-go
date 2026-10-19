@@ -1,4 +1,4 @@
-# GoBlockchain
+# Learning Blockchain with Go
 [![Go CI](https://github.com/petersonsalme/blockchain-with-go/actions/workflows/go-ci.yml/badge.svg)](https://github.com/petersonsalme/blockchain-with-go/actions/workflows/go-ci.yml)
 
 > # ⚠️ IMPORTANT DISCLAIMER
