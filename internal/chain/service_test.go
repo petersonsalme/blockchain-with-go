@@ -320,6 +320,8 @@ var _ = Describe("Service", func() {
 			Expect(err).NotTo(HaveOccurred())
 			b, err := NewService(repo, eng, WithGenerator(barrier))
 			Expect(err).NotTo(HaveOccurred())
+			Expect(a).NotTo(BeNil())
+			Expect(b).NotTo(BeNil())
 
 			errs := make(chan error, 2)
 			for _, svc := range []*Service{a, b} {
