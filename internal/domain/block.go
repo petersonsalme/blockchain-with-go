@@ -15,10 +15,12 @@ type Block struct {
 	PrevHash     string
 	Nonce        int
 	Difficulty   int
+	Validator    string
+	Signature    string
 }
 
 func (b *Block) CalculateHash() string {
-	record := fmt.Sprintf("%d%s%s%s%d%d", b.Index, b.Timestamp.UTC().String(), TransactionsHash(b.Transactions), b.PrevHash, b.Nonce, b.Difficulty)
+	record := fmt.Sprintf("%d%s%s%s%d%d%s", b.Index, b.Timestamp.UTC().String(), TransactionsHash(b.Transactions), b.PrevHash, b.Nonce, b.Difficulty, b.Validator)
 	h := sha256.New()
 	h.Write([]byte(record))
 	hashed := h.Sum(nil)

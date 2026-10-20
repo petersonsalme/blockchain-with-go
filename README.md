@@ -67,6 +67,7 @@ Design decisions live in [`docs/adr/`](docs/adr):
 | [0002](docs/adr/0002-genesis-allocations-env-var.md) | Genesis funding comes from `GENESIS_ALLOCATIONS` |
 | [0003](docs/adr/0003-learning-project-positioning.md) | Personal learning project with an AI-generated-changes disclaimer |
 | [0004](docs/adr/0004-disk-storage.md) | Disk storage: bbolt adapter with in-memory derived UTXO set |
+| [0005](docs/adr/0005-poa-block-seal.md) | Proof of Authority seal fields on Block |
 
 ## Configuration & Environment Variables
 

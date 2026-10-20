@@ -76,6 +76,10 @@ func (p *ProofOfWork) Verify(prev, b *domain.Block) error {
 		return consensus.ErrInvalidHash
 	}
 
+	if b.Validator != "" || b.Signature != "" {
+		return consensus.ErrInvalidSeal
+	}
+
 	if !solvesDifficulty(b.Hash, b.Difficulty) {
 		return consensus.ErrInvalidProofOfWork
 	}
