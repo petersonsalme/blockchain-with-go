@@ -49,6 +49,43 @@ type Transaction struct {
 - **TransactionsHash**: SHA-256 over each transaction's hash and its input signatures, binding them to the block header.
 - **Genesis**: the genesis block of an empty chain carries one transaction without inputs that creates the outputs listed in `GENESIS_ALLOCATIONS`; that is the only source of coins for now (no coinbase yet).
 
+### Proof of Authority
+
+With `CONSENSUS=poa` the node seals blocks with an Ed25519 signature instead of mining them (see [ADR-0005](docs/adr/0005-poa-block-seal.md)).
+
+- **Who seals:** the node's own key, loaded from `POA_KEYSTORE`. It must belong to the validator set `POA_VALIDATORS`, otherwise the node refuses to start (it would produce blocks it rejects itself).
+- **What is signed:** the block hash (which covers `Validator`, index, timestamp, transactions, `PrevHash`). `Verify` accepts a block only if `Validator` is in the set and `Signature` is valid over its hash.
+- **A chain is tied to one consensus:** a chain mined with PoW cannot be continued in PoA (or the reverse), nor with a different validator set; start from an empty `DATA_DIR`.
+
+Generate a keystore and print the public key to put in `POA_VALIDATORS`:
+
+```go
+package main
+
+import (
+	"encoding/hex"
+	"fmt"
+	"log"
+
+	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
+)
+
+func main() {
+	w, err := wallet.New()
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := w.Save("validator.key", "choose-a-password"); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(hex.EncodeToString(w.PublicKey()))
+}
+```
+
+```shell
+$ CONSENSUS=poa POA_VALIDATORS=<hex> POA_KEYSTORE=validator.key POA_KEYSTORE_PASSWORD=choose-a-password go run ./cmd/node
+```
+
 ## Architectural Trade-offs
 1. **In-Memory Storage vs. Persistence**: The node supports both in-memory and persistent disk storage. When `DATA_DIR` is set, blocks and hash indexes are persisted to `$DATA_DIR/chain.db` via the bbolt adapter (`internal/storage/bolt`). When `DATA_DIR` is empty, state lives in memory (`internal/storage/memory`) and is lost on restart. The UTXO set remains derived in memory and is rebuilt from the chain at startup (ADR-0001, ADR-0004).
 2. **Centralization vs. P2P Network**: Currently, the blockchain runs as a single centralized HTTP server rather than a decentralized peer-to-peer network. This eliminates the complexity of network discovery, peer management, and gossip protocols, but makes the system centralized.
@@ -76,7 +113,11 @@ The application can be configured via environment variables (e.g., in a `.env` f
 | Variable | Description | Default |
 |---|---|---|
 | `PORT` | HTTP server port | `8080` |
-| `POW_DIFFICULTY` | Number of leading zeros required for block hashes | `2` |
+| `CONSENSUS` | Consensus engine: `pow` or `poa`. Any other value stops the node at startup | empty (`pow`) |
+| `POW_DIFFICULTY` | Number of leading zeros required for block hashes (`CONSENSUS=pow`) | `2` |
+| `POA_VALIDATORS` | Validator set for `CONSENSUS=poa`: Ed25519 public keys in hex, comma-separated (spaces around items ignored). Required; a non-hex, wrong-length or duplicate item stops the node, naming the item | empty |
+| `POA_KEYSTORE` | Path of the encrypted keystore (`wallet.Save`) holding this node's signing key. Its public key must be in `POA_VALIDATORS`; required with `CONSENSUS=poa` | empty |
+| `POA_KEYSTORE_PASSWORD` | Password that unlocks `POA_KEYSTORE`; required with `CONSENSUS=poa` | empty |
 | `MINING_TIMEOUT` | Maximum duration allowed for mining a block (e.g., `10s`, `500ms`, or integer seconds) | `10s` |
 | `GENESIS_ALLOCATIONS` | Genesis outputs as `address:amount[,address:amount...]`. Each address must be a valid wallet address and each amount an integer from 1 to 2^64−1; an invalid item stops the node at startup. Only used when the chain is empty (the genesis is created); ignored otherwise | empty (genesis without transactions) |
 | `DATA_DIR` | Directory for persistent disk storage (stores `chain.db`). When empty, the in-memory repository is used | empty (in-memory storage) |
@@ -171,18 +212,24 @@ $ curl http://localhost:8080/
 
 **Response (`200 OK`):**
 ```json
-[
-  {
-    "Index": 0,
-    "Timestamp": "2026-10-16T12:00:00Z",
-    "Transactions": [],
-    "Hash": "00a1b2c3...",
-    "PrevHash": "",
-    "Nonce": 42,
-    "Difficulty": 2
-  }
-]
+{
+  "Blocks": [
+    {
+      "Index": 1,
+      "Timestamp": "2026-10-16T12:00:00Z",
+      "Transactions": [],
+      "Hash": "9f3a1c...",
+      "PrevHash": "00a1b2c3...",
+      "Nonce": 0,
+      "Difficulty": 0,
+      "Validator": "3b6a27bc...",
+      "Signature": "e1f0c4d2..."
+    }
+  ]
+}
 ```
+
+`Validator` and `Signature` are filled only under `CONSENSUS=poa` (hex strings); under PoW they are empty and `Nonce`/`Difficulty` carry the proof of work.
 
 ### GET /blocks
 
