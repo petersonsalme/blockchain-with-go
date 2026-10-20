@@ -127,6 +127,7 @@ func run(ctx context.Context) error {
 
 	srv, err := server.NewServer(svc, server.Config{
 		MiningTimeout: server.ParseMiningTimeout(os.Getenv(server.MiningTimeoutEnvVar)),
+		RateLimit:     server.ParseRateLimit(os.Getenv(server.RateLimitEnvVar)),
 	})
 	if err != nil {
 		return err
