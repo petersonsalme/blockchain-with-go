@@ -35,6 +35,19 @@ blockchain-with-go/
 - No global state: `internal/server` and `internal/chain` only have `const` and `errors.New` sentinels at package level. Dependencies (repository, consensus, block generator) are injected through constructors (`chain.NewService(repo, consensus, opts...)`, `server.NewServer(svc, cfg)`).
 - Composition root in `cmd/node/main.go`; it is the only place that triggers configuration reading (`PORT`, `MINING_TIMEOUT` and `DATA_DIR` directly; `POW_DIFFICULTY` via `pow.NewProofOfWorkFromEnv`; `GENESIS_ALLOCATIONS`, genesis outputs as `address:amount[,...]`, parsed in `cmd/node` and ignored when the repository is not empty).
 
+## Core Areas (Risk: core)
+
+A story is **Risk: core** when it changes any of the areas below. Core stories need the second review (see the Lead's routing); all others are **normal**.
+
+- **Block and transaction validation:** `internal/domain/block.go`, `rules.go`, `transaction.go`, `utxo.go` (hashing, validation order, UTXO rules, double-spend).
+- **Consensus:** `internal/consensus/` and `internal/consensus/pow/` (`Seal`/`Verify`, difficulty, error sentinels).
+- **Chain write path and concurrency:** `internal/chain/service.go` (`Mine`, append, any lock or semaphore, future reorg and sync).
+- **Storage guarantees:** `internal/storage/` contracts and adapters (`memory`, `bolt`), including atomicity of `Append`/`Apply`/`Revert` and the `storagetest` contract.
+- **Keys and signatures:** `pkg/wallet/` (Ed25519, addressing, keystore).
+- **Schema:** any change to the persisted or hashed shape of `Block`, `Transaction` or UTXO, and any ADR-level change.
+
+Everything else (HTTP handlers and DTOs, logging, docs, README, CLI, build files, `cmd/node` wiring that does not change configuration semantics) is **normal**. When a story is borderline, mark it core.
+
 ## Rules and Commands
 
 1. **Validation and Tests:**
