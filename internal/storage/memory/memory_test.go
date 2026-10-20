@@ -2,6 +2,7 @@ package memory_test
 
 import (
 	"fmt"
+	"math"
 	"sync"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -132,5 +133,130 @@ var _ = Describe("Repository", func() {
 				Expect(b.PrevHash).To(Equal(all[i-1].Hash))
 			}
 		}
+	})
+
+	Describe("lookups", func() {
+		var blocks []*domain.Block
+
+		BeforeEach(func() {
+			blocks = nil
+			for i := 0; i < 5; i++ {
+				b := &domain.Block{Index: i, Hash: fmt.Sprintf("h%d", i)}
+				if i > 0 {
+					b.PrevHash = blocks[i-1].Hash
+				}
+				Expect(repo.Append(b)).To(Succeed())
+				blocks = append(blocks, b)
+			}
+		})
+
+		It("finds every block by hash and by height", func() {
+			for _, b := range blocks {
+				byHash, err := repo.ByHash(b.Hash)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(byHash).To(BeIdenticalTo(b))
+				byHeight, err := repo.ByHeight(b.Index)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(byHeight).To(BeIdenticalTo(b))
+			}
+		})
+
+		It("returns ErrNotFound for a hash or height outside the chain", func() {
+			b, err := repo.ByHash("unknown")
+			Expect(b).To(BeNil())
+			Expect(err).To(MatchError(storage.ErrNotFound))
+			for _, h := range []int{-1, 5, 100} {
+				b, err := repo.ByHeight(h)
+				Expect(b).To(BeNil())
+				Expect(err).To(MatchError(storage.ErrNotFound))
+			}
+		})
+
+		It("returns ErrNotFound on an empty repository", func() {
+			empty := New()
+			_, err := empty.ByHeight(0)
+			Expect(err).To(MatchError(storage.ErrNotFound))
+			_, err = empty.ByHash("h0")
+			Expect(err).To(MatchError(storage.ErrNotFound))
+		})
+
+		DescribeTable("Range returns a window of the chain in order",
+			func(from, limit, first, count int) {
+				got, err := repo.Range(from, limit)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(got).To(HaveLen(count))
+				for i, b := range got {
+					Expect(b).To(BeIdenticalTo(blocks[first+i]))
+				}
+			},
+			Entry("from the start", 0, 2, 0, 2),
+			Entry("from the middle", 2, 2, 2, 2),
+			Entry("limit past the tip", 3, 10, 3, 2),
+			Entry("whole chain", 0, 5, 0, 5),
+			Entry("last block", 4, 1, 4, 1),
+			Entry("huge limit", 1, math.MaxInt, 1, 4),
+		)
+
+		DescribeTable("Range returns an empty, non-nil slice when nothing matches",
+			func(from, limit int) {
+				got, err := repo.Range(from, limit)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(got).NotTo(BeNil())
+				Expect(got).To(BeEmpty())
+			},
+			Entry("from at the tip+1", 5, 3),
+			Entry("from far past the tip", 99, 3),
+			Entry("negative from", -1, 3),
+			Entry("zero limit", 0, 0),
+			Entry("negative limit", 0, -2),
+		)
+
+		It("returns a Range copy that caller edits do not affect", func() {
+			got, _ := repo.Range(0, 2)
+			got[0] = nil
+			again, _ := repo.Range(0, 2)
+			Expect(again[0]).To(BeIdenticalTo(blocks[0]))
+		})
+
+		It("leaves the lookups unchanged after a rejected Append", func() {
+			rejected := &domain.Block{Index: 9, PrevHash: "nope", Hash: "rejected"}
+			Expect(repo.Append(rejected)).To(MatchError(storage.ErrConflict))
+			Expect(repo.Append(nil)).To(MatchError(ErrNilBlock))
+
+			_, err := repo.ByHash("rejected")
+			Expect(err).To(MatchError(storage.ErrNotFound))
+			_, err = repo.ByHeight(9)
+			Expect(err).To(MatchError(storage.ErrNotFound))
+			got, _ := repo.Range(0, 100)
+			Expect(got).To(Equal(blocks))
+		})
+
+		It("keeps the lookups consistent under concurrent Append", func() {
+			var wg sync.WaitGroup
+			wg.Add(2)
+			go func() {
+				defer GinkgoRecover()
+				defer wg.Done()
+				for i := 5; i < 200; i++ {
+					prev, _ := repo.Last()
+					Expect(repo.Append(&domain.Block{Index: i, PrevHash: prev.Hash, Hash: fmt.Sprintf("h%d", i)})).To(Succeed())
+				}
+			}()
+			go func() {
+				defer GinkgoRecover()
+				defer wg.Done()
+				for i := 0; i < 200; i++ {
+					page, err := repo.Range(0, 1000)
+					Expect(err).NotTo(HaveOccurred())
+					for j, b := range page {
+						Expect(b.Index).To(Equal(j))
+						byHash, err := repo.ByHash(b.Hash)
+						Expect(err).NotTo(HaveOccurred())
+						Expect(byHash).To(BeIdenticalTo(b))
+					}
+				}
+			}()
+			wg.Wait()
+		})
 	})
 })

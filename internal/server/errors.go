@@ -19,6 +19,18 @@ const chainConflictCode = "chain_conflict"
 // endpointGoneCode is the error code returned by the removed POST /legacy/bpm.
 const endpointGoneCode = "endpoint_gone"
 
+// invalidQueryCode is the error code for a malformed from/limit query value.
+const invalidQueryCode = "invalid_query"
+
+// invalidBlockRefCode is the error code for a GET /block/{ref} that is neither a hash nor a height.
+const invalidBlockRefCode = "invalid_block_ref"
+
+// blockNotFoundCode is the error code for a block outside the chain.
+const blockNotFoundCode = "block_not_found"
+
+// unhealthyCode is the error code returned by GET /health when the chain cannot be read.
+const unhealthyCode = "unhealthy"
+
 // transactionErrors maps transaction rejections to their HTTP status and code.
 var transactionErrors = []struct {
 	err    error

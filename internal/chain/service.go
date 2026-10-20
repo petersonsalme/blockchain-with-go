@@ -131,12 +131,32 @@ func (s *Service) Blocks() ([]*domain.Block, error) {
 	return s.repo.All()
 }
 
+// Tip returns the most recent block.
+func (s *Service) Tip() (*domain.Block, error) {
+	return s.repo.Last()
+}
+
+// BlockByHeight returns the block with Index h, or storage.ErrNotFound.
+func (s *Service) BlockByHeight(h int) (*domain.Block, error) {
+	return s.repo.ByHeight(h)
+}
+
+// BlockByHash returns the block with the given hash, or storage.ErrNotFound.
+func (s *Service) BlockByHash(hash string) (*domain.Block, error) {
+	return s.repo.ByHash(hash)
+}
+
+// BlocksRange returns up to limit blocks starting at height from.
+func (s *Service) BlocksRange(from, limit int) ([]*domain.Block, error) {
+	return s.repo.Range(from, limit)
+}
+
 // Mine seals txs into a new block and appends it to the chain.
 // Every transaction must spend existing, unspent outputs it owns and cover its
 // outputs, otherwise the matching domain error is returned and nothing
 // changes. Calls are serialized; waiting for the turn is bounded by ctx. A
 // rejected block leaves the repository and the UTXO set untouched, and Blocks
-// never waits for Mine.
+// never waits for Mine, nor do the block queries.
 func (s *Service) Mine(ctx context.Context, txs []domain.Transaction) (*domain.Block, error) {
 	select {
 	case s.writeSem <- struct{}{}:

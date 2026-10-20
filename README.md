@@ -104,9 +104,9 @@ blockchain-with-go/
 | Layer | Package | Role |
 | --- | --- | --- |
 | Domain | `internal/domain` | Pure entities and rules (`Block`, `Transaction`, `ValidateBlockRules`). Imports no other internal package. |
-| Port (outbound) | `internal/storage` (`BlockRepository`) | `Last`, `Append`, `All` — where the chain is stored. |
+| Port (outbound) | `internal/storage` (`BlockRepository`) | `Last`, `Append`, `All`, `ByHeight`, `ByHash`, `Range` — where the chain is stored. |
 | Port (outbound) | `internal/consensus` (`Consensus`) | `Seal`/`Verify` — how blocks are produced and accepted. |
-| Application | `internal/chain` (`Service`) | `Blocks()` and `Mine(ctx, txs)`: genesis, pre-validation, `Seal`, rules, `Verify`, `Append`. Rejection → `chain.ErrInvalidBlock`. |
+| Application | `internal/chain` (`Service`) | `Blocks()`, `Tip()`, `BlockByHeight`, `BlockByHash`, `BlocksRange` and `Mine(ctx, txs)`: genesis, pre-validation, `Seal`, rules, `Verify`, `Append`. Rejection → `chain.ErrInvalidBlock`. |
 | Adapter (inbound) | `internal/server` (`Server`) | HTTP (gorilla/mux); maps `Service` errors to HTTP status codes. |
 | Adapters (outbound) | `internal/storage/memory`, `internal/consensus/pow` | In-memory repository (`sync.RWMutex`) and Proof of Work. |
 | Composition root | `cmd/node` | Reads `.env`/environment, wires repo → pow → service → server and handles graceful shutdown. |
@@ -160,6 +160,26 @@ $ curl http://localhost:8080/
   }
 ]
 ```
+
+### GET /blocks
+
+Paginated read of the chain. Query: `from` (default `0`) and `limit` (default `20`, maximum `100`; a larger value is reduced to `100`).
+
+```json
+{"blocks": [...], "from": 0, "limit": 20, "next": 20}
+```
+
+`next` (`from` + number of blocks returned) is present only when a block exists at that height; follow it until it disappears to read the whole chain. A `from` past the tip returns `blocks: []` without `next`. A non-integer or negative `from`/`limit`, or `limit=0`, returns `400` with `"code": "invalid_query"`.
+
+### GET /block/{ref}
+
+`ref` is a block hash (64 lowercase hex characters) or a height (decimal digits, fewer than 64). Returns `200` with the block in the same JSON format as `POST /`. Any other form returns `400` `invalid_block_ref`; a block outside the chain returns `404` `block_not_found`. The genesis block carries no hash, so look it up by height (`/block/0`).
+
+### GET /health
+
+`200` `{"status": "ok", "height": 12, "tip": "<hash>"}` with the current tip; `503` `{"error": "...", "code": "unhealthy"}` when the repository cannot be read.
+
+None of these reads waits for a `POST /` that is mining.
 
 ### POST /
 Create and mine a new block with a list of **signed** transactions. The node never changes a signed field: `Timestamp` is required (`400 missing_timestamp`), and `ID` is filled in only when empty (a wrong `ID` is `400`).
@@ -218,6 +238,10 @@ BPM payloads cannot be signed, so the endpoint answers `410 Gone` (with `Depreca
 | Status Code | Description | Example Response Body |
 |---|---|---|
 | `200 OK` | Blockchain retrieved successfully via `GET /` | JSON array of blocks |
+| `200 OK` | `GET /blocks`, `GET /block/{ref}`, `GET /health` | page, block or health object (see above) |
+| `400 Bad Request` | Malformed `from`/`limit` on `GET /blocks`, or malformed `ref` on `GET /block/{ref}` | `{"error": "...", "code": "invalid_query" \| "invalid_block_ref"}` |
+| `404 Not Found` | `GET /block/{ref}` for a hash or height outside the chain | `{"error": "...", "code": "block_not_found"}` |
+| `503 Service Unavailable` | `GET /health` cannot read the chain tip | `{"error": "...", "code": "unhealthy"}` |
 | `201 Created` | Block mined and appended to the blockchain via `POST /` | JSON object of the new block |
 | `400 Bad Request` | Malformed JSON body or invalid transaction payload (e.g. empty list) | `{"error": "invalid request body"}` |
 | `400 Bad Request` | Transaction rejected before mining | `{"error": "...", "code": "missing_signature" \| "invalid_signature" \| "invalid_public_key" \| "input_owner_mismatch" \| "invalid_output" \| "missing_inputs" \| "missing_timestamp"}` |
