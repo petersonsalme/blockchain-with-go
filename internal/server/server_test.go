@@ -1007,7 +1007,7 @@ var _ = Describe("Server", func() {
 			h.ServeHTTP(rec4, req4)
 
 			Expect(rec4.Code).To(Equal(http.StatusTooManyRequests))
-			Expect(rec4.Header().Get("Retry-After")).To(Equal("20")) // 60s / 3 = 20s
+			Expect(rec4.Result().Header.Get("Retry-After")).To(Equal("20")) // 60s / 3 = 20s
 			var errBody map[string]any
 			Expect(json.Unmarshal(rec4.Body.Bytes(), &errBody)).To(Succeed())
 			Expect(errBody["code"]).To(Equal("rate_limited"))
