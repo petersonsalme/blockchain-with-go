@@ -15,6 +15,12 @@ import (
 // ErrInvalidBlock is returned by Mine when the sealed block is nil or fails consensus verification.
 var ErrInvalidBlock = errors.New("chain: invalid block")
 
+// ErrNilRepository is returned by NewService when repo is nil.
+var ErrNilRepository = errors.New("chain: nil repository")
+
+// ErrNilConsensus is returned by NewService when consensus is nil.
+var ErrNilConsensus = errors.New("chain: nil consensus")
+
 // ErrStateDiverged is returned by Mine after a state transition failure leaves
 // the repository and the UTXO set diverged. The service stops accepting writes.
 var ErrStateDiverged = errors.New("chain: state diverged")
@@ -59,6 +65,12 @@ type Service struct {
 // NewService builds a Service over repo, stores the genesis block when repo is
 // empty and rebuilds the UTXO set from the chain.
 func NewService(repo storage.BlockRepository, c consensus.Consensus, opts ...Option) (*Service, error) {
+	if repo == nil {
+		return nil, ErrNilRepository
+	}
+	if c == nil {
+		return nil, ErrNilConsensus
+	}
 	s := &Service{repo: repo, consensus: c, generate: GenerateBlockWithContext, writeSem: make(chan struct{}, 1)}
 	for _, opt := range opts {
 		opt(s)

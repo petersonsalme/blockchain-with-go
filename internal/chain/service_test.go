@@ -95,6 +95,16 @@ var _ = Describe("Service", func() {
 	})
 
 	Describe("NewService", func() {
+		It("fails when repo is nil", func() {
+			_, err := NewService(nil, eng)
+			Expect(err).To(MatchError(ErrNilRepository))
+		})
+
+		It("fails when consensus is nil", func() {
+			_, err := NewService(repo, nil)
+			Expect(err).To(MatchError(ErrNilConsensus))
+		})
+
 		It("creates the genesis block in an empty repository", func() {
 			_, err := NewService(repo, eng)
 			Expect(err).NotTo(HaveOccurred())
