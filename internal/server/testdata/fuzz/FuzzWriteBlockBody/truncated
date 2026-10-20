@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"Transactions\":[{\"Inputs\":[{\"PrevTxID\":\"ab\",\"OutIndex\":0,\"PublicKey\":\"cd\",\"Signature\":")

@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"Transactions\":[{\"Inputs\":[{\"PrevTxID\":\"ab\",\"OutIndex\":0,\"PublicKey\":\"cd\",\"Signature\":\"ef\"}],\"Outputs\":[{\"Amount\":60,\"Address\":\"addr\"}],\"Timestamp\":\"2026-10-16T12:05:00Z\"}]}")
