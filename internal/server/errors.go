@@ -19,6 +19,9 @@ const chainConflictCode = "chain_conflict"
 // endpointGoneCode is the error code returned by the removed POST /legacy/bpm.
 const endpointGoneCode = "endpoint_gone"
 
+// rateLimitedCode is the error code returned when requests exceed the rate limit.
+const rateLimitedCode = "rate_limited"
+
 // invalidQueryCode is the error code for a malformed from/limit query value.
 const invalidQueryCode = "invalid_query"
 

@@ -134,6 +134,17 @@ func (brokenChain) Mine(context.Context, []domain.Transaction) (*domain.Block, e
 	return nil, errors.New("unused")
 }
 
+// spyMineChain counts Mine calls and returns a valid mock block.
+type spyMineChain struct {
+	brokenChain
+	mineCalls int64
+}
+
+func (s *spyMineChain) Mine(ctx context.Context, txs []domain.Transaction) (*domain.Block, error) {
+	atomic.AddInt64(&s.mineCalls, 1)
+	return &domain.Block{Index: 1, Hash: "0000000000000000000000000000000000000000000000000000000000000001"}, nil
+}
+
 var _ = Describe("Server", func() {
 	var (
 		router http.Handler
@@ -477,6 +488,27 @@ var _ = Describe("Server", func() {
 		It("returns 413 request_too_large for a giant body", func() {
 			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "100")
 			rec := post(`{"Transactions":[{"ID":"` + strings.Repeat("a", 1000) + `"}]}`)
+
+			Expect(rec.Code).To(Equal(http.StatusRequestEntityTooLarge))
+			var body map[string]any
+			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
+			Expect(body["code"]).To(Equal("request_too_large"))
+			Expect(body["error"]).To(Equal("request body exceeds the maximum size"))
+			Expect(body["details"]).To(HaveKeyWithValue("max", BeNumerically("==", 200)))
+		})
+
+		It("returns 413 request_too_large for a giant body with rate limiting enabled and unexhausted", func() {
+			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "100")
+			repo := memory.New()
+			engine := pow.NewProofOfWorkFromEnv()
+			svc, err := funds.service(repo, engine)
+			Expect(err).NotTo(HaveOccurred())
+			s, err := NewServer(svc, Config{RateLimit: 10})
+			Expect(err).NotTo(HaveOccurred())
+
+			req := httptest.NewRequest("POST", "/", strings.NewReader(`{"Transactions":[{"ID":"`+strings.Repeat("a", 1000)+`"}]}`))
+			rec := httptest.NewRecorder()
+			s.Handler().ServeHTTP(rec, req)
 
 			Expect(rec.Code).To(Equal(http.StatusRequestEntityTooLarge))
 			var body map[string]any
@@ -1161,6 +1193,94 @@ var _ = Describe("Server", func() {
 			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 			Expect(rec.Code).To(Equal(http.StatusInternalServerError))
 			Expect(rec.Body.String()).To(ContainSubstring("read failed"))
+		})
+	})
+
+	Describe("rate limiting wiring via Server.Handler()", func() {
+		It("enforces rate limit on POST /, blocks mining when exceeded, and recovers with Config.Now", func() {
+			var currentTime = time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+			fakeNow := func() time.Time { return currentTime }
+
+			spy := &spyMineChain{}
+			srv, err := NewServer(spy, Config{RateLimit: 3, Now: fakeNow})
+			Expect(err).NotTo(HaveOccurred())
+
+			h := srv.Handler()
+			clientIP := "192.168.10.50:9999"
+
+			// Send N = 3 requests: all should be allowed and call Mine
+			for i := 0; i < 3; i++ {
+				req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(funds.payload()))
+				req.RemoteAddr = clientIP
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, req)
+				Expect(rec.Code).To(Equal(http.StatusCreated))
+			}
+			Expect(atomic.LoadInt64(&spy.mineCalls)).To(Equal(int64(3)))
+
+			// Request N+1 (4th) from same IP at same instant must be rate limited (429)
+			req4 := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(funds.payload()))
+			req4.RemoteAddr = clientIP
+			rec4 := httptest.NewRecorder()
+			h.ServeHTTP(rec4, req4)
+
+			Expect(rec4.Code).To(Equal(http.StatusTooManyRequests))
+			Expect(rec4.Result().Header.Get("Retry-After")).To(Equal("20")) // 60s / 3 = 20s
+			var errBody map[string]any
+			Expect(json.Unmarshal(rec4.Body.Bytes(), &errBody)).To(Succeed())
+			Expect(errBody["code"]).To(Equal("rate_limited"))
+			Expect(errBody["error"]).To(Equal("rate limit exceeded"))
+
+			// Barred request must not call Mine (Inv.3)
+			Expect(atomic.LoadInt64(&spy.mineCalls)).To(Equal(int64(3)))
+
+			// The bucket is per IP, not per route: every route of Handler() is limited.
+			// Without the limiter these routes answer 500 (broken Blocks) or 200/4xx, never 429.
+			for _, rt := range []struct{ method, path, body string }{
+				{http.MethodGet, "/", ""},
+				{http.MethodGet, "/blocks", ""},
+				{http.MethodGet, "/block/1", ""},
+				{http.MethodGet, "/health", ""},
+				{http.MethodPost, "/legacy/bpm", `{"BPM": 72}`},
+			} {
+				req := httptest.NewRequest(rt.method, rt.path, strings.NewReader(rt.body))
+				req.RemoteAddr = clientIP
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, req)
+				Expect(rec.Code).To(Equal(http.StatusTooManyRequests), "%s %s", rt.method, rt.path)
+				Expect(rec.Result().Header.Get("Retry-After")).To(Equal("20"), "%s %s", rt.method, rt.path)
+			}
+			Expect(atomic.LoadInt64(&spy.mineCalls)).To(Equal(int64(3)))
+
+			// Advance clock by 20s (60s/N) so 1 token recovers
+			currentTime = currentTime.Add(20 * time.Second)
+
+			// 5th request should succeed now and call Mine (AC2 & Config.Now wiring)
+			req5 := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(funds.payload()))
+			req5.RemoteAddr = clientIP
+			rec5 := httptest.NewRecorder()
+			h.ServeHTTP(rec5, req5)
+
+			Expect(rec5.Code).To(Equal(http.StatusCreated))
+			Expect(atomic.LoadInt64(&spy.mineCalls)).To(Equal(int64(4)))
+		})
+
+		It("never rate limits through Handler() when RateLimit is 0", func() {
+			spy := &spyMineChain{}
+			srv, err := NewServer(spy, Config{RateLimit: 0})
+			Expect(err).NotTo(HaveOccurred())
+
+			h := srv.Handler()
+			clientIP := "192.168.10.50:9999"
+
+			for i := 0; i < 100; i++ {
+				req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(funds.payload()))
+				req.RemoteAddr = clientIP
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, req)
+				Expect(rec.Code).To(Equal(http.StatusCreated))
+			}
+			Expect(atomic.LoadInt64(&spy.mineCalls)).To(Equal(int64(100)))
 		})
 	})
 
