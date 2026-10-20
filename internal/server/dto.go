@@ -1,6 +1,9 @@
 package server
 
-import "github.com/petersonsalme/blockchain-with-go/internal/domain"
+import (
+	"github.com/petersonsalme/blockchain-with-go/internal/chain"
+	"github.com/petersonsalme/blockchain-with-go/internal/domain"
+)
 
 type Message struct {
 	Transactions []domain.Transaction
@@ -30,4 +33,18 @@ type healthResponse struct {
 	Status string `json:"status"`
 	Height int    `json:"height"`
 	Tip    string `json:"tip"`
+}
+
+// txResponse is the body of GET /tx/{id}.
+type txResponse struct {
+	Transaction *domain.Transaction `json:"transaction"`
+	BlockHash   string              `json:"block_hash"`
+	Height      int                 `json:"height"`
+}
+
+// balanceResponse is the body of GET /balance/{addr}.
+type balanceResponse struct {
+	Address string       `json:"address"`
+	Balance uint64       `json:"balance"`
+	UTXOs   []chain.UTXO `json:"utxos"`
 }

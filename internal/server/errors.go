@@ -31,6 +31,15 @@ const blockNotFoundCode = "block_not_found"
 // unhealthyCode is the error code returned by GET /health when the chain cannot be read.
 const unhealthyCode = "unhealthy"
 
+// invalidTxIDCode is the error code for a GET /tx/{id} that is not a 64-char lowercase hex hash.
+const invalidTxIDCode = "invalid_tx_id"
+
+// txNotFoundCode is the error code for a transaction outside the chain.
+const txNotFoundCode = "tx_not_found"
+
+// invalidAddressCode is the error code for an invalid address in GET /balance/{addr}.
+const invalidAddressCode = "invalid_address"
+
 // transactionErrors maps transaction rejections to their HTTP status and code.
 var transactionErrors = []struct {
 	err    error
