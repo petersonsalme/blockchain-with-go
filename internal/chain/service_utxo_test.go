@@ -11,6 +11,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	. "github.com/petersonsalme/blockchain-with-go/internal/chain"
+	"github.com/petersonsalme/blockchain-with-go/internal/consensus"
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus/pow"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
@@ -40,6 +41,9 @@ func (s *stubRepo) Append(*domain.Block) error   { return storage.ErrConflict }
 func (s *stubRepo) All() ([]*domain.Block, error) {
 	return s.blocks, nil
 }
+func (s *stubRepo) ByHeight(int) (*domain.Block, error)     { return nil, storage.ErrNotFound }
+func (s *stubRepo) ByHash(string) (*domain.Block, error)    { return nil, storage.ErrNotFound }
+func (s *stubRepo) Range(int, int) ([]*domain.Block, error) { return nil, storage.ErrNotFound }
 
 var _ = Describe("Service UTXO rules", func() {
 	var (
@@ -371,14 +375,40 @@ var _ = Describe("Service UTXO rules", func() {
 			Expect(fset.Snapshot()).To(Equal(before))
 		})
 
-		It("returns the error when applying the delta fails after the append", func() {
+		It("fails stop when applying the delta fails after the append", func() {
 			boom := errors.New("boom")
 			failing := &failingUTXOSet{UTXOSet: memory.NewUTXOSet()}
-			s, ff := funded(memory.New(), eng, WithUTXOSet(failing))
+			memRepo := memory.New()
+			var genCalls atomic.Int32
+			s, ff := funded(memRepo, eng, WithUTXOSet(failing), WithGenerator(func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+				genCalls.Add(1)
+				return GenerateBlockWithContext(ctx, c, prev, txs)
+			}))
 			failing.applyErr = boom
 
 			_, err := s.Mine(context.Background(), ff.tx())
-			Expect(err).To(MatchError(boom))
+			Expect(err).To(MatchError(ContainSubstring("boom")))
+			Expect(errors.Is(err, ErrStateDiverged)).To(BeTrue())
+
+			// Block was appended to repository before failure
+			all, err := memRepo.All()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(all).To(HaveLen(2))
+			callsBefore := genCalls.Load()
+
+			// Every subsequent Mine returns ErrStateDiverged without calling Generator or Append
+			_, err = s.Mine(context.Background(), ff.tx())
+			Expect(errors.Is(err, ErrStateDiverged)).To(BeTrue())
+			Expect(genCalls.Load()).To(Equal(callsBefore))
+
+			allAfter, err := memRepo.All()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(allAfter).To(HaveLen(2))
+
+			// Blocks() continues to respond
+			blocks, err := s.Blocks()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(blocks).To(HaveLen(2))
 		})
 
 		It("keeps the set equal to a rebuild from the chain after many blocks", func() {

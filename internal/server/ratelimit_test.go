@@ -170,10 +170,12 @@ var _ = Describe("Rate Limiting", func() {
 		})
 
 		It("never rate limits when RATE_LIMIT is disabled (0)", func() {
-			srv := NewServer(nil, Config{RateLimit: 0})
+			srv, err := NewServer(brokenChain{}, Config{RateLimit: 0})
+			Expect(err).NotTo(HaveOccurred())
 			Expect(srv.limiter).To(BeNil())
 
-			sActive := NewServer(nil, Config{RateLimit: 10})
+			sActive, err := NewServer(brokenChain{}, Config{RateLimit: 10})
+			Expect(err).NotTo(HaveOccurred())
 			Expect(sActive.limiter).NotTo(BeNil())
 
 			dummyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -38,6 +38,28 @@ type failingRepo struct {
 	appendErr error
 	lastErr   error
 	allErr    error
+	readErr   error
+}
+
+func (f *failingRepo) ByHeight(h int) (*domain.Block, error) {
+	if f.readErr != nil {
+		return nil, f.readErr
+	}
+	return f.BlockRepository.ByHeight(h)
+}
+
+func (f *failingRepo) ByHash(hash string) (*domain.Block, error) {
+	if f.readErr != nil {
+		return nil, f.readErr
+	}
+	return f.BlockRepository.ByHash(hash)
+}
+
+func (f *failingRepo) Range(from, limit int) ([]*domain.Block, error) {
+	if f.readErr != nil {
+		return nil, f.readErr
+	}
+	return f.BlockRepository.Range(from, limit)
 }
 
 func (f *failingRepo) All() ([]*domain.Block, error) {
@@ -73,6 +95,16 @@ var _ = Describe("Service", func() {
 	})
 
 	Describe("NewService", func() {
+		It("fails when repo is nil", func() {
+			_, err := NewService(nil, eng)
+			Expect(err).To(MatchError(ErrNilRepository))
+		})
+
+		It("fails when consensus is nil", func() {
+			_, err := NewService(repo, nil)
+			Expect(err).To(MatchError(ErrNilConsensus))
+		})
+
 		It("creates the genesis block in an empty repository", func() {
 			_, err := NewService(repo, eng)
 			Expect(err).NotTo(HaveOccurred())
@@ -124,6 +156,61 @@ var _ = Describe("Service", func() {
 			blocks, err := svc.Blocks()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(blocks).To(HaveLen(1))
+		})
+	})
+
+	Describe("block queries", func() {
+		var svc *Service
+
+		BeforeEach(func() {
+			var f *funding
+			svc, f = funded(repo, eng)
+			_, err := svc.Mine(context.Background(), f.tx())
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("returns the tip", func() {
+			tip, err := svc.Tip()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(tip.Index).To(Equal(1))
+		})
+
+		It("looks blocks up by height and hash and ranges over them", func() {
+			all, _ := repo.All()
+			for _, b := range all {
+				byHeight, err := svc.BlockByHeight(b.Index)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(byHeight).To(BeIdenticalTo(b))
+				byHash, err := svc.BlockByHash(b.Hash)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(byHash).To(BeIdenticalTo(b))
+			}
+			page, err := svc.BlocksRange(1, 5)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(page).To(Equal(all[1:]))
+		})
+
+		It("reports ErrNotFound for unknown blocks", func() {
+			_, err := svc.BlockByHeight(2)
+			Expect(err).To(MatchError(storage.ErrNotFound))
+			_, err = svc.BlockByHash("unknown")
+			Expect(err).To(MatchError(storage.ErrNotFound))
+		})
+
+		It("propagates repository errors", func() {
+			boom := errors.New("boom")
+			failing := &failingRepo{BlockRepository: repo}
+			bad, err := NewService(failing, eng)
+			Expect(err).NotTo(HaveOccurred())
+			failing.readErr, failing.lastErr = boom, boom
+			_, err = bad.BlockByHeight(0)
+			Expect(err).To(MatchError(boom))
+			_, err = bad.BlockByHash("x")
+			Expect(err).To(MatchError(boom))
+			_, err = bad.BlocksRange(0, 1)
+			Expect(err).To(MatchError(boom))
+			_, err = bad.Tip()
+			Expect(err).To(MatchError(boom))
 		})
 	})
 
