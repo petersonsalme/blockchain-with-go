@@ -7,6 +7,7 @@ require (
 	github.com/joho/godotenv v1.4.0
 	github.com/onsi/ginkgo/v2 v2.1.4
 	github.com/onsi/gomega v1.20.0
+	go.etcd.io/bbolt v1.4.3
 	golang.org/x/crypto v0.58.0
 )
 

@@ -21,6 +21,7 @@ blockchain-with-go/
 │   ├── domain/        # Domain models (Block, Transaction, rules) — no internal dependencies
 │   ├── server/        # HTTP adapter: server.Server (DI), handlers, DTOs and error mapping
 │   └── storage/       # BlockRepository port
+│       ├── bolt/      # bbolt disk adapter
 │       └── memory/    # In-memory adapter (sync.RWMutex)
 ├── pkg/
 │   └── wallet/        # Ed25519 keys, addressing and keystore
@@ -32,7 +33,7 @@ blockchain-with-go/
 
 - Dependencies point inward: `cmd/node` → `server`/`chain`/adapters → `domain`. `internal/domain` never imports `storage`, `chain`, `server`, `net/http` or `os/signal`; `internal/chain` does not import `server` or `net/http`.
 - No global state: `internal/server` and `internal/chain` only have `const` and `errors.New` sentinels at package level. Dependencies (repository, consensus, block generator) are injected through constructors (`chain.NewService(repo, consensus, opts...)`, `server.NewServer(svc, cfg)`).
-- Composition root in `cmd/node/main.go`; it is the only place that triggers configuration reading (`PORT` and `MINING_TIMEOUT` directly; `POW_DIFFICULTY` via `pow.NewProofOfWorkFromEnv`; `GENESIS_ALLOCATIONS`, genesis outputs as `address:amount[,...]`, parsed in `cmd/node` and ignored when the repository is not empty).
+- Composition root in `cmd/node/main.go`; it is the only place that triggers configuration reading (`PORT`, `MINING_TIMEOUT` and `DATA_DIR` directly; `POW_DIFFICULTY` via `pow.NewProofOfWorkFromEnv`; `GENESIS_ALLOCATIONS`, genesis outputs as `address:amount[,...]`, parsed in `cmd/node` and ignored when the repository is not empty).
 
 ## Rules and Commands
 
