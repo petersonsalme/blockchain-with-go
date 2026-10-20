@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -20,6 +21,7 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/internal/server"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
+	"github.com/petersonsalme/blockchain-with-go/internal/storage/bolt"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/memory"
 	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
 )
@@ -89,9 +91,33 @@ func parseGenesisAllocations(raw string) ([]domain.TxOut, error) {
 	return outs, nil
 }
 
+// dataDirEnvVar holds the optional directory where chain.db is stored.
+const dataDirEnvVar = "DATA_DIR"
+
+// openRepository returns an in-memory repository when dataDir is empty, or opens
+// a bbolt repository at dataDir/chain.db, creating dataDir with 0o700 if needed.
+func openRepository(dataDir string) (storage.BlockRepository, func() error, error) {
+	if strings.TrimSpace(dataDir) == "" {
+		return memory.New(), func() error { return nil }, nil
+	}
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		return nil, nil, err
+	}
+	repo, err := bolt.Open(filepath.Join(dataDir, "chain.db"))
+	if err != nil {
+		return nil, nil, err
+	}
+	return repo, repo.Close, nil
+}
+
 // run wires repository, consensus, service and server, then serves until ctx is done.
 func run(ctx context.Context) error {
-	repo := memory.New()
+	repo, closeRepo, err := openRepository(os.Getenv(dataDirEnvVar))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = closeRepo() }()
+
 	engine := pow.NewProofOfWorkFromEnv()
 
 	svc, err := newService(repo, engine)

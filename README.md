@@ -50,7 +50,7 @@ type Transaction struct {
 - **Genesis**: the genesis block of an empty chain carries one transaction without inputs that creates the outputs listed in `GENESIS_ALLOCATIONS`; that is the only source of coins for now (no coinbase yet).
 
 ## Architectural Trade-offs
-1. **In-Memory Storage vs. Persistence**: The blockchain state is kept entirely in memory. While this keeps the implementation simple, fast, and dependency-free, all data is lost when the server is restarted. A production system would require a persistent datastore (like LevelDB or RocksDB).
+1. **In-Memory Storage vs. Persistence**: The node supports both in-memory and persistent disk storage. When `DATA_DIR` is set, blocks and hash indexes are persisted to `$DATA_DIR/chain.db` via the bbolt adapter (`internal/storage/bolt`). When `DATA_DIR` is empty, state lives in memory (`internal/storage/memory`) and is lost on restart. The UTXO set remains derived in memory and is rebuilt from the chain at startup (ADR-0001, ADR-0004).
 2. **Centralization vs. P2P Network**: Currently, the blockchain runs as a single centralized HTTP server rather than a decentralized peer-to-peer network. This eliminates the complexity of network discovery, peer management, and gossip protocols, but makes the system centralized.
 3. **Sybil Protection (Proof of Work)**: A Proof of Work (PoW) mechanism is implemented to require computational effort for block creation and mitigate spam. The difficulty (number of leading zeros required in the block hash) is configured via the `POW_DIFFICULTY` environment variable, defaulting to `2`. The logic lives in the `consensus` package behind the `Consensus` interface (`Seal`/`Verify`); `consensus.ProofOfWork` is the default implementation, and `POW_DIFFICULTY` is read once at startup (`cmd/node`).
    - **Difficulty Decoupled from Validation**: Each block records its difficulty in `b.Difficulty` at mining time, and validation checks the block's proof of work against its own recorded difficulty (which is included in the SHA-256 hash). Dynamic difficulty adjustment (e.g. retargeting) across nodes is not implemented.
@@ -66,6 +66,7 @@ Design decisions live in [`docs/adr/`](docs/adr):
 | [0001](docs/adr/0001-utxo-model.md) | Transaction model: UTXO replaces account/nonce |
 | [0002](docs/adr/0002-genesis-allocations-env-var.md) | Genesis funding comes from `GENESIS_ALLOCATIONS` |
 | [0003](docs/adr/0003-learning-project-positioning.md) | Personal learning project with an AI-generated-changes disclaimer |
+| [0004](docs/adr/0004-disk-storage.md) | Disk storage: bbolt adapter with in-memory derived UTXO set |
 
 ## Configuration & Environment Variables
 
@@ -77,6 +78,7 @@ The application can be configured via environment variables (e.g., in a `.env` f
 | `POW_DIFFICULTY` | Number of leading zeros required for block hashes | `2` |
 | `MINING_TIMEOUT` | Maximum duration allowed for mining a block (e.g., `10s`, `500ms`, or integer seconds) | `10s` |
 | `GENESIS_ALLOCATIONS` | Genesis outputs as `address:amount[,address:amount...]`. Each address must be a valid wallet address and each amount an integer from 1 to 2^64−1; an invalid item stops the node at startup. Only used when the chain is empty (the genesis is created); ignored otherwise | empty (genesis without transactions) |
+| `DATA_DIR` | Directory for persistent disk storage (stores `chain.db`). When empty, the in-memory repository is used | empty (in-memory storage) |
 | `MAX_BLOCK_BYTES` | Maximum JSON-serialized block size in bytes (positive integer; invalid values fall back to the default) | `1048576` |
 
 ## Project Structure
@@ -88,6 +90,7 @@ blockchain-with-go/
 ├── internal/
 │   ├── chain/         # Chain service (genesis, mining, validation) and block generation
 │   ├── storage/       # BlockRepository port
+│   │   ├── bolt/      # bbolt disk adapter
 │   │   └── memory/    # In-memory adapter (sync.RWMutex)
 │   ├── consensus/     # Consensus port interface and errors
 │   │   └── pow/       # Proof of Work implementation
@@ -108,7 +111,7 @@ blockchain-with-go/
 | Port (outbound) | `internal/consensus` (`Consensus`) | `Seal`/`Verify` — how blocks are produced and accepted. |
 | Application | `internal/chain` (`Service`) | `Blocks()`, `Tip()`, `BlockByHeight`, `BlockByHash`, `BlocksRange` and `Mine(ctx, txs)`: genesis, pre-validation, `Seal`, rules, `Verify`, `Append`. Rejection → `chain.ErrInvalidBlock`. |
 | Adapter (inbound) | `internal/server` (`Server`) | HTTP (gorilla/mux); maps `Service` errors to HTTP status codes. |
-| Adapters (outbound) | `internal/storage/memory`, `internal/consensus/pow` | In-memory repository (`sync.RWMutex`) and Proof of Work. |
+| Adapters (outbound) | `internal/storage/bolt`, `internal/storage/memory`, `internal/consensus/pow` | Disk repository (bbolt), in-memory repository (`sync.RWMutex`) and Proof of Work. |
 | Composition root | `cmd/node` | Reads `.env`/environment, wires repo → pow → service → server and handles graceful shutdown. |
 
 **Dependency rule:** arrows point inward (adapters → application → domain). `domain` does not depend on `storage`, `chain`, `server`, `net/http` or `os/signal`; `chain` does not import `server` or `net/http`. There is no global state: each `Server` receives its `Service` by injection.
@@ -120,9 +123,14 @@ Build the node binary:
 $ go build -o /dev/null ./cmd/node
 ```
 
-Run the node:
+Run the node in-memory:
 ```shell
 $ go run ./cmd/node
+```
+
+Run the node with disk storage:
+```shell
+$ DATA_DIR=./data go run ./cmd/node
 ```
 
 To run test suites:
