@@ -4,7 +4,7 @@ Guidelines for AI agents working in the `blockchain-with-go` repository.
 
 ## Project Context
 
-Educational blockchain implementation in Go with block validation, SHA-256 hashing and a simple HTTP server (`gorilla/mux`).
+Educational blockchain implementation in Go with block validation, SHA-256 hashing and a simple HTTP server.
 
 - For the full architecture, consensus concepts and trade-offs, see [README.md](README.md).
 
