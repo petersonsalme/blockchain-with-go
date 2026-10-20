@@ -15,6 +15,7 @@ import (
 
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus/pow"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
+	"github.com/petersonsalme/blockchain-with-go/internal/storage/bolt"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/memory"
 	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
 )
@@ -272,4 +273,112 @@ func TestBuildServiceGenesisAllocations(t *testing.T) {
 			t.Fatalf("chain changed: %+v -> %+v", before, after)
 		}
 	})
+}
+
+func TestOpenRepository(t *testing.T) {
+	t.Run("empty DATA_DIR chooses memory adapter", func(t *testing.T) {
+		repo, closeRepo, err := openRepository("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := closeRepo(); err != nil {
+				t.Fatal(err)
+			}
+		}()
+
+		if _, ok := repo.(*memory.Repository); !ok {
+			t.Fatalf("repo = %T, want *memory.Repository", repo)
+		}
+	})
+
+	t.Run("non-empty DATA_DIR creates directory and chooses bolt adapter", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "nested", "data")
+		repo, closeRepo, err := openRepository(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := closeRepo(); err != nil {
+				t.Fatal(err)
+			}
+		}()
+
+		if _, ok := repo.(*bolt.Repository); !ok {
+			t.Fatalf("repo = %T, want *bolt.Repository", repo)
+		}
+
+		dbPath := filepath.Join(dir, "chain.db")
+		info, err := os.Stat(dbPath)
+		if err != nil || info.IsDir() {
+			t.Fatalf("db file %s not found: %v", dbPath, err)
+		}
+	})
+}
+
+func TestRunServesAndShutsDownGracefullyWithDataDir(t *testing.T) {
+	port := freePort(t)
+	dataDir := t.TempDir()
+	t.Setenv("PORT", port)
+	t.Setenv("POW_DIFFICULTY", "1")
+	t.Setenv("MINING_TIMEOUT", "5s")
+	t.Setenv("DATA_DIR", dataDir)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- run(ctx) }()
+
+	url := "http://127.0.0.1:" + port + "/"
+	var resp *http.Response
+	var err error
+	for i := 0; i < 100; i++ {
+		resp, err = http.Get(url)
+		if err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err != nil {
+		cancel()
+		t.Fatalf("server did not come up: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET / = %d, want 200", resp.StatusCode)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("run returned %v after shutdown, want nil", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("run did not return after context cancel")
+	}
+
+	dbPath := filepath.Join(dataDir, "chain.db")
+	if info, err := os.Stat(dbPath); err != nil || info.IsDir() {
+		t.Fatalf("chain.db does not exist: %v", err)
+	}
+}
+
+func TestRunReleasesBoltLockWhenBootstrapFails(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("PORT", freePort(t))
+	t.Setenv("POW_DIFFICULTY", "1")
+	t.Setenv("DATA_DIR", dataDir)
+	t.Setenv(genesisAllocationsEnvVar, "bad:5")
+
+	err := run(context.Background())
+	if err == nil {
+		t.Fatal("run succeeded, want error")
+	}
+
+	// Because closeRepo() was deferred, the file lock must be released immediately.
+	reopened, openErr := bolt.Open(filepath.Join(dataDir, "chain.db"))
+	if openErr != nil {
+		t.Fatalf("database file still locked after run failure: %v", openErr)
+	}
+	_ = reopened.Close()
 }
