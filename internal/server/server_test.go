@@ -141,7 +141,9 @@ var _ = Describe("Server", func() {
 	build := func(opts ...chain.Option) {
 		svc, err := funds.service(repo, engine, opts...)
 		Expect(err).NotTo(HaveOccurred())
-		router = NewServer(svc, cfg).Handler()
+		srv, err := NewServer(svc, cfg)
+		Expect(err).NotTo(HaveOccurred())
+		router = srv.Handler()
 	}
 	chainLen := func() int {
 		all, err := repo.All()
@@ -664,7 +666,9 @@ var _ = Describe("Server", func() {
 			)
 
 			It("returns 500 when the chain cannot be read", func() {
-				h := NewServer(brokenChain{}, Config{}).Handler()
+				srv, err := NewServer(brokenChain{}, Config{})
+				Expect(err).NotTo(HaveOccurred())
+				h := srv.Handler()
 				rec := httptest.NewRecorder()
 				h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/blocks", nil))
 				Expect(rec.Code).To(Equal(http.StatusInternalServerError))
@@ -722,7 +726,9 @@ var _ = Describe("Server", func() {
 			})
 
 			It("returns 500 when the chain cannot be read", func() {
-				h := NewServer(brokenChain{}, Config{}).Handler()
+				srv, err := NewServer(brokenChain{}, Config{})
+				Expect(err).NotTo(HaveOccurred())
+				h := srv.Handler()
 				for _, ref := range []string{"0", strings.Repeat("a", 64)} {
 					rec := httptest.NewRecorder()
 					h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/block/"+ref, nil))
@@ -741,7 +747,9 @@ var _ = Describe("Server", func() {
 			})
 
 			It("returns 503 unhealthy when the repository fails", func() {
-				h := NewServer(brokenChain{}, Config{}).Handler()
+				srv, err := NewServer(brokenChain{}, Config{})
+				Expect(err).NotTo(HaveOccurred())
+				h := srv.Handler()
 				rec := httptest.NewRecorder()
 				h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
 				expectError(rec, http.StatusServiceUnavailable, "unhealthy")
@@ -883,19 +891,34 @@ var _ = Describe("Server", func() {
 	})
 
 	Describe("NewServer", func() {
+		It("fails when svc is nil", func() {
+			_, err := NewServer(nil, Config{})
+			Expect(err).To(MatchError(ErrNilService))
+		})
+
 		It("falls back to the default mining timeout for a non-positive value", func() {
 			svc, err := chain.NewService(memory.New(), engine)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(NewServer(svc, Config{}).miningTimeout).To(Equal(DefaultMiningTimeout))
-			Expect(NewServer(svc, Config{MiningTimeout: -time.Second}).miningTimeout).To(Equal(DefaultMiningTimeout))
-			Expect(NewServer(svc, Config{MiningTimeout: time.Second}).miningTimeout).To(Equal(time.Second))
+			s1, err := NewServer(svc, Config{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(s1.miningTimeout).To(Equal(DefaultMiningTimeout))
+			s2, err := NewServer(svc, Config{MiningTimeout: -time.Second})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(s2.miningTimeout).To(Equal(DefaultMiningTimeout))
+			s3, err := NewServer(svc, Config{MiningTimeout: time.Second})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(s3.miningTimeout).To(Equal(time.Second))
 		})
 
 		It("isolates state between two servers in the same process", func() {
 			bankA := newBank()
 			svcA, _ := bankA.service(memory.New(), engine)
 			svcB, _ := chain.NewService(memory.New(), engine)
-			a, b := NewServer(svcA, Config{}).Handler(), NewServer(svcB, Config{}).Handler()
+			srvA, err := NewServer(svcA, Config{})
+			Expect(err).NotTo(HaveOccurred())
+			srvB, err := NewServer(svcB, Config{})
+			Expect(err).NotTo(HaveOccurred())
+			a, b := srvA.Handler(), srvB.Handler()
 
 			rec := httptest.NewRecorder()
 			a.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(bankA.payload())))
@@ -913,7 +936,9 @@ var _ = Describe("Server", func() {
 		})
 
 		It("returns 500 on GET / when the chain cannot be read", func() {
-			h := NewServer(brokenChain{}, Config{}).Handler()
+			srv, err := NewServer(brokenChain{}, Config{})
+			Expect(err).NotTo(HaveOccurred())
+			h := srv.Handler()
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 			Expect(rec.Code).To(Equal(http.StatusInternalServerError))
@@ -930,7 +955,9 @@ var _ = Describe("Server", func() {
 
 			svc, err := chain.NewService(repo, engine)
 			Expect(err).NotTo(HaveOccurred())
-			hs := NewServer(svc, cfg).HTTPServer(addr)
+			srv, err := NewServer(svc, cfg)
+			Expect(err).NotTo(HaveOccurred())
+			hs := srv.HTTPServer(addr)
 			DeferCleanup(func() { _ = hs.Close() })
 			go func() {
 				defer GinkgoRecover()
@@ -948,7 +975,9 @@ var _ = Describe("Server", func() {
 
 		It("sets the service address, header limit and handler", func() {
 			svc, _ := chain.NewService(memory.New(), engine)
-			hs := NewServer(svc, Config{}).HTTPServer(":1234")
+			srv, err := NewServer(svc, Config{})
+			Expect(err).NotTo(HaveOccurred())
+			hs := srv.HTTPServer(":1234")
 			Expect(hs.Addr).To(Equal(":1234"))
 			Expect(hs.Handler).NotTo(BeNil())
 			Expect(hs.MaxHeaderBytes).To(Equal(1 << 20))
@@ -996,7 +1025,9 @@ var _ = Describe("Server", func() {
 			Expect(err).NotTo(HaveOccurred())
 			addr := l.Addr().String()
 			Expect(l.Close()).To(Succeed())
-			hs := NewServer(svc, cfg).HTTPServer(addr)
+			srv, err := NewServer(svc, cfg)
+			Expect(err).NotTo(HaveOccurred())
+			hs := srv.HTTPServer(addr)
 			DeferCleanup(func() { _ = hs.Close() })
 			go func() {
 				defer GinkgoRecover()

@@ -50,13 +50,19 @@ type Server struct {
 	miningTimeout time.Duration
 }
 
+// ErrNilService is returned by NewServer when svc is nil.
+var ErrNilService = errors.New("server: nil service")
+
 // NewServer builds a Server that serves svc.
-func NewServer(svc Chain, cfg Config) *Server {
+func NewServer(svc Chain, cfg Config) (*Server, error) {
+	if svc == nil {
+		return nil, ErrNilService
+	}
 	timeout := cfg.MiningTimeout
 	if timeout <= 0 {
 		timeout = DefaultMiningTimeout
 	}
-	return &Server{chain: svc, miningTimeout: timeout}
+	return &Server{chain: svc, miningTimeout: timeout}, nil
 }
 
 // ParseMiningTimeout reads a MINING_TIMEOUT value: a Go duration or integer seconds.
