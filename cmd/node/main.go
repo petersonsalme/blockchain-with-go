@@ -125,9 +125,12 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	srv := server.NewServer(svc, server.Config{
+	srv, err := server.NewServer(svc, server.Config{
 		MiningTimeout: server.ParseMiningTimeout(os.Getenv(server.MiningTimeoutEnvVar)),
 	})
+	if err != nil {
+		return err
+	}
 
 	addr := ":" + os.Getenv("PORT")
 	httpSrv := srv.HTTPServer(addr)
