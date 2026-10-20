@@ -1016,6 +1016,24 @@ var _ = Describe("Server", func() {
 			// Barred request must not call Mine (Inv.3)
 			Expect(atomic.LoadInt64(&spy.mineCalls)).To(Equal(int64(3)))
 
+			// The bucket is per IP, not per route: every route of Handler() is limited.
+			// Without the limiter these routes answer 500 (broken Blocks) or 200/4xx, never 429.
+			for _, rt := range []struct{ method, path, body string }{
+				{http.MethodGet, "/", ""},
+				{http.MethodGet, "/blocks", ""},
+				{http.MethodGet, "/block/1", ""},
+				{http.MethodGet, "/health", ""},
+				{http.MethodPost, "/legacy/bpm", `{"BPM": 72}`},
+			} {
+				req := httptest.NewRequest(rt.method, rt.path, strings.NewReader(rt.body))
+				req.RemoteAddr = clientIP
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, req)
+				Expect(rec.Code).To(Equal(http.StatusTooManyRequests), "%s %s", rt.method, rt.path)
+				Expect(rec.Result().Header.Get("Retry-After")).To(Equal("20"), "%s %s", rt.method, rt.path)
+			}
+			Expect(atomic.LoadInt64(&spy.mineCalls)).To(Equal(int64(3)))
+
 			// Advance clock by 20s (60s/N) so 1 token recovers
 			currentTime = currentTime.Add(20 * time.Second)
 
