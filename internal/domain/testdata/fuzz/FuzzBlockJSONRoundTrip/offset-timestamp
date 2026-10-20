@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"Index\":-1,\"Timestamp\":\"2026-10-16T12:05:00.123456789+05:30\",\"Transactions\":[],\"Nonce\":11,\"Difficulty\":2}")

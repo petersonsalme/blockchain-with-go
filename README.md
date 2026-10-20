@@ -146,6 +146,19 @@ $ go clean -testcache
 $ go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --timeout-coefficient 20 ./internal/<pacote>
 ```
 
+### Fuzzing
+
+Native Go fuzz targets (`testing.F`) check that `POST /` decoding, block JSON/hash and the block rules never panic and keep their properties. Seeds live in `testdata/fuzz/<FuzzName>/` of each package and run with a plain `go test ./...`. To fuzz for 60 seconds each:
+
+```shell
+$ go test -run='^$' -fuzz='^FuzzWriteBlockBody$' -fuzztime=60s ./internal/server
+$ go test -run='^$' -fuzz='^FuzzBlockJSONRoundTrip$' -fuzztime=60s ./internal/domain
+$ go test -run='^$' -fuzz='^FuzzValidateBlockRules$' -fuzztime=60s ./internal/domain
+$ go test -run='^$' -fuzz='^FuzzVerifyTamper$' -fuzztime=60s ./internal/consensus/pow
+```
+
+A failing input is written to `testdata/fuzz/<FuzzName>/`; commit it so it becomes a regression seed.
+
 ## API Calls
 
 ### GET /
