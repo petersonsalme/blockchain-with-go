@@ -79,9 +79,9 @@ var _ = Describe("Rate Limiting", func() {
 			wrapped.ServeHTTP(rec, req)
 
 			Expect(rec.Code).To(Equal(http.StatusTooManyRequests))
-			Expect(rec.Header().Get("Content-Type")).To(Equal("application/json"))
+			Expect(rec.Result().Header.Get("Content-Type")).To(Equal("application/json"))
 
-			retryAfter := rec.Header().Get("Retry-After")
+			retryAfter := rec.Result().Header.Get("Retry-After")
 			retrySec, err := strconv.Atoi(retryAfter)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(retrySec).To(BeNumerically(">=", 1))
@@ -117,7 +117,7 @@ var _ = Describe("Rate Limiting", func() {
 			rec := httptest.NewRecorder()
 			wrapped.ServeHTTP(rec, req)
 			Expect(rec.Code).To(Equal(http.StatusTooManyRequests))
-			Expect(rec.Header().Get("Retry-After")).To(Equal("2"))
+			Expect(rec.Result().Header.Get("Retry-After")).To(Equal("2"))
 
 			// Advance clock by 1s (half token recovered, missing 0.5 tokens => 1s)
 			currentTime = currentTime.Add(1 * time.Second)
@@ -128,7 +128,7 @@ var _ = Describe("Rate Limiting", func() {
 			rec = httptest.NewRecorder()
 			wrapped.ServeHTTP(rec, req)
 			Expect(rec.Code).To(Equal(http.StatusTooManyRequests))
-			Expect(rec.Header().Get("Retry-After")).To(Equal("1"))
+			Expect(rec.Result().Header.Get("Retry-After")).To(Equal("1"))
 
 			// Advance clock by 1 more second (total 2s = 60s / N)
 			currentTime = currentTime.Add(1 * time.Second)
@@ -173,7 +173,7 @@ var _ = Describe("Rate Limiting", func() {
 			rec := httptest.NewRecorder()
 			wrapped.ServeHTTP(rec, req)
 			Expect(rec.Code).To(Equal(http.StatusTooManyRequests))
-			Expect(rec.Header().Get("Retry-After")).To(Equal("9"))
+			Expect(rec.Result().Header.Get("Retry-After")).To(Equal("9"))
 
 			// Advance clock by 8 seconds:
 			// tokens refilled = 8 * (7/60) = 56/60 ≈ 0.9333 tokens
@@ -187,7 +187,7 @@ var _ = Describe("Rate Limiting", func() {
 			rec = httptest.NewRecorder()
 			wrapped.ServeHTTP(rec, req)
 			Expect(rec.Code).To(Equal(http.StatusTooManyRequests))
-			Expect(rec.Header().Get("Retry-After")).To(Equal("1"))
+			Expect(rec.Result().Header.Get("Retry-After")).To(Equal("1"))
 		})
 
 		It("caps accumulated tokens at maxTokens after prolonged idle periods", func() {
