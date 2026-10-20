@@ -23,7 +23,7 @@ A simple blockchain implementation in Go, created as an exercise to demonstrate 
 - **Cryptographic Hashing**: Uses SHA-256 to ensure data integrity across all block attributes (including nonce, difficulty, and an aggregate hash of all transactions). Transaction content hashing is deterministic and independent of transaction ID, signature, and public key.
 - **Proof of Work & Context-Aware Mining**: Nonce search satisfying leading-zero difficulty, supporting graceful context cancellation and mining timeouts.
 - **Chain Validation**: Validates new blocks by checking index sequentiality, cryptographic linkage (`PrevHash`), SHA-256 hash integrity, and Proof of Work against each block's recorded difficulty.
-- **HTTP API**: A RESTful API built with `gorilla/mux` to view the blockchain, append new blocks with transactions, and report structured errors with appropriate HTTP status codes.
+- **HTTP API**: A RESTful API to view the blockchain, append new blocks with transactions, and report structured errors with appropriate HTTP status codes.
 
 ## Consensus Mechanism
 This implementation utilizes a simplified **Longest Chain Rule** (represented by the `replaceChain` function). When confronted with multiple valid chains, the node will accept the longest chain as the source of truth. However, since this iteration does not implement peer-to-peer networking or block broadcasting, chain forks do not occur naturally. Block validation checks cryptographic linkage, index sequentiality, Proof of Work against the block's recorded difficulty, and transaction data integrity.
@@ -105,6 +105,7 @@ Design decisions live in [`docs/adr/`](docs/adr):
 | [0003](docs/adr/0003-learning-project-positioning.md) | Personal learning project with an AI-generated-changes disclaimer |
 | [0004](docs/adr/0004-disk-storage.md) | Disk storage: bbolt adapter with in-memory derived UTXO set |
 | [0005](docs/adr/0005-poa-block-seal.md) | Proof of Authority seal fields on Block |
+| [0006](docs/adr/0006-stdlib-servemux-routing.md) | HTTP routing with the standard library `ServeMux` instead of gorilla/mux |
 
 ## Configuration & Environment Variables
 
@@ -138,7 +139,7 @@ blockchain-with-go/
 │   ├── consensus/     # Consensus port interface and errors
 │   │   └── pow/       # Proof of Work implementation
 │   ├── domain/        # Domain entities (Block, Transaction, rules)
-│   └── server/        # HTTP REST API server, handlers and DTOs (gorilla/mux)
+│   └── server/        # HTTP REST API server, handlers and DTOs
 ├── pkg/
 │   └── wallet/        # Cryptographic wallet (Ed25519), addresses, and keystore
 ├── go.mod             # Go module definition
@@ -153,7 +154,7 @@ blockchain-with-go/
 | Port (outbound) | `internal/storage` (`BlockRepository`) | `Last`, `Append`, `All`, `ByHeight`, `ByHash`, `Range` — where the chain is stored. |
 | Port (outbound) | `internal/consensus` (`Consensus`) | `Seal`/`Verify` — how blocks are produced and accepted. |
 | Application | `internal/chain` (`Service`) | `Blocks()`, `Tip()`, `BlockByHeight`, `BlockByHash`, `BlocksRange` and `Mine(ctx, txs)`: genesis, pre-validation, `Seal`, rules, `Verify`, `Append`. Rejection → `chain.ErrInvalidBlock`. |
-| Adapter (inbound) | `internal/server` (`Server`) | HTTP (gorilla/mux); maps `Service` errors to HTTP status codes. |
+| Adapter (inbound) | `internal/server` (`Server`) | HTTP; maps `Service` errors to HTTP status codes. |
 | Adapters (outbound) | `internal/storage/bolt`, `internal/storage/memory`, `internal/consensus/pow` | Disk repository (bbolt), in-memory repository (`sync.RWMutex`) and Proof of Work. |
 | Composition root | `cmd/node` | Reads `.env`/environment, wires repo → pow → service → server and handles graceful shutdown. |
 
