@@ -3,6 +3,7 @@ package chain
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus"
@@ -14,7 +15,12 @@ import (
 // ErrInvalidBlock is returned by Mine when the sealed block is nil or fails consensus verification.
 var ErrInvalidBlock = errors.New("chain: invalid block")
 
-// Generator builds the candidate successor of prev holding txs.
+// ErrStateDiverged is returned by Mine after a state transition failure leaves
+// the repository and the UTXO set diverged. The service stops accepting writes.
+var ErrStateDiverged = errors.New("chain: state diverged")
+
+// Generator builds the candidate successor of prev holding txs. The returned
+// block must contain exactly txs, in the same order.
 type Generator func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error)
 
 // Option customises a Service.
@@ -26,7 +32,8 @@ func WithGenerator(g Generator) Option {
 }
 
 // WithUTXOSet replaces the default in-memory UTXO set. NewService rebuilds it
-// from the chain, so it must start empty.
+// from the chain, so it must start empty. The set belongs exclusively to the
+// Service; no external caller may invoke Apply or Revert on it.
 func WithUTXOSet(u storage.UTXOSet) Option {
 	return func(s *Service) { s.utxos = u }
 }
@@ -44,6 +51,7 @@ type Service struct {
 	generate    Generator
 	utxos       storage.UTXOSet
 	allocations []domain.TxOut
+	diverged    bool
 	// writeSem serializes Mine; a buffered channel lets waiters honour ctx.
 	writeSem chan struct{}
 }
@@ -165,6 +173,10 @@ func (s *Service) Mine(ctx context.Context, txs []domain.Transaction) (*domain.B
 		return nil, ctx.Err()
 	}
 
+	if s.diverged {
+		return nil, ErrStateDiverged
+	}
+
 	// select picks at random when both cases are ready; do not mine for a dead ctx.
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -203,7 +215,8 @@ func (s *Service) Mine(ctx context.Context, txs []domain.Transaction) (*domain.B
 	}
 
 	if err := s.utxos.Apply(delta); err != nil {
-		return nil, err
+		s.diverged = true
+		return nil, fmt.Errorf("%w: %w", ErrStateDiverged, err)
 	}
 
 	return block, nil
