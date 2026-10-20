@@ -50,12 +50,23 @@ type Transaction struct {
 - **Genesis**: the genesis block of an empty chain carries one transaction without inputs that creates the outputs listed in `GENESIS_ALLOCATIONS`; that is the only source of coins for now (no coinbase yet).
 
 ## Architectural Trade-offs
-1. **In-Memory Storage vs. Persistence**: The blockchain state is kept entirely in memory. While this keeps the implementation simple, fast, and dependency-free, all data is lost when the server is restarted. A production system would require a persistent datastore (like LevelDB or RocksDB).
+1. **In-Memory Storage vs. Persistence**: The node supports both in-memory and persistent disk storage. When `DATA_DIR` is set, blocks and hash indexes are persisted to `$DATA_DIR/chain.db` via the bbolt adapter (`internal/storage/bolt`). When `DATA_DIR` is empty, state lives in memory (`internal/storage/memory`) and is lost on restart. The UTXO set remains derived in memory and is rebuilt from the chain at startup (ADR-0001, ADR-0004).
 2. **Centralization vs. P2P Network**: Currently, the blockchain runs as a single centralized HTTP server rather than a decentralized peer-to-peer network. This eliminates the complexity of network discovery, peer management, and gossip protocols, but makes the system centralized.
 3. **Sybil Protection (Proof of Work)**: A Proof of Work (PoW) mechanism is implemented to require computational effort for block creation and mitigate spam. The difficulty (number of leading zeros required in the block hash) is configured via the `POW_DIFFICULTY` environment variable, defaulting to `2`. The logic lives in the `consensus` package behind the `Consensus` interface (`Seal`/`Verify`); `consensus.ProofOfWork` is the default implementation, and `POW_DIFFICULTY` is read once at startup (`cmd/node`).
    - **Difficulty Decoupled from Validation**: Each block records its difficulty in `b.Difficulty` at mining time, and validation checks the block's proof of work against its own recorded difficulty (which is included in the SHA-256 hash). Dynamic difficulty adjustment (e.g. retargeting) across nodes is not implemented.
    - **Context Cancellation & Timeouts**: Mining supports cooperative cancellation via `context.Context` (`consensus.MineWithContext`, `GenerateBlockWithContext`). The HTTP handler applies a configurable mining timeout via `MINING_TIMEOUT` (defaulting to 10 seconds) and aborts immediately if the client disconnects or cancels the request, preventing request processing from blocking indefinitely.
 4. **Transaction List Payload**: Blocks store a slice of transactions committed via `TransactionsHash`. Full Merkle tree support with inclusion proofs is deferred to a subsequent milestone (ENG-20).
+
+## Architecture Decision Records
+
+Design decisions live in [`docs/adr/`](docs/adr):
+
+| ADR | Decision |
+|---|---|
+| [0001](docs/adr/0001-utxo-model.md) | Transaction model: UTXO replaces account/nonce |
+| [0002](docs/adr/0002-genesis-allocations-env-var.md) | Genesis funding comes from `GENESIS_ALLOCATIONS` |
+| [0003](docs/adr/0003-learning-project-positioning.md) | Personal learning project with an AI-generated-changes disclaimer |
+| [0004](docs/adr/0004-disk-storage.md) | Disk storage: bbolt adapter with in-memory derived UTXO set |
 
 ## Configuration & Environment Variables
 
@@ -67,6 +78,7 @@ The application can be configured via environment variables (e.g., in a `.env` f
 | `POW_DIFFICULTY` | Number of leading zeros required for block hashes | `2` |
 | `MINING_TIMEOUT` | Maximum duration allowed for mining a block (e.g., `10s`, `500ms`, or integer seconds) | `10s` |
 | `GENESIS_ALLOCATIONS` | Genesis outputs as `address:amount[,address:amount...]`. Each address must be a valid wallet address and each amount an integer from 1 to 2^64−1; an invalid item stops the node at startup. Only used when the chain is empty (the genesis is created); ignored otherwise | empty (genesis without transactions) |
+| `DATA_DIR` | Directory for persistent disk storage (stores `chain.db`). When empty, the in-memory repository is used | empty (in-memory storage) |
 | `MAX_BLOCK_BYTES` | Maximum JSON-serialized block size in bytes (positive integer; invalid values fall back to the default) | `1048576` |
 | `RATE_LIMIT` | Maximum requests per minute per IP (positive integer; empty, invalid, or non-positive disables rate limiting) | disabled (`0`) |
 
@@ -79,6 +91,7 @@ blockchain-with-go/
 ├── internal/
 │   ├── chain/         # Chain service (genesis, mining, validation) and block generation
 │   ├── storage/       # BlockRepository port
+│   │   ├── bolt/      # bbolt disk adapter
 │   │   └── memory/    # In-memory adapter (sync.RWMutex)
 │   ├── consensus/     # Consensus port interface and errors
 │   │   └── pow/       # Proof of Work implementation
@@ -95,11 +108,11 @@ blockchain-with-go/
 | Layer | Package | Role |
 | --- | --- | --- |
 | Domain | `internal/domain` | Pure entities and rules (`Block`, `Transaction`, `ValidateBlockRules`). Imports no other internal package. |
-| Port (outbound) | `internal/storage` (`BlockRepository`) | `Last`, `Append`, `All` — where the chain is stored. |
+| Port (outbound) | `internal/storage` (`BlockRepository`) | `Last`, `Append`, `All`, `ByHeight`, `ByHash`, `Range` — where the chain is stored. |
 | Port (outbound) | `internal/consensus` (`Consensus`) | `Seal`/`Verify` — how blocks are produced and accepted. |
-| Application | `internal/chain` (`Service`) | `Blocks()` and `Mine(ctx, txs)`: genesis, pre-validation, `Seal`, rules, `Verify`, `Append`. Rejection → `chain.ErrInvalidBlock`. |
+| Application | `internal/chain` (`Service`) | `Blocks()`, `Tip()`, `BlockByHeight`, `BlockByHash`, `BlocksRange` and `Mine(ctx, txs)`: genesis, pre-validation, `Seal`, rules, `Verify`, `Append`. Rejection → `chain.ErrInvalidBlock`. |
 | Adapter (inbound) | `internal/server` (`Server`) | HTTP (gorilla/mux); maps `Service` errors to HTTP status codes. |
-| Adapters (outbound) | `internal/storage/memory`, `internal/consensus/pow` | In-memory repository (`sync.RWMutex`) and Proof of Work. |
+| Adapters (outbound) | `internal/storage/bolt`, `internal/storage/memory`, `internal/consensus/pow` | Disk repository (bbolt), in-memory repository (`sync.RWMutex`) and Proof of Work. |
 | Composition root | `cmd/node` | Reads `.env`/environment, wires repo → pow → service → server and handles graceful shutdown. |
 
 **Dependency rule:** arrows point inward (adapters → application → domain). `domain` does not depend on `storage`, `chain`, `server`, `net/http` or `os/signal`; `chain` does not import `server` or `net/http`. There is no global state: each `Server` receives its `Service` by injection.
@@ -111,9 +124,14 @@ Build the node binary:
 $ go build -o /dev/null ./cmd/node
 ```
 
-Run the node:
+Run the node in-memory:
 ```shell
 $ go run ./cmd/node
+```
+
+Run the node with disk storage:
+```shell
+$ DATA_DIR=./data go run ./cmd/node
 ```
 
 To run test suites:
@@ -151,6 +169,26 @@ $ curl http://localhost:8080/
   }
 ]
 ```
+
+### GET /blocks
+
+Paginated read of the chain. Query: `from` (default `0`) and `limit` (default `20`, maximum `100`; a larger value is reduced to `100`).
+
+```json
+{"blocks": [...], "from": 0, "limit": 20, "next": 20}
+```
+
+`next` (`from` + number of blocks returned) is present only when a block exists at that height; follow it until it disappears to read the whole chain. A `from` past the tip returns `blocks: []` without `next`. A non-integer or negative `from`/`limit`, or `limit=0`, returns `400` with `"code": "invalid_query"`.
+
+### GET /block/{ref}
+
+`ref` is a block hash (64 lowercase hex characters) or a height (decimal digits, fewer than 64). Returns `200` with the block in the same JSON format as `POST /`. Any other form returns `400` `invalid_block_ref`; a block outside the chain returns `404` `block_not_found`. The genesis block carries no hash, so look it up by height (`/block/0`).
+
+### GET /health
+
+`200` `{"status": "ok", "height": 12, "tip": "<hash>"}` with the current tip; `503` `{"error": "...", "code": "unhealthy"}` when the repository cannot be read.
+
+None of these reads waits for a `POST /` that is mining.
 
 ### POST /
 Create and mine a new block with a list of **signed** transactions. The node never changes a signed field: `Timestamp` is required (`400 missing_timestamp`), and `ID` is filled in only when empty (a wrong `ID` is `400`).
@@ -209,6 +247,10 @@ BPM payloads cannot be signed, so the endpoint answers `410 Gone` (with `Depreca
 | Status Code | Description | Example Response Body |
 |---|---|---|
 | `200 OK` | Blockchain retrieved successfully via `GET /` | JSON array of blocks |
+| `200 OK` | `GET /blocks`, `GET /block/{ref}`, `GET /health` | page, block or health object (see above) |
+| `400 Bad Request` | Malformed `from`/`limit` on `GET /blocks`, or malformed `ref` on `GET /block/{ref}` | `{"error": "...", "code": "invalid_query" \| "invalid_block_ref"}` |
+| `404 Not Found` | `GET /block/{ref}` for a hash or height outside the chain | `{"error": "...", "code": "block_not_found"}` |
+| `503 Service Unavailable` | `GET /health` cannot read the chain tip | `{"error": "...", "code": "unhealthy"}` |
 | `201 Created` | Block mined and appended to the blockchain via `POST /` | JSON object of the new block |
 | `400 Bad Request` | Malformed JSON body or invalid transaction payload (e.g. empty list) | `{"error": "invalid request body"}` |
 | `400 Bad Request` | Transaction rejected before mining | `{"error": "...", "code": "missing_signature" \| "invalid_signature" \| "invalid_public_key" \| "input_owner_mismatch" \| "invalid_output" \| "missing_inputs" \| "missing_timestamp"}` |
