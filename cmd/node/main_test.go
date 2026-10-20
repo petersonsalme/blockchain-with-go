@@ -308,6 +308,14 @@ func TestOpenRepository(t *testing.T) {
 			t.Fatalf("repo = %T, want *bolt.Repository", repo)
 		}
 
+		dirInfo, err := os.Stat(dir)
+		if err != nil {
+			t.Fatalf("stat dir %s: %v", dir, err)
+		}
+		if perm := dirInfo.Mode().Perm(); perm != 0o700 {
+			t.Fatalf("dir perm = %#o, want %#o", perm, 0o700)
+		}
+
 		dbPath := filepath.Join(dir, "chain.db")
 		info, err := os.Stat(dbPath)
 		if err != nil || info.IsDir() {
