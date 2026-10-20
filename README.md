@@ -175,6 +175,26 @@ Paginated read of the chain. Query: `from` (default `0`) and `limit` (default `2
 
 `ref` is a block hash (64 lowercase hex characters) or a height (decimal digits, fewer than 64). Returns `200` with the block in the same JSON format as `POST /`. Any other form returns `400` `invalid_block_ref`; a block outside the chain returns `404` `block_not_found`. The genesis block carries no hash, so look it up by height (`/block/0`).
 
+### GET /tx/{id}
+
+Lookup a mined transaction by its 64-character lowercase hex ID. Returns `200` with the transaction object, the block hash, and height:
+
+```json
+{"transaction": {...}, "block_hash": "...", "height": 1}
+```
+
+The genesis allocation transaction is found at height `0` with `"block_hash": ""`. An ID that is not 64 lowercase hex characters returns `400` with `"code": "invalid_tx_id"`. A non-existent transaction returns `404` with `"code": "tx_not_found"`.
+
+### GET /balance/{addr}
+
+Returns the balance and unspent outputs (UTXOs) for `addr` from a single snapshot of the UTXO set:
+
+```json
+{"address": "...", "balance": 100, "utxos": [{"txid": "...", "index": 0, "amount": 100}]}
+```
+
+Outputs are sorted by `(TxID, Index)`. If `wallet.ValidateAddress` fails, returns `400` with `"code": "invalid_address"`. An address with no unspent outputs returns `balance: 0` and `utxos: []` (never `null`).
+
 ### GET /health
 
 `200` `{"status": "ok", "height": 12, "tip": "<hash>"}` with the current tip; `503` `{"error": "...", "code": "unhealthy"}` when the repository cannot be read.
@@ -238,9 +258,9 @@ BPM payloads cannot be signed, so the endpoint answers `410 Gone` (with `Depreca
 | Status Code | Description | Example Response Body |
 |---|---|---|
 | `200 OK` | Blockchain retrieved successfully via `GET /` | JSON array of blocks |
-| `200 OK` | `GET /blocks`, `GET /block/{ref}`, `GET /health` | page, block or health object (see above) |
-| `400 Bad Request` | Malformed `from`/`limit` on `GET /blocks`, or malformed `ref` on `GET /block/{ref}` | `{"error": "...", "code": "invalid_query" \| "invalid_block_ref"}` |
-| `404 Not Found` | `GET /block/{ref}` for a hash or height outside the chain | `{"error": "...", "code": "block_not_found"}` |
+| `200 OK` | `GET /blocks`, `GET /block/{ref}`, `GET /tx/{id}`, `GET /balance/{addr}`, `GET /health` | page, block, transaction, balance or health object (see above) |
+| `400 Bad Request` | Malformed query on `/blocks`, malformed `ref` on `/block/{ref}`, malformed `id` on `/tx/{id}`, or invalid address on `/balance/{addr}` | `{"error": "...", "code": "invalid_query" \| "invalid_block_ref" \| "invalid_tx_id" \| "invalid_address"}` |
+| `404 Not Found` | `GET /block/{ref}` or `GET /tx/{id}` outside the chain | `{"error": "...", "code": "block_not_found" \| "tx_not_found"}` |
 | `503 Service Unavailable` | `GET /health` cannot read the chain tip | `{"error": "...", "code": "unhealthy"}` |
 | `201 Created` | Block mined and appended to the blockchain via `POST /` | JSON object of the new block |
 | `400 Bad Request` | Malformed JSON body or invalid transaction payload (e.g. empty list) | `{"error": "invalid request body"}` |
