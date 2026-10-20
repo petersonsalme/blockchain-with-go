@@ -1265,6 +1265,30 @@ var _ = Describe("Server", func() {
 			Expect(atomic.LoadInt64(&spy.mineCalls)).To(Equal(int64(4)))
 		})
 
+		It("rate limits the 405 and 404 routes too (ADR-0006)", func() {
+			now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+			srv, err := NewServer(&spyMineChain{}, Config{RateLimit: 1, Now: func() time.Time { return now }})
+			Expect(err).NotTo(HaveOccurred())
+
+			h := srv.Handler()
+			for _, rt := range []struct {
+				method, path string
+				first        int
+			}{
+				{http.MethodPut, "/blocks", http.StatusMethodNotAllowed},
+				{http.MethodGet, "/nao-existe", http.StatusNotFound},
+			} {
+				now = now.Add(time.Hour) // refill the single token
+				for i, want := range []int{rt.first, http.StatusTooManyRequests} {
+					req := httptest.NewRequest(rt.method, rt.path, nil)
+					req.RemoteAddr = "192.168.10.51:9999"
+					rec := httptest.NewRecorder()
+					h.ServeHTTP(rec, req)
+					Expect(rec.Code).To(Equal(want), "%s %s request %d", rt.method, rt.path, i+1)
+				}
+			}
+		})
+
 		It("never rate limits through Handler() when RateLimit is 0", func() {
 			spy := &spyMineChain{}
 			srv, err := NewServer(spy, Config{RateLimit: 0})
