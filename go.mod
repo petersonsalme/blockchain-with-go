@@ -7,12 +7,12 @@ require (
 	github.com/joho/godotenv v1.4.0
 	github.com/onsi/ginkgo/v2 v2.1.4
 	github.com/onsi/gomega v1.20.0
+	go.etcd.io/bbolt v1.4.3
 	golang.org/x/crypto v0.58.0
 )
 
 require (
 	github.com/google/go-cmp v0.5.8 // indirect
-	go.etcd.io/bbolt v1.4.3 // indirect
 	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
