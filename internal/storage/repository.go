@@ -13,6 +13,9 @@ var ErrEmpty = errors.New("storage: repository is empty")
 // ErrConflict is returned by Append when the block does not extend the current last block.
 var ErrConflict = errors.New("storage: block does not extend the chain tip")
 
+// ErrNotFound is returned by ByHeight and ByHash when no stored block matches.
+var ErrNotFound = errors.New("storage: block not found")
+
 // BlockRepository stores the blocks of a chain in append order.
 // Implementations must be safe for concurrent use.
 type BlockRepository interface {
@@ -25,4 +28,12 @@ type BlockRepository interface {
 	Append(b *domain.Block) error
 	// All returns a snapshot of the chain, oldest block first.
 	All() ([]*domain.Block, error)
+	// ByHeight returns the block with Index h, or ErrNotFound.
+	ByHeight(h int) (*domain.Block, error)
+	// ByHash returns the block with the given Hash, or ErrNotFound.
+	ByHash(hash string) (*domain.Block, error)
+	// Range returns up to limit blocks starting at height from, oldest first.
+	// It returns an empty slice when from is negative or past the tip, or limit
+	// is not positive.
+	Range(from, limit int) ([]*domain.Block, error)
 }

@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -113,6 +115,13 @@ type chainBody struct {
 
 // brokenChain fails to read blocks.
 type brokenChain struct{}
+
+func (brokenChain) Tip() (*domain.Block, error)               { return nil, errors.New("read failed") }
+func (brokenChain) BlockByHeight(int) (*domain.Block, error)  { return nil, errors.New("read failed") }
+func (brokenChain) BlockByHash(string) (*domain.Block, error) { return nil, errors.New("read failed") }
+func (brokenChain) BlocksRange(int, int) ([]*domain.Block, error) {
+	return nil, errors.New("read failed")
+}
 
 func (brokenChain) Blocks() ([]*domain.Block, error) { return nil, errors.New("read failed") }
 func (brokenChain) Mine(context.Context, []domain.Transaction) (*domain.Block, error) {
@@ -525,6 +534,296 @@ var _ = Describe("Server", func() {
 			Expect(rec.Code).To(Equal(http.StatusInternalServerError))
 			Expect(rec.Body.String()).To(MatchJSON(`{"error": "boom"}`))
 			Expect(chainLen()).To(Equal(initialLen))
+		})
+	})
+
+	Describe("block queries", func() {
+		get := func(target string) *httptest.ResponseRecorder {
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+			return rec
+		}
+		mineN := func(n int) {
+			for i := 0; i < n; i++ {
+				rec := httptest.NewRecorder()
+				router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(funds.payload())))
+				Expect(rec.Code).To(Equal(http.StatusCreated))
+			}
+		}
+		type page struct {
+			Blocks []*domain.Block `json:"blocks"`
+			From   int             `json:"from"`
+			Limit  int             `json:"limit"`
+			Next   *int            `json:"next"`
+		}
+		getPage := func(target string) page {
+			rec := get(target)
+			Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+			Expect(rec.Header().Get("Content-Type")).To(Equal("application/json"))
+			var p page
+			Expect(json.Unmarshal(rec.Body.Bytes(), &p)).To(Succeed())
+			return p
+		}
+		expectError := func(rec *httptest.ResponseRecorder, status int, code string) {
+			Expect(rec.Code).To(Equal(status), rec.Body.String())
+			Expect(rec.Header().Get("Content-Type")).To(Equal("application/json"))
+			var resp errorResponse
+			Expect(json.Unmarshal(rec.Body.Bytes(), &resp)).To(Succeed())
+			Expect(resp.Code).To(Equal(code))
+			Expect(resp.Error).NotTo(BeEmpty())
+		}
+		expectLinked := func(p page) {
+			for i, b := range p.Blocks {
+				Expect(b.Index).To(Equal(p.From + i))
+				if i > 0 {
+					Expect(b.PrevHash).To(Equal(p.Blocks[i-1].Hash))
+				}
+			}
+		}
+
+		Describe("GET /blocks", func() {
+			BeforeEach(func() { mineN(4) }) // heights 0..4
+
+			It("defaults to from=0 and limit=20", func() {
+				p := getPage("/blocks")
+				Expect(p.From).To(Equal(0))
+				Expect(p.Limit).To(Equal(20))
+				Expect(p.Blocks).To(HaveLen(5))
+				Expect(p.Next).To(BeNil())
+				expectLinked(p)
+			})
+
+			It("returns the window and a next cursor while more blocks exist", func() {
+				p := getPage("/blocks?from=1&limit=2")
+				Expect(p.From).To(Equal(1))
+				Expect(p.Limit).To(Equal(2))
+				Expect(p.Blocks).To(HaveLen(2))
+				Expect(p.Next).NotTo(BeNil())
+				Expect(*p.Next).To(Equal(3))
+				expectLinked(p)
+			})
+
+			It("omits next when the page ends exactly at the tip", func() {
+				p := getPage("/blocks?from=3&limit=2")
+				Expect(p.Blocks).To(HaveLen(2))
+				Expect(p.Next).To(BeNil())
+				Expect(get("/blocks?from=3&limit=2").Body.String()).NotTo(ContainSubstring(`"next"`))
+			})
+
+			It("returns an empty list without next when from is past the tip", func() {
+				for _, target := range []string{"/blocks?from=5", "/blocks?from=999999999999"} {
+					rec := get(target)
+					Expect(rec.Code).To(Equal(http.StatusOK))
+					Expect(rec.Body.String()).To(ContainSubstring(`"blocks": []`))
+					var p page
+					Expect(json.Unmarshal(rec.Body.Bytes(), &p)).To(Succeed())
+					Expect(p.Blocks).To(BeEmpty())
+					Expect(p.Next).To(BeNil())
+				}
+			})
+
+			It("caps limit at 100", func() {
+				p := getPage("/blocks?limit=100")
+				Expect(p.Limit).To(Equal(100))
+				p = getPage("/blocks?limit=101")
+				Expect(p.Limit).To(Equal(100))
+				p = getPage("/blocks?limit=9223372036854775807")
+				Expect(p.Limit).To(Equal(100))
+			})
+
+			It("follows next from 0 and returns the whole chain once, in order", func() {
+				all, _ := repo.All()
+				var got []*domain.Block
+				target := "/blocks?limit=2"
+				for target != "" {
+					p := getPage(target)
+					got = append(got, p.Blocks...)
+					target = ""
+					if p.Next != nil {
+						target = fmt.Sprintf("/blocks?from=%d&limit=2", *p.Next)
+					}
+				}
+				Expect(got).To(HaveLen(len(all)))
+				for i := range all {
+					Expect(got[i].Hash).To(Equal(all[i].Hash))
+				}
+			})
+
+			DescribeTable("rejects bad query values with 400 invalid_query",
+				func(target string) {
+					expectError(get(target), http.StatusBadRequest, "invalid_query")
+				},
+				Entry("non-integer from", "/blocks?from=abc"),
+				Entry("non-integer limit", "/blocks?limit=1.5"),
+				Entry("empty from", "/blocks?from="),
+				Entry("empty limit", "/blocks?limit="),
+				Entry("negative from", "/blocks?from=-1"),
+				Entry("negative limit", "/blocks?limit=-1"),
+				Entry("zero limit", "/blocks?limit=0"),
+				Entry("overflowing limit", "/blocks?limit=99999999999999999999"),
+			)
+
+			It("returns 500 when the chain cannot be read", func() {
+				h := NewServer(brokenChain{}, Config{}).Handler()
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/blocks", nil))
+				Expect(rec.Code).To(Equal(http.StatusInternalServerError))
+			})
+		})
+
+		Describe("GET /block/{ref}", func() {
+			BeforeEach(func() { mineN(2) })
+
+			It("finds a block by height and by hash in the POST / format", func() {
+				all, _ := repo.All()
+				for _, want := range all {
+					refs := []string{strconv.Itoa(want.Index)}
+					if want.Hash != "" { // the genesis block is stored unsealed, without a hash
+						refs = append(refs, want.Hash)
+					}
+					for _, ref := range refs {
+						rec := get("/block/" + ref)
+						Expect(rec.Code).To(Equal(http.StatusOK))
+						Expect(rec.Header().Get("Content-Type")).To(Equal("application/json"))
+						wantJSON, err := json.MarshalIndent(want, "", "  ")
+						Expect(err).NotTo(HaveOccurred())
+						Expect(rec.Body.String()).To(MatchJSON(wantJSON))
+					}
+				}
+			})
+
+			It("returns 404 block_not_found for an unknown height or hash", func() {
+				unknownHash := strings.Repeat("a", 64)
+				for _, ref := range []string{"3", "99999", "99999999999999999999", unknownHash} {
+					expectError(get("/block/"+ref), http.StatusNotFound, "block_not_found")
+				}
+			})
+
+			DescribeTable("returns 400 invalid_block_ref for anything else",
+				func(ref string) {
+					expectError(get("/block/"+ref), http.StatusBadRequest, "invalid_block_ref")
+				},
+				Entry("letters", "abc"),
+				Entry("negative height", "-1"),
+				Entry("uppercase hash", strings.Repeat("A", 64)),
+				Entry("63 hex characters", strings.Repeat("a", 63)),
+				Entry("65 hex characters", strings.Repeat("a", 65)),
+				Entry("64 non-hex characters", strings.Repeat("g", 64)),
+				Entry("64 decimal digits is a hash, 65 are not", strings.Repeat("1", 65)),
+				Entry("decimal with sign", "+1"),
+			)
+
+			It("treats 64 zeros as a hash, not as height 0", func() {
+				expectError(get("/block/"+strings.Repeat("0", 64)), http.StatusNotFound, "block_not_found")
+			})
+
+			It("treats 64 decimal digits as a hash, not a height", func() {
+				expectError(get("/block/"+strings.Repeat("1", 64)), http.StatusNotFound, "block_not_found")
+			})
+
+			It("returns 500 when the chain cannot be read", func() {
+				h := NewServer(brokenChain{}, Config{}).Handler()
+				for _, ref := range []string{"0", strings.Repeat("a", 64)} {
+					rec := httptest.NewRecorder()
+					h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/block/"+ref, nil))
+					Expect(rec.Code).To(Equal(http.StatusInternalServerError))
+				}
+			})
+		})
+
+		Describe("GET /health", func() {
+			It("reports the current tip", func() {
+				mineN(2)
+				rec := get("/health")
+				Expect(rec.Code).To(Equal(http.StatusOK))
+				Expect(rec.Header().Get("Content-Type")).To(Equal("application/json"))
+				Expect(rec.Body.String()).To(MatchJSON(fmt.Sprintf(`{"status":"ok","height":2,"tip":%q}`, lastBlock().Hash)))
+			})
+
+			It("returns 503 unhealthy when the repository fails", func() {
+				h := NewServer(brokenChain{}, Config{}).Handler()
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+				expectError(rec, http.StatusServiceUnavailable, "unhealthy")
+			})
+		})
+
+		Describe("while Mine is stuck", func() {
+			It("answers every read in under a second", func() {
+				mineN(1)
+				entered := make(chan struct{})
+				release := make(chan struct{})
+				withGenerator(func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+					close(entered)
+					select {
+					case <-release:
+					case <-ctx.Done():
+					}
+					return nil, ctx.Err()
+				})
+				mineN := func() {
+					defer GinkgoRecover()
+					router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", strings.NewReader(funds.payload())))
+				}
+				done := make(chan struct{})
+				go func() { defer close(done); mineN() }()
+				Eventually(entered).Should(BeClosed())
+				defer func() { close(release); <-done }()
+
+				tip := lastBlock()
+				for _, target := range []string{"/blocks", "/block/0", "/block/" + tip.Hash, "/health"} {
+					start := time.Now()
+					rec := get(target)
+					Expect(rec.Code).To(Equal(http.StatusOK), target)
+					Expect(time.Since(start)).To(BeNumerically("<", time.Second), target)
+				}
+			})
+		})
+
+		Describe("with concurrent POST / and parallel reads", func() {
+			It("keeps every page linked and every block findable", func() {
+				const writers, readers, rounds = 6, 6, 40
+				var wg sync.WaitGroup
+				stop := make(chan struct{})
+				for w := 0; w < writers; w++ {
+					wg.Add(1)
+					go func() {
+						defer GinkgoRecover()
+						defer wg.Done()
+						rec := httptest.NewRecorder()
+						router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(funds.payload())))
+						Expect(rec.Code).To(Equal(http.StatusCreated))
+					}()
+				}
+				var rg sync.WaitGroup
+				for r := 0; r < readers; r++ {
+					rg.Add(1)
+					go func() {
+						defer GinkgoRecover()
+						defer rg.Done()
+						for i := 0; i < rounds; i++ {
+							select {
+							case <-stop:
+								return
+							default:
+							}
+							p := getPage("/blocks?from=0&limit=3")
+							Expect(len(p.Blocks)).To(BeNumerically("<=", 3))
+							expectLinked(p)
+							for _, b := range p.Blocks {
+								if b.Hash != "" { // genesis has no hash
+									Expect(get("/block/" + b.Hash).Code).To(Equal(http.StatusOK))
+								}
+								Expect(get("/block/" + strconv.Itoa(b.Index)).Code).To(Equal(http.StatusOK))
+							}
+							Expect(get("/health").Code).To(Equal(http.StatusOK))
+						}
+					}()
+				}
+				wg.Wait()
+				close(stop)
+				rg.Wait()
+			})
 		})
 	})
 
