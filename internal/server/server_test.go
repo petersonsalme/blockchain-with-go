@@ -817,7 +817,9 @@ var _ = Describe("Server", func() {
 			)
 
 			It("returns 500 when the chain cannot be read", func() {
-				h := NewServer(brokenChain{}, Config{}).Handler()
+				srv, err := NewServer(brokenChain{}, Config{})
+				Expect(err).NotTo(HaveOccurred())
+				h := srv.Handler()
 				rec := httptest.NewRecorder()
 				h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tx/"+strings.Repeat("a", 64), nil))
 				Expect(rec.Code).To(Equal(http.StatusInternalServerError))
