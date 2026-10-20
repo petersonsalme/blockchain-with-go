@@ -190,6 +190,47 @@ var _ = Describe("Rate Limiting", func() {
 			Expect(rec.Header().Get("Retry-After")).To(Equal("1"))
 		})
 
+		It("caps accumulated tokens at maxTokens after prolonged idle periods", func() {
+			const n = 10
+			limiter := newRateLimiter(n, nowFunc)
+			wrapped := limiter.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+
+			// Send 2 requests spaced by 1s to ensure an existing bucket with lastCheck is active
+			for i := 0; i < 2; i++ {
+				req := httptest.NewRequest("GET", "/", nil)
+				req.RemoteAddr = "10.0.0.5:1234"
+				rec := httptest.NewRecorder()
+				wrapped.ServeHTTP(rec, req)
+				Expect(rec.Code).To(Equal(http.StatusOK))
+				currentTime = currentTime.Add(1 * time.Second)
+			}
+
+			// Advance clock by 10 minutes (600s), far exceeding the time to refill to maxTokens.
+			// No requests from other IPs occur, so the bucket is not lazily evicted.
+			currentTime = currentTime.Add(10 * time.Minute)
+
+			// Fire 30 requests at the same instant from the same IP
+			okCount, limitedCount := 0, 0
+			for i := 0; i < 30; i++ {
+				req := httptest.NewRequest("GET", "/", nil)
+				req.RemoteAddr = "10.0.0.5:1234"
+				rec := httptest.NewRecorder()
+				wrapped.ServeHTTP(rec, req)
+				switch rec.Code {
+				case http.StatusOK:
+					okCount++
+				case http.StatusTooManyRequests:
+					limitedCount++
+				}
+			}
+
+			// With token cap at maxTokens, exactly N requests succeed; excess requests must be rejected.
+			Expect(okCount).To(Equal(n))
+			Expect(limitedCount).To(Equal(20))
+		})
+
 		It("does not affect another IP when one IP is exhausted", func() {
 			const n = 2
 			limiter := newRateLimiter(n, nowFunc)
