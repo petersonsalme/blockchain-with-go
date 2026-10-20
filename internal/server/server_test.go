@@ -1570,4 +1570,51 @@ var _ = Describe("Server", func() {
 			Expect(chainLen()).To(Equal(2))
 		})
 	})
+
+	Describe("routing (ADR-0005)", func() {
+		DescribeTable("unsupported methods return 405 with empty body and Allow",
+			func(method, path, allow string) {
+				req := httptest.NewRequest(method, path, nil)
+				rec := httptest.NewRecorder()
+
+				router.ServeHTTP(rec, req)
+
+				Expect(rec.Code).To(Equal(http.StatusMethodNotAllowed))
+				Expect(rec.Body.String()).To(BeEmpty())
+				Expect(rec.Header().Get("Allow")).To(Equal(allow))
+			},
+			Entry("PUT /", http.MethodPut, "/", "GET, HEAD, POST"),
+			Entry("DELETE /", http.MethodDelete, "/", "GET, HEAD, POST"),
+			Entry("PUT /blocks", http.MethodPut, "/blocks", "GET, HEAD"),
+			Entry("POST /blocks", http.MethodPost, "/blocks", "GET, HEAD"),
+			Entry("POST /block/abc", http.MethodPost, "/block/abc", "GET, HEAD"),
+			Entry("POST /tx/abc", http.MethodPost, "/tx/abc", "GET, HEAD"),
+			Entry("POST /balance/abc", http.MethodPost, "/balance/abc", "GET, HEAD"),
+			Entry("POST /health", http.MethodPost, "/health", "GET, HEAD"),
+			Entry("GET /legacy/bpm", http.MethodGet, "/legacy/bpm", "POST"),
+			Entry("PUT /legacy/bpm", http.MethodPut, "/legacy/bpm", "POST"),
+		)
+
+		It("returns 404 for unregistered paths", func() {
+			for _, path := range []string{"/nao-existe", "/blocks/extra", "/block/", "/health/x"} {
+				rec := httptest.NewRecorder()
+				router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+				Expect(rec.Code).To(Equal(http.StatusNotFound), path)
+			}
+		})
+
+		It("serves HEAD /health with 200 and no body", func() {
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodHead, "/health", nil))
+			Expect(rec.Code).To(Equal(http.StatusOK))
+			Expect(rec.Body.String()).To(BeEmpty())
+		})
+
+		It("rejects an escaped slash in the block ref with 400 invalid_block_ref", func() {
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/block/a%2Fb", nil))
+			Expect(rec.Code).To(Equal(http.StatusBadRequest))
+			Expect(rec.Body.String()).To(ContainSubstring("invalid_block_ref"))
+		})
+	})
 })
