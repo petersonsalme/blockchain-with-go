@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/ed25519"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -17,6 +20,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/petersonsalme/blockchain-with-go/internal/chain"
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus"
+	"github.com/petersonsalme/blockchain-with-go/internal/consensus/poa"
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus/pow"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/internal/server"
@@ -51,6 +55,76 @@ func bootstrap(ctx context.Context) error {
 // shutdownContext bounds the graceful shutdown to 10 seconds.
 func shutdownContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 10*time.Second)
+}
+
+// Consensus selection: CONSENSUS is "pow" (default) or "poa"; the POA_* variables configure poa.
+const (
+	consensusEnvVar           = "CONSENSUS"
+	poaValidatorsEnvVar       = "POA_VALIDATORS"
+	poaKeystoreEnvVar         = "POA_KEYSTORE"
+	poaKeystorePasswordEnvVar = "POA_KEYSTORE_PASSWORD"
+)
+
+// newConsensus picks the consensus engine from CONSENSUS. Absent, empty and
+// "pow" select Proof of Work; "poa" selects Proof of Authority; anything else fails.
+func newConsensus() (consensus.Consensus, error) {
+	switch v := os.Getenv(consensusEnvVar); v {
+	case "", "pow":
+		return pow.NewProofOfWorkFromEnv(), nil
+	case "poa":
+		return newProofOfAuthority()
+	default:
+		return nil, fmt.Errorf("%s: unknown value %q: want pow or poa", consensusEnvVar, v)
+	}
+}
+
+// newProofOfAuthority builds poa from POA_VALIDATORS and the POA_KEYSTORE signer.
+func newProofOfAuthority() (consensus.Consensus, error) {
+	validators, err := parseValidators(os.Getenv(poaValidatorsEnvVar))
+	if err != nil {
+		return nil, err
+	}
+
+	path := os.Getenv(poaKeystoreEnvVar)
+	signer, err := wallet.Load(path, os.Getenv(poaKeystorePasswordEnvVar))
+	if errors.Is(err, wallet.ErrWrongPassword) || errors.Is(err, wallet.ErrEmptyPassword) {
+		return nil, fmt.Errorf("%s: cannot unlock %q: %w", poaKeystorePasswordEnvVar, path, err)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%s: cannot load %q: %w", poaKeystoreEnvVar, path, err)
+	}
+
+	engine, err := poa.New(validators, signer)
+	if err != nil {
+		return nil, fmt.Errorf("%s: key %s is not in %s: %w", poaKeystoreEnvVar, hex.EncodeToString(signer.PublicKey()), poaValidatorsEnvVar, err)
+	}
+	return engine, nil
+}
+
+// parseValidators parses comma-separated hex Ed25519 public keys. The set must
+// be non-empty and every item well formed and unique; any bad item fails the list.
+func parseValidators(raw string) ([]ed25519.PublicKey, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, fmt.Errorf("%s: at least one validator public key is required", poaValidatorsEnvVar)
+	}
+	var keys []ed25519.PublicKey
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimSpace(item)
+		key, err := hex.DecodeString(item)
+		if err != nil {
+			return nil, fmt.Errorf("%s: invalid item %q: not hex", poaValidatorsEnvVar, item)
+		}
+		if len(key) != ed25519.PublicKeySize {
+			return nil, fmt.Errorf("%s: invalid item %q: want %d bytes", poaValidatorsEnvVar, item, ed25519.PublicKeySize)
+		}
+		for _, seen := range keys {
+			if bytes.Equal(seen, key) {
+				return nil, fmt.Errorf("%s: duplicate item %q", poaValidatorsEnvVar, item)
+			}
+		}
+		keys = append(keys, key)
+	}
+	return keys, nil
 }
 
 // genesisAllocationsEnvVar lists the genesis outputs as address:amount[,address:amount...].
@@ -118,7 +192,10 @@ func run(ctx context.Context) error {
 	}
 	defer func() { _ = closeRepo() }()
 
-	engine := pow.NewProofOfWorkFromEnv()
+	engine, err := newConsensus()
+	if err != nil {
+		return err
+	}
 
 	svc, err := newService(repo, engine)
 	if err != nil {
