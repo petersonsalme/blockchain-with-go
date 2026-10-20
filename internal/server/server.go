@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/petersonsalme/blockchain-with-go/internal/chain"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
+	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
 )
 
 // DefaultMiningTimeout is the default duration allowed for block mining before timing out.
@@ -35,6 +37,8 @@ type Chain interface {
 	BlockByHeight(h int) (*domain.Block, error)
 	BlockByHash(hash string) (*domain.Block, error)
 	BlocksRange(from, limit int) ([]*domain.Block, error)
+	Transaction(id string) (*domain.Transaction, string, int, error)
+	Balance(addr string) (uint64, []chain.UTXO)
 	Mine(ctx context.Context, txs []domain.Transaction) (*domain.Block, error)
 }
 
@@ -85,6 +89,8 @@ func (s *Server) Handler() http.Handler {
 	r.HandleFunc("/", s.handleWriteBlock).Methods("POST")
 	r.HandleFunc("/blocks", s.handleGetBlocks).Methods("GET")
 	r.HandleFunc("/block/{ref}", s.handleGetBlock).Methods("GET")
+	r.HandleFunc("/tx/{id}", s.handleGetTx).Methods("GET")
+	r.HandleFunc("/balance/{addr}", s.handleGetBalance).Methods("GET")
 	r.HandleFunc("/health", s.handleHealth).Methods("GET")
 	r.HandleFunc("/legacy/bpm", s.handleLegacyBPM).Methods("POST")
 	return r
@@ -240,6 +246,60 @@ func isHeight(ref string) bool {
 		}
 	}
 	return true
+}
+
+// handleGetTx serves one transaction by its 64-character lowercase hex ID.
+func (s *Server) handleGetTx(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	if !isHash(id) {
+		respondWithJSON(w, http.StatusBadRequest, errorResponse{
+			Error: "transaction id must be a 64-character lowercase hex string",
+			Code:  invalidTxIDCode,
+		})
+		return
+	}
+
+	tx, blockHash, height, err := s.chain.Transaction(id)
+	if errors.Is(err, storage.ErrNotFound) {
+		respondWithJSON(w, http.StatusNotFound, errorResponse{
+			Error: "transaction not found",
+			Code:  txNotFoundCode,
+		})
+		return
+	}
+	if err != nil {
+		respondWithJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, txResponse{
+		Transaction: tx,
+		BlockHash:   blockHash,
+		Height:      height,
+	})
+}
+
+// handleGetBalance serves the balance and unspent outputs for addr.
+func (s *Server) handleGetBalance(w http.ResponseWriter, r *http.Request) {
+	addr := mux.Vars(r)["addr"]
+	if err := wallet.ValidateAddress(addr); err != nil {
+		respondWithJSON(w, http.StatusBadRequest, errorResponse{
+			Error: err.Error(),
+			Code:  invalidAddressCode,
+		})
+		return
+	}
+
+	balance, utxos := s.chain.Balance(addr)
+	if utxos == nil {
+		utxos = []chain.UTXO{}
+	}
+
+	respondWithJSON(w, http.StatusOK, balanceResponse{
+		Address: addr,
+		Balance: balance,
+		UTXOs:   utxos,
+	})
 }
 
 func (s *Server) mineAndRespond(w http.ResponseWriter, r *http.Request, txs []domain.Transaction) {

@@ -124,6 +124,12 @@ func (brokenChain) BlocksRange(int, int) ([]*domain.Block, error) {
 }
 
 func (brokenChain) Blocks() ([]*domain.Block, error) { return nil, errors.New("read failed") }
+func (brokenChain) Transaction(string) (*domain.Transaction, string, int, error) {
+	return nil, "", 0, errors.New("read failed")
+}
+func (brokenChain) Balance(string) (uint64, []chain.UTXO) {
+	return 0, []chain.UTXO{}
+}
 func (brokenChain) Mine(context.Context, []domain.Transaction) (*domain.Block, error) {
 	return nil, errors.New("unused")
 }
@@ -748,6 +754,181 @@ var _ = Describe("Server", func() {
 			})
 		})
 
+		Describe("GET /tx/{id}", func() {
+			BeforeEach(func() { mineN(2) })
+
+			It("finds a mined transaction with block_hash and height", func() {
+				all, _ := repo.All()
+				tx := all[1].Transactions[0]
+				rec := get("/tx/" + tx.ID)
+				Expect(rec.Code).To(Equal(http.StatusOK))
+				Expect(rec.Header().Get("Content-Type")).To(Equal("application/json"))
+
+				var resp struct {
+					Transaction domain.Transaction `json:"transaction"`
+					BlockHash   string             `json:"block_hash"`
+					Height      int                `json:"height"`
+				}
+				Expect(json.Unmarshal(rec.Body.Bytes(), &resp)).To(Succeed())
+				Expect(resp.Transaction.ID).To(Equal(tx.ID))
+				Expect(resp.BlockHash).To(Equal(all[1].Hash))
+				Expect(resp.Height).To(Equal(1))
+			})
+
+			It("finds the genesis allocation transaction at height 0 with empty block_hash", func() {
+				all, _ := repo.All()
+				allocTx := all[0].Transactions[0]
+				rec := get("/tx/" + allocTx.ID)
+				Expect(rec.Code).To(Equal(http.StatusOK))
+
+				var resp struct {
+					Transaction domain.Transaction `json:"transaction"`
+					BlockHash   string             `json:"block_hash"`
+					Height      int                `json:"height"`
+				}
+				Expect(json.Unmarshal(rec.Body.Bytes(), &resp)).To(Succeed())
+				Expect(resp.Transaction.ID).To(Equal(allocTx.ID))
+				Expect(resp.BlockHash).To(Equal(""))
+				Expect(resp.Height).To(Equal(0))
+			})
+
+			It("returns 404 tx_not_found for an unknown 64-char hex id", func() {
+				unknownID := strings.Repeat("a", 64)
+				expectError(get("/tx/"+unknownID), http.StatusNotFound, "tx_not_found")
+			})
+
+			DescribeTable("returns 400 invalid_tx_id for a malformed id",
+				func(id string) {
+					expectError(get("/tx/"+id), http.StatusBadRequest, "invalid_tx_id")
+				},
+				Entry("letters too short", "abcd"),
+				Entry("uppercase hex", strings.Repeat("A", 64)),
+				Entry("63 hex characters", strings.Repeat("b", 63)),
+				Entry("65 hex characters", strings.Repeat("b", 65)),
+				Entry("64 non-hex characters", strings.Repeat("g", 64)),
+			)
+
+			It("returns 500 when the chain cannot be read", func() {
+				h := NewServer(brokenChain{}, Config{}).Handler()
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tx/"+strings.Repeat("a", 64), nil))
+				Expect(rec.Code).To(Equal(http.StatusInternalServerError))
+			})
+		})
+
+		Describe("GET /balance/{addr}", func() {
+			BeforeEach(func() { mineN(1) })
+
+			post := func(body string) *httptest.ResponseRecorder {
+				req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+				rec := httptest.NewRecorder()
+				router.ServeHTTP(rec, req)
+				return rec
+			}
+
+			It("returns 400 invalid_address when ValidateAddress fails", func() {
+				for _, bad := range []string{"invalid", "123", "0x123", "bc1qxxx"} {
+					expectError(get("/balance/"+bad), http.StatusBadRequest, "invalid_address")
+				}
+			})
+
+			It("returns 200 with balance 0 and empty utxos slice for a valid address with no outputs", func() {
+				unused := newWallet()
+				rec := get("/balance/" + unused.Address())
+				Expect(rec.Code).To(Equal(http.StatusOK))
+				Expect(rec.Header().Get("Content-Type")).To(Equal("application/json"))
+				Expect(rec.Body.String()).To(ContainSubstring(`"utxos": []`))
+				Expect(rec.Body.String()).NotTo(ContainSubstring(`"utxos": null`))
+
+				var resp struct {
+					Address string       `json:"address"`
+					Balance uint64       `json:"balance"`
+					UTXOs   []chain.UTXO `json:"utxos"`
+				}
+				Expect(json.Unmarshal(rec.Body.Bytes(), &resp)).To(Succeed())
+				Expect(resp.Address).To(Equal(unused.Address()))
+				Expect(resp.Balance).To(Equal(uint64(0)))
+				Expect(resp.UTXOs).To(BeEmpty())
+			})
+
+			It("returns 200 with balance and sorted utxos for a funded address", func() {
+				rec := get("/balance/" + funds.owner.Address())
+				Expect(rec.Code).To(Equal(http.StatusOK))
+
+				var resp struct {
+					Address string       `json:"address"`
+					Balance uint64       `json:"balance"`
+					UTXOs   []chain.UTXO `json:"utxos"`
+				}
+				Expect(json.Unmarshal(rec.Body.Bytes(), &resp)).To(Succeed())
+				Expect(resp.Address).To(Equal(funds.owner.Address()))
+				Expect(resp.UTXOs).To(HaveLen(bankOutputs - 1)) // 1 output was spent in mineN(1)
+				var sum uint64
+				for i, u := range resp.UTXOs {
+					sum += u.Amount
+					if i > 0 {
+						prev := resp.UTXOs[i-1]
+						if prev.TxID == u.TxID {
+							Expect(prev.Index).To(BeNumerically("<", u.Index))
+						} else {
+							Expect(prev.TxID < u.TxID).To(BeTrue())
+						}
+					}
+				}
+				Expect(resp.Balance).To(Equal(sum))
+			})
+
+			It("reflects balance drop of (X - troco) for sender and increase for recipient after POST /", func() {
+				alice := newWallet()
+				bob := newWallet()
+
+				// First fund Alice from the bank with 100
+				rec := post(payloadOf(funds.tx(alice.Address(), 100)))
+				Expect(rec.Code).To(Equal(http.StatusCreated))
+
+				// Get Alice's balance and UTXO
+				aliceBalRec := get("/balance/" + alice.Address())
+				Expect(aliceBalRec.Code).To(Equal(http.StatusOK))
+				var aliceBalResp struct {
+					Balance uint64       `json:"balance"`
+					UTXOs   []chain.UTXO `json:"utxos"`
+				}
+				Expect(json.Unmarshal(aliceBalRec.Body.Bytes(), &aliceBalResp)).To(Succeed())
+				Expect(aliceBalResp.Balance).To(Equal(uint64(100)))
+				Expect(aliceBalResp.UTXOs).To(HaveLen(1))
+
+				// Alice spends her 100 output (X = 100), paying Bob 40 and returning 60 change (troco = 60) to Alice
+				spentOp := domain.OutPoint{TxID: aliceBalResp.UTXOs[0].TxID, Index: aliceBalResp.UTXOs[0].Index}
+				tx := domain.Transaction{
+					Inputs: []domain.TxIn{{PrevTxID: spentOp.TxID, OutIndex: spentOp.Index}},
+					Outputs: []domain.TxOut{
+						{Amount: 40, Address: bob.Address()},
+						{Amount: 60, Address: alice.Address()},
+					},
+					Timestamp: time.Now(),
+				}
+				tx.ID = tx.CalculateHash()
+				Expect(domain.SignInput(&tx, 0, alice)).To(Succeed())
+
+				rec = post(payloadOf(tx))
+				Expect(rec.Code).To(Equal(http.StatusCreated))
+
+				// Alice's balance drops by X - troco (100 - 60 = 40)
+				var aliceAfter, bobAfter struct {
+					Balance uint64       `json:"balance"`
+					UTXOs   []chain.UTXO `json:"utxos"`
+				}
+				Expect(json.Unmarshal(get("/balance/"+alice.Address()).Body.Bytes(), &aliceAfter)).To(Succeed())
+				Expect(aliceAfter.Balance).To(Equal(uint64(60)))
+				Expect(aliceAfter.UTXOs).To(HaveLen(1))
+
+				// Bob's balance rises by 40
+				Expect(json.Unmarshal(get("/balance/"+bob.Address()).Body.Bytes(), &bobAfter)).To(Succeed())
+				Expect(bobAfter.Balance).To(Equal(uint64(40)))
+				Expect(bobAfter.UTXOs).To(HaveLen(1))
+			})
+		})
+
 		Describe("while Mine is stuck", func() {
 			It("answers every read in under a second", func() {
 				mineN(1)
@@ -771,7 +952,15 @@ var _ = Describe("Server", func() {
 				defer func() { close(release); <-done }()
 
 				tip := lastBlock()
-				for _, target := range []string{"/blocks", "/block/0", "/block/" + tip.Hash, "/health"} {
+				targets := []string{
+					"/blocks",
+					"/block/0",
+					"/block/" + tip.Hash,
+					"/health",
+					"/tx/" + tip.Transactions[0].ID,
+					"/balance/" + funds.owner.Address(),
+				}
+				for _, target := range targets {
 					start := time.Now()
 					rec := get(target)
 					Expect(rec.Code).To(Equal(http.StatusOK), target)
@@ -815,8 +1004,35 @@ var _ = Describe("Server", func() {
 									Expect(get("/block/" + b.Hash).Code).To(Equal(http.StatusOK))
 								}
 								Expect(get("/block/" + strconv.Itoa(b.Index)).Code).To(Equal(http.StatusOK))
+								for _, t := range b.Transactions {
+									txRec := get("/tx/" + t.ID)
+									Expect(txRec.Code).To(Equal(http.StatusOK))
+									var resp struct {
+										Transaction domain.Transaction `json:"transaction"`
+										BlockHash   string             `json:"block_hash"`
+										Height      int                `json:"height"`
+									}
+									Expect(json.Unmarshal(txRec.Body.Bytes(), &resp)).To(Succeed())
+									Expect(resp.Transaction.ID).To(Equal(t.ID))
+									Expect(resp.BlockHash).To(Equal(b.Hash))
+									Expect(resp.Height).To(Equal(b.Index))
+								}
 							}
 							Expect(get("/health").Code).To(Equal(http.StatusOK))
+
+							balRec := get("/balance/" + funds.owner.Address())
+							Expect(balRec.Code).To(Equal(http.StatusOK))
+							var balResp struct {
+								Address string       `json:"address"`
+								Balance uint64       `json:"balance"`
+								UTXOs   []chain.UTXO `json:"utxos"`
+							}
+							Expect(json.Unmarshal(balRec.Body.Bytes(), &balResp)).To(Succeed())
+							var sum uint64
+							for _, u := range balResp.UTXOs {
+								sum += u.Amount
+							}
+							Expect(balResp.Balance).To(Equal(sum))
 						}
 					}()
 				}
