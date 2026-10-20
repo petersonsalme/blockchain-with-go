@@ -111,7 +111,8 @@ func (p *ProofOfAuthority) Verify(prev, b *domain.Block) error {
 	}
 
 	sig, err := hex.DecodeString(b.Signature)
-	if err != nil || len(sig) != ed25519.SignatureSize {
+	// The re-encoding check rejects uppercase hex: one block, one signature form.
+	if err != nil || len(sig) != ed25519.SignatureSize || b.Signature != hex.EncodeToString(sig) {
 		return consensus.ErrInvalidSignature
 	}
 

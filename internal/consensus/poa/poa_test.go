@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/hex"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -187,6 +188,18 @@ var _ = Describe("ProofOfAuthority", func() {
 			Entry("short", hex.EncodeToString(make([]byte, 63))),
 			Entry("long", hex.EncodeToString(make([]byte, 65))),
 		)
+
+		It("rejects a non-canonical (uppercase) signature", func() {
+			sealed()
+			b.Signature = strings.ToUpper(b.Signature)
+			Expect(p.Verify(prev, b)).To(MatchError(consensus.ErrInvalidSignature))
+		})
+
+		It("rejects an uppercase validator through the hash", func() {
+			sealed()
+			b.Validator = strings.ToUpper(b.Validator)
+			Expect(p.Verify(prev, b)).To(MatchError(consensus.ErrInvalidHash))
+		})
 
 		It("rejects a signature by a different key than the validator", func() {
 			sealed()
