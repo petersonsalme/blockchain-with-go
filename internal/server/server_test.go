@@ -1571,7 +1571,7 @@ var _ = Describe("Server", func() {
 		})
 	})
 
-	Describe("routing (ADR-0005)", func() {
+	Describe("routing (ADR-0006)", func() {
 		DescribeTable("unsupported methods return 405 with empty body and Allow",
 			func(method, path, allow string) {
 				req := httptest.NewRequest(method, path, nil)
@@ -1604,10 +1604,16 @@ var _ = Describe("Server", func() {
 		})
 
 		It("serves HEAD /health with 200 and no body", func() {
-			rec := httptest.NewRecorder()
-			router.ServeHTTP(rec, httptest.NewRequest(http.MethodHead, "/health", nil))
-			Expect(rec.Code).To(Equal(http.StatusOK))
-			Expect(rec.Body.String()).To(BeEmpty())
+			// ResponseRecorder keeps HEAD bodies; a real server drops them.
+			ts := httptest.NewServer(router)
+			defer ts.Close()
+			resp, err := http.Head(ts.URL + "/health")
+			Expect(err).NotTo(HaveOccurred())
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(resp.StatusCode).To(Equal(http.StatusOK))
+			Expect(body).To(BeEmpty())
 		})
 
 		It("rejects an escaped slash in the block ref with 400 invalid_block_ref", func() {
