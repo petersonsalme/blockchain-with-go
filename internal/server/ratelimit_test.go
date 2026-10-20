@@ -11,7 +11,15 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 )
+
+type dummyTipChain struct{ brokenChain }
+
+func (dummyTipChain) Tip() (*domain.Block, error) {
+	return &domain.Block{Index: 0, Hash: "0000000000000000000000000000000000000000000000000000000000000000"}, nil
+}
 
 var _ = Describe("Rate Limiting", func() {
 	Describe("ParseRateLimit", func() {
@@ -140,6 +148,48 @@ var _ = Describe("Rate Limiting", func() {
 			Expect(rec.Code).To(Equal(http.StatusTooManyRequests))
 		})
 
+		It("rounds Retry-After up to the next full second for non-integer wait times", func() {
+			const n = 7 // refill rate: 7 / 60s
+			limiter := newRateLimiter(n, nowFunc)
+			wrapped := limiter.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+
+			// Exhaust all 7 tokens at t=0
+			for i := 0; i < n; i++ {
+				req := httptest.NewRequest("GET", "/", nil)
+				req.RemoteAddr = "10.0.0.7:1234"
+				rec := httptest.NewRecorder()
+				wrapped.ServeHTTP(rec, req)
+				Expect(rec.Code).To(Equal(http.StatusOK))
+			}
+
+			// 8th request is rate limited
+			// missing = 1.0 token, refillRate = 7/60 tokens/s
+			// wait time = 1.0 / (7/60) = 60/7 ≈ 8.5714s
+			// Ceil must round up to 9s (Floor would give 8s)
+			req := httptest.NewRequest("GET", "/", nil)
+			req.RemoteAddr = "10.0.0.7:1234"
+			rec := httptest.NewRecorder()
+			wrapped.ServeHTTP(rec, req)
+			Expect(rec.Code).To(Equal(http.StatusTooManyRequests))
+			Expect(rec.Header().Get("Retry-After")).To(Equal("9"))
+
+			// Advance clock by 8 seconds:
+			// tokens refilled = 8 * (7/60) = 56/60 ≈ 0.9333 tokens
+			// missing = 1.0 - 56/60 = 4/60 tokens
+			// wait time = (4/60) / (7/60) = 4/7 ≈ 0.5714s (< 1s)
+			// Ceil must round up to 1s (Floor would give 0s, violating >= 1)
+			currentTime = currentTime.Add(8 * time.Second)
+
+			req = httptest.NewRequest("GET", "/", nil)
+			req.RemoteAddr = "10.0.0.7:1234"
+			rec = httptest.NewRecorder()
+			wrapped.ServeHTTP(rec, req)
+			Expect(rec.Code).To(Equal(http.StatusTooManyRequests))
+			Expect(rec.Header().Get("Retry-After")).To(Equal("1"))
+		})
+
 		It("does not affect another IP when one IP is exhausted", func() {
 			const n = 2
 			limiter := newRateLimiter(n, nowFunc)
@@ -170,27 +220,20 @@ var _ = Describe("Rate Limiting", func() {
 		})
 
 		It("never rate limits when RATE_LIMIT is disabled (0)", func() {
-			srv, err := NewServer(brokenChain{}, Config{RateLimit: 0})
+			srv, err := NewServer(dummyTipChain{}, Config{RateLimit: 0})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(srv.limiter).To(BeNil())
 
-			sActive, err := NewServer(brokenChain{}, Config{RateLimit: 10})
+			sActive, err := NewServer(dummyTipChain{}, Config{RateLimit: 10})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(sActive.limiter).NotTo(BeNil())
 
-			dummyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusOK)
-			})
-			var wrapped http.Handler = dummyHandler
-			if srv.limiter != nil {
-				wrapped = srv.limiter.middleware(dummyHandler)
-			}
-
+			handler := srv.Handler()
 			for i := 0; i < 150; i++ {
-				req := httptest.NewRequest("GET", "/", nil)
+				req := httptest.NewRequest("GET", "/health", nil)
 				req.RemoteAddr = "127.0.0.1:5000"
 				rec := httptest.NewRecorder()
-				wrapped.ServeHTTP(rec, req)
+				handler.ServeHTTP(rec, req)
 				Expect(rec.Code).To(Equal(http.StatusOK))
 			}
 		})
