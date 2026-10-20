@@ -1,9 +1,12 @@
 package chain
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus"
@@ -169,6 +172,58 @@ func (s *Service) BlockByHash(hash string) (*domain.Block, error) {
 // BlocksRange returns up to limit blocks starting at height from.
 func (s *Service) BlocksRange(from, limit int) ([]*domain.Block, error) {
 	return s.repo.Range(from, limit)
+}
+
+// UTXO represents an unspent transaction output.
+type UTXO struct {
+	TxID   string `json:"txid"`
+	Index  uint32 `json:"index"`
+	Amount uint64 `json:"amount"`
+}
+
+// Transaction returns the transaction with the given ID, the hash and height of
+// the block that contains it, or storage.ErrNotFound.
+func (s *Service) Transaction(id string) (*domain.Transaction, string, int, error) {
+	blocks, err := s.repo.All()
+	if err != nil {
+		return nil, "", 0, err
+	}
+	for _, b := range blocks {
+		for i := range b.Transactions {
+			if b.Transactions[i].ID == id {
+				tx := b.Transactions[i]
+				return &tx, b.Hash, b.Index, nil
+			}
+		}
+	}
+	return nil, "", 0, storage.ErrNotFound
+}
+
+// Balance returns the unspent outputs owned by addr, sorted by (TxID, Index),
+// plus their sum, from a single snapshot of the UTXO set.
+func (s *Service) Balance(addr string) (uint64, []UTXO) {
+	snap := s.utxos.Snapshot()
+	var (
+		balance uint64
+		utxos   = make([]UTXO, 0)
+	)
+	for op, out := range snap {
+		if out.Address == addr {
+			balance += out.Amount
+			utxos = append(utxos, UTXO{
+				TxID:   op.TxID,
+				Index:  op.Index,
+				Amount: out.Amount,
+			})
+		}
+	}
+	slices.SortFunc(utxos, func(a, b UTXO) int {
+		if c := strings.Compare(a.TxID, b.TxID); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.Index, b.Index)
+	})
+	return balance, utxos
 }
 
 // Mine seals txs into a new block and appends it to the chain.

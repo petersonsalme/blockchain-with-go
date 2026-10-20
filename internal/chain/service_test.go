@@ -160,10 +160,12 @@ var _ = Describe("Service", func() {
 	})
 
 	Describe("block queries", func() {
-		var svc *Service
+		var (
+			svc *Service
+			f   *funding
+		)
 
 		BeforeEach(func() {
-			var f *funding
 			svc, f = funded(repo, eng)
 			_, err := svc.Mine(context.Background(), f.tx())
 			Expect(err).NotTo(HaveOccurred())
@@ -211,6 +213,99 @@ var _ = Describe("Service", func() {
 			Expect(err).To(MatchError(boom))
 			_, err = bad.Tip()
 			Expect(err).To(MatchError(boom))
+		})
+
+		It("finds transactions across blocks, including genesis allocation at height 0", func() {
+			all, _ := repo.All()
+			genesisTx := all[0].Transactions[0]
+			tx, blockHash, height, err := svc.Transaction(genesisTx.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(tx.ID).To(Equal(genesisTx.ID))
+			Expect(blockHash).To(Equal(all[0].Hash))
+			Expect(height).To(Equal(0))
+
+			minedTx := all[1].Transactions[0]
+			tx, blockHash, height, err = svc.Transaction(minedTx.ID)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(tx.ID).To(Equal(minedTx.ID))
+			Expect(blockHash).To(Equal(all[1].Hash))
+			Expect(height).To(Equal(1))
+		})
+
+		It("reports ErrNotFound for unknown transactions", func() {
+			_, _, _, err := svc.Transaction("unknown")
+			Expect(err).To(MatchError(storage.ErrNotFound))
+		})
+
+		It("propagates repository errors from Transaction", func() {
+			boom := errors.New("boom")
+			failing := &failingRepo{BlockRepository: repo}
+			bad, err := NewService(failing, eng)
+			Expect(err).NotTo(HaveOccurred())
+			failing.allErr = boom
+			_, _, _, err = bad.Transaction("any")
+			Expect(err).To(MatchError(boom))
+		})
+
+		It("returns balance and utxos sorted by (TxID, Index)", func() {
+			all, _ := repo.All()
+			ownerAddr := all[0].Transactions[0].Outputs[0].Address
+			balance, utxos := svc.Balance(ownerAddr)
+			Expect(balance).To(Equal(uint64(110))) // 12 * 10 - 10 spent
+			Expect(utxos).To(HaveLen(11))
+			for i := 1; i < len(utxos); i++ {
+				prev, curr := utxos[i-1], utxos[i]
+				if prev.TxID == curr.TxID {
+					Expect(prev.Index).To(BeNumerically("<", curr.Index))
+				} else {
+					Expect(prev.TxID < curr.TxID).To(BeTrue())
+				}
+			}
+
+			// Mine another transaction paying recipient two outputs, so recipient has
+			// UTXOs with both different TxIDs and identical TxID with different indices.
+			recip := recipient()
+			recipAddr := recip.Address()
+			// Initial balance of recipient from BeforeEach (spent 1 output paying 9 to recipient)
+			rBal, rUTXOs := svc.Balance(recipAddr)
+			Expect(rBal).To(Equal(uint64(9)))
+			Expect(rUTXOs).To(HaveLen(1))
+
+			// Spend recipient's output into two outputs to self
+			tx2 := domain.Transaction{
+				Inputs: []domain.TxIn{{PrevTxID: rUTXOs[0].TxID, OutIndex: rUTXOs[0].Index}},
+				Outputs: []domain.TxOut{
+					{Amount: 3, Address: recipAddr},
+					{Amount: 4, Address: recipAddr},
+				},
+				Timestamp: time.Now(),
+			}
+			tx2.ID = tx2.CalculateHash()
+			Expect(domain.SignInput(&tx2, 0, recip)).To(Succeed())
+			_, err := svc.Mine(context.Background(), []domain.Transaction{tx2})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Now send another payment from owner to recipient so recipient has 2 different TxIDs
+			_, err = svc.Mine(context.Background(), f.tx())
+			Expect(err).NotTo(HaveOccurred())
+
+			rBalFinal, rUTXOsFinal := svc.Balance(recipAddr)
+			Expect(rBalFinal).To(Equal(uint64(3 + 4 + 9)))
+			Expect(rUTXOsFinal).To(HaveLen(3))
+			for i := 1; i < len(rUTXOsFinal); i++ {
+				prev, curr := rUTXOsFinal[i-1], rUTXOsFinal[i]
+				if prev.TxID == curr.TxID {
+					Expect(prev.Index).To(BeNumerically("<", curr.Index))
+				} else {
+					Expect(prev.TxID < curr.TxID).To(BeTrue())
+				}
+			}
+
+			// Empty/unknown address returns 0 and non-nil empty slice
+			emptyBal, emptyUTXOs := svc.Balance("unknown")
+			Expect(emptyBal).To(Equal(uint64(0)))
+			Expect(emptyUTXOs).NotTo(BeNil())
+			Expect(emptyUTXOs).To(BeEmpty())
 		})
 	})
 
@@ -502,6 +597,17 @@ var _ = Describe("Service", func() {
 					done <- bs
 				}()
 				Eventually(done, time.Second).Should(Receive(HaveLen(1)))
+			})
+
+			It("does not block Transaction or Balance", func() {
+				done := make(chan struct{}, 1)
+				go func() {
+					defer GinkgoRecover()
+					_, _, _, _ = svc.Transaction("any")
+					_, _ = svc.Balance("any")
+					close(done)
+				}()
+				Eventually(done, time.Second).Should(BeClosed())
 			})
 		})
 	})
