@@ -60,6 +60,20 @@ var _ = Describe("Keystore", func() {
 		Expect(entries).To(HaveLen(1))
 	})
 
+	It("removes the temp file and reports the error when the rename fails", func() {
+		target := filepath.Join(dir, "target")
+		Expect(os.Mkdir(target, 0o700)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(target, "keep"), []byte("x"), 0o600)).To(Succeed())
+
+		err := w.Save(target, pw)
+
+		Expect(err).To(MatchError(ContainSubstring("replacing keystore")))
+		entries, _ := os.ReadDir(dir)
+		Expect(entries).To(HaveLen(2)) // the keystore saved in BeforeEach and the untouched target dir
+		_, statErr := os.Stat(filepath.Join(target, "keep"))
+		Expect(statErr).NotTo(HaveOccurred())
+	})
+
 	It("rejects empty password on save", func() {
 		Expect(w.Save(filepath.Join(dir, "x.json"), "")).To(MatchError(ErrEmptyPassword))
 	})

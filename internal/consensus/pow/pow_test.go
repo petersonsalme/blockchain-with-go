@@ -212,7 +212,7 @@ var _ = Describe("ProofOfWork", func() {
 		})
 
 		It("should handle a nil context gracefully", func() {
-			err := powpkg.MineWithContext(nil, b, 1)
+			err := powpkg.MineWithContext(context.TODO(), b, 1)
 
 			Expect(err).NotTo(HaveOccurred())
 			Expect(b.Difficulty).To(Equal(1))
