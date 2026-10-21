@@ -268,6 +268,8 @@ var _ = Describe("Merkle tree", func() {
 			Expect(domain.VerifyMerkleProof(leaf, []domain.MerkleStep{{Hash: "zz"}}, root)).To(BeFalse())
 			Expect(domain.VerifyMerkleProof(leaf, []domain.MerkleStep{{Hash: leaf[:62]}}, root)).To(BeFalse())
 			Expect(domain.VerifyMerkleProof(leaf, proof.Steps, "")).To(BeFalse())
+			Expect(domain.VerifyMerkleProof("", nil, "")).To(BeFalse())
+			Expect(domain.VerifyMerkleProof(leaf[:62], nil, leaf[:62])).To(BeFalse())
 		})
 
 		It("accepts the leaf itself as root with no steps", func() {
