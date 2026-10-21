@@ -29,6 +29,9 @@ jobs:
     - name: Check coverage floor
       run: scripts/check-coverage.sh coverage.out 90.0
 
+    - name: Check generated client is up to date
+      run: go generate ./client/... && git diff --exit-code client/
+
   lint:
     runs-on: ubuntu-latest
     steps:

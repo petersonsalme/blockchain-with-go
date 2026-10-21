@@ -14,6 +14,7 @@ Educational blockchain implementation in Go with block validation, SHA-256 hashi
 blockchain-with-go/
 ├── cmd/
 │   └── node/          # Application entry point (main.go)
+├── client/            # Go client generated from openapi.yaml by oapi-codegen (do not edit by hand)
 ├── internal/
 │   ├── chain/         # chain.Service (Blocks/Mine), block generation, ErrInvalidBlock
 │   ├── consensus/     # Consensus port and errors
@@ -27,6 +28,7 @@ blockchain-with-go/
 │       └── memory/    # In-memory adapter (sync.RWMutex)
 ├── pkg/
 │   └── wallet/        # Ed25519 keys, addressing and keystore
+├── openapi.yaml       # HTTP API contract (OpenAPI 3.0.3); internal/server/contract_test.go checks the server against it
 ├── go.mod             # Go module and dependencies
 └── README.md          # Project documentation and run instructions
 ```
@@ -57,9 +59,10 @@ Everything else (HTTP handlers and DTOs, logging, docs, README, CLI, build files
    - Standard Go formatting: `gofmt -s -w .` or `goimports`
    - Build check: `go build -o /dev/null ./cmd/node`
    - Run the node locally: `go run ./cmd/node`
+   - Regenerate the client after editing `openapi.yaml`: `go generate ./client/...` (CI fails on `git diff --exit-code client/`)
    - CI quality gates (`.github/workflows/go-ci.yml`), local equivalents:
      - Tests with race detector and coverage profile: `go test -race -covermode=atomic -coverprofile=coverage.out ./...`
-     - Coverage floor: `scripts/check-coverage.sh coverage.out 90.0` (fails when total statement coverage is below **90.0%**; excludes, by explicit import path, the contract suites `internal/consensus/consensustest` and `internal/storage/storagetest`, which only run from adapter tests). Reference measurement: 94,6% at `450f42e`, without the two contract suites.
+     - Coverage floor: `scripts/check-coverage.sh coverage.out 90.0` (fails when total statement coverage is below **90.0%**; excludes, by explicit import path, the contract suites `internal/consensus/consensustest` and `internal/storage/storagetest`, which only run from adapter tests, and the generated `client`, exercised by `internal/server/contract_test.go`). Reference measurement: 94,6% at `450f42e`, without the two contract suites.
      - Lint: `golangci-lint run ./...` (golangci-lint v2.15.0, default linters)
      - Vulnerabilities: `go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...`
    - Mutation testing (gremlins v0.6.0) — two supported forms:
