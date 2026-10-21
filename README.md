@@ -106,6 +106,7 @@ Design decisions live in [`docs/adr/`](docs/adr):
 | [0004](docs/adr/0004-disk-storage.md) | Disk storage: bbolt adapter with in-memory derived UTXO set |
 | [0005](docs/adr/0005-poa-block-seal.md) | Proof of Authority seal fields on Block |
 | [0006](docs/adr/0006-stdlib-servemux-routing.md) | HTTP routing with the standard library `ServeMux` instead of gorilla/mux |
+| [0007](docs/adr/0007-openapi-contract.md) | OpenAPI spec as the HTTP contract, with a generated Go client |
 
 ## Configuration & Environment Variables
 
@@ -140,8 +141,10 @@ blockchain-with-go/
 │   │   └── pow/       # Proof of Work implementation
 │   ├── domain/        # Domain entities (Block, Transaction, rules)
 │   └── server/        # HTTP REST API server, handlers and DTOs
+├── client/            # Go client generated from openapi.yaml (do not edit)
 ├── pkg/
 │   └── wallet/        # Cryptographic wallet (Ed25519), addresses, and keystore
+├── openapi.yaml       # HTTP API contract (OpenAPI 3.0.3)
 ├── go.mod             # Go module definition
 └── README.md          # Project documentation
 ```
@@ -203,6 +206,22 @@ $ go test -run='^$' -fuzz='^FuzzVerifyTamper$' -fuzztime=60s ./internal/consensu
 A failing input is written to `testdata/fuzz/<FuzzName>/`; commit it so it becomes a regression seed.
 
 ## API Calls
+
+The HTTP contract is [`openapi.yaml`](openapi.yaml) (OpenAPI 3.0.3, see [ADR-0007](docs/adr/0007-openapi-contract.md)). `internal/server/contract_test.go` checks the server against it, so a route, status or JSON field change must update the spec in the same PR.
+
+The Go client in [`client/`](client) is generated from the spec. After editing `openapi.yaml`, regenerate it (CI fails when `client/` is out of date):
+
+```shell
+go generate ./client/...
+```
+
+```go
+api, _ := client.NewClientWithResponses("http://localhost:8080")
+resp, _ := api.GetHealthWithResponse(ctx)
+if resp.JSON200 != nil {
+    fmt.Println(resp.JSON200.Height, resp.JSON200.Tip)
+}
+```
 
 ### GET /
 Retrieve the full blockchain.
