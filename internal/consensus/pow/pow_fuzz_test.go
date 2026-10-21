@@ -126,13 +126,13 @@ func FuzzVerifyTamper(f *testing.F) {
 			t.Fatal(err)
 		}
 		p := powpkg.New(int(diff % 3))
-		if err := p.Verify(prev, &b); err != nil {
+		if err := p.Verify([]*domain.Block{prev}, &b); err != nil {
 			t.Fatalf("mined block rejected: %v", err)
 		}
 
 		tampered := cloneBlock(b)
 		want := tamper(&tampered, sel)
-		if err := p.Verify(prev, &tampered); !errors.Is(err, want) {
+		if err := p.Verify([]*domain.Block{prev}, &tampered); !errors.Is(err, want) {
 			t.Fatalf("tamper %d: Verify = %v, want %v", sel%13, err, want)
 		}
 	})

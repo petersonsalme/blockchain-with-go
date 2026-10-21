@@ -64,7 +64,7 @@ var _ = Describe("ProofOfWork", func() {
 		})
 
 		It("should fill nonce, difficulty and hash", func() {
-			Expect(powpkg.NewProofOfWork(2).Seal(context.Background(), b)).To(Succeed())
+			Expect(powpkg.NewProofOfWork(2).Seal(context.Background(), nil, b)).To(Succeed())
 
 			Expect(b.Difficulty).To(Equal(2))
 			Expect(b.Hash).To(HavePrefix("00"))
@@ -75,7 +75,7 @@ var _ = Describe("ProofOfWork", func() {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 
-			err := powpkg.NewProofOfWork(0).Seal(ctx, b)
+			err := powpkg.NewProofOfWork(0).Seal(ctx, nil, b)
 			Expect(errors.Is(err, context.Canceled)).To(BeTrue())
 			Expect(b.Hash).To(BeEmpty())
 		})
@@ -84,7 +84,7 @@ var _ = Describe("ProofOfWork", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 			defer cancel()
 
-			err := mineAsync(func() error { return powpkg.NewProofOfWork(12).Seal(ctx, b) })
+			err := mineAsync(func() error { return powpkg.NewProofOfWork(12).Seal(ctx, nil, b) })
 			Expect(errors.Is(err, context.DeadlineExceeded)).To(BeTrue())
 			Expect(b.Hash).To(BeEmpty())
 		})
@@ -289,7 +289,7 @@ var _ = Describe("ProofOfWork", func() {
 				Hash:         "",
 			}
 
-			newBlock = chain.GenerateBlock(pow, oldBlock, []domain.Transaction{
+			newBlock = chain.GenerateBlock(pow, []*domain.Block{oldBlock}, []domain.Transaction{
 				{Inputs: []domain.TxIn{{PrevTxID: "p1", Signature: "sig1"}}, Outputs: []domain.TxOut{{Amount: 10, Address: "bob"}}},
 				{Inputs: []domain.TxIn{{PrevTxID: "p2", Signature: "sig2"}}, Outputs: []domain.TxOut{{Amount: 20, Address: "dave"}}},
 			})
@@ -297,14 +297,14 @@ var _ = Describe("ProofOfWork", func() {
 
 		When("everything is fine", func() {
 			It("should return true", func() {
-				Expect(pow.Verify(oldBlock, newBlock)).To(Succeed())
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(Succeed())
 			})
 		})
 
 		When("index doesn't match", func() {
 			It("should return false", func() {
 				newBlock.Index = 50
-				Expect(pow.Verify(oldBlock, newBlock)).To(MatchError(consensus.ErrInvalidIndex))
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(MatchError(consensus.ErrInvalidIndex))
 			})
 		})
 
@@ -312,21 +312,21 @@ var _ = Describe("ProofOfWork", func() {
 			It("should report the index first", func() {
 				newBlock.Index = 50
 				newBlock.PrevHash = "abc"
-				Expect(pow.Verify(oldBlock, newBlock)).To(MatchError(consensus.ErrInvalidIndex))
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(MatchError(consensus.ErrInvalidIndex))
 			})
 		})
 
 		When("previous hash doesn't match", func() {
 			It("should return false", func() {
 				newBlock.PrevHash = "abc"
-				Expect(pow.Verify(oldBlock, newBlock)).To(MatchError(consensus.ErrInvalidPrevHash))
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(MatchError(consensus.ErrInvalidPrevHash))
 			})
 		})
 
 		When("hash doesn't match", func() {
 			It("should return false", func() {
 				newBlock.Hash = "123"
-				Expect(pow.Verify(oldBlock, newBlock)).To(MatchError(consensus.ErrInvalidHash))
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(MatchError(consensus.ErrInvalidHash))
 			})
 		})
 
@@ -343,7 +343,7 @@ var _ = Describe("ProofOfWork", func() {
 				}
 
 				Expect(newBlock.Hash).To(Equal(newBlock.CalculateHash()))
-				Expect(pow.Verify(oldBlock, newBlock)).To(MatchError(consensus.ErrInvalidProofOfWork))
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(MatchError(consensus.ErrInvalidProofOfWork))
 			})
 		})
 
@@ -353,7 +353,7 @@ var _ = Describe("ProofOfWork", func() {
 
 				pinDifficultyEnv("4")
 
-				Expect(pow.Verify(oldBlock, newBlock)).To(Succeed())
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(Succeed())
 			})
 		})
 
@@ -362,7 +362,7 @@ var _ = Describe("ProofOfWork", func() {
 				Expect(powpkg.MineWithContext(context.Background(), newBlock, powpkg.DifficultyFromEnv()-1)).To(Succeed())
 
 				Expect(newBlock.Difficulty).To(Equal(powpkg.DifficultyFromEnv() - 1))
-				Expect(pow.Verify(oldBlock, newBlock)).To(Succeed())
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(Succeed())
 			})
 		})
 
@@ -371,7 +371,7 @@ var _ = Describe("ProofOfWork", func() {
 				newBlock.Difficulty++
 
 				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
-				Expect(pow.Verify(oldBlock, newBlock)).To(HaveOccurred())
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(HaveOccurred())
 			})
 		})
 
@@ -380,7 +380,7 @@ var _ = Describe("ProofOfWork", func() {
 				newBlock.Transactions[0].Outputs[0].Amount = 999
 
 				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
-				Expect(pow.Verify(oldBlock, newBlock)).To(HaveOccurred())
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(HaveOccurred())
 			})
 		})
 
@@ -389,7 +389,7 @@ var _ = Describe("ProofOfWork", func() {
 				newBlock.Transactions[0].Inputs[0].PrevTxID = "mallory"
 
 				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
-				Expect(pow.Verify(oldBlock, newBlock)).To(HaveOccurred())
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(HaveOccurred())
 			})
 		})
 
@@ -398,7 +398,7 @@ var _ = Describe("ProofOfWork", func() {
 				newBlock.Transactions[0].Outputs[0].Address = "mallory"
 
 				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
-				Expect(pow.Verify(oldBlock, newBlock)).To(HaveOccurred())
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(HaveOccurred())
 			})
 		})
 
@@ -407,7 +407,7 @@ var _ = Describe("ProofOfWork", func() {
 				newBlock.Transactions[0].Inputs[0].OutIndex = 99
 
 				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
-				Expect(pow.Verify(oldBlock, newBlock)).To(HaveOccurred())
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(HaveOccurred())
 			})
 		})
 
@@ -416,7 +416,7 @@ var _ = Describe("ProofOfWork", func() {
 				newBlock.Transactions[0].Timestamp = time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
 
 				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
-				Expect(pow.Verify(oldBlock, newBlock)).To(HaveOccurred())
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(HaveOccurred())
 			})
 		})
 
@@ -427,7 +427,7 @@ var _ = Describe("ProofOfWork", func() {
 				})
 
 				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
-				Expect(pow.Verify(oldBlock, newBlock)).To(HaveOccurred())
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(HaveOccurred())
 			})
 		})
 
@@ -436,7 +436,7 @@ var _ = Describe("ProofOfWork", func() {
 				newBlock.Transactions = newBlock.Transactions[:1]
 
 				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
-				Expect(pow.Verify(oldBlock, newBlock)).To(HaveOccurred())
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(HaveOccurred())
 			})
 		})
 
@@ -445,7 +445,7 @@ var _ = Describe("ProofOfWork", func() {
 				newBlock.Transactions[0], newBlock.Transactions[1] = newBlock.Transactions[1], newBlock.Transactions[0]
 
 				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
-				Expect(pow.Verify(oldBlock, newBlock)).To(HaveOccurred())
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(HaveOccurred())
 			})
 		})
 
@@ -454,7 +454,7 @@ var _ = Describe("ProofOfWork", func() {
 				newBlock.Transactions[0].Inputs[0].Signature = "tampered-sig"
 
 				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
-				Expect(pow.Verify(oldBlock, newBlock)).To(HaveOccurred())
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(HaveOccurred())
 			})
 		})
 	})

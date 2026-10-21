@@ -21,11 +21,13 @@ import (
 // rejectingConsensus seals with PoW but never accepts a block.
 type rejectingConsensus struct{ inner *pow.ProofOfWork }
 
-func (r rejectingConsensus) Seal(ctx context.Context, b *domain.Block) error {
-	return r.inner.Seal(ctx, b)
+func (r rejectingConsensus) Seal(ctx context.Context, history []*domain.Block, b *domain.Block) error {
+	return r.inner.Seal(ctx, nil, b)
 }
 
-func (rejectingConsensus) Verify(prev, b *domain.Block) error { return errors.New("rejected") }
+func (rejectingConsensus) Verify(history []*domain.Block, b *domain.Block) error {
+	return errors.New("rejected")
+}
 
 // errOnlyCtx reports Canceled through Err but never closes Done.
 type errOnlyCtx struct{ context.Context }
@@ -320,7 +322,7 @@ var _ = Describe("Service", func() {
 			Expect(all).To(HaveLen(2))
 			Expect(all[1]).To(BeIdenticalTo(blk))
 			Expect(all[1].PrevHash).To(Equal(all[0].Hash))
-			Expect(eng.Verify(all[0], blk)).To(Succeed())
+			Expect(eng.Verify([]*domain.Block{all[0]}, blk)).To(Succeed())
 		})
 
 		It("returns ErrInvalidBlock when Verify rejects, leaving the chain unchanged", func() {
@@ -334,7 +336,7 @@ var _ = Describe("Service", func() {
 		})
 
 		It("returns ErrInvalidBlock for a nil block", func() {
-			svc, f := funded(repo, eng, WithGenerator(func(context.Context, consensus.Consensus, *domain.Block, []domain.Transaction) (*domain.Block, error) {
+			svc, f := funded(repo, eng, WithGenerator(func(context.Context, consensus.Consensus, []*domain.Block, []domain.Transaction) (*domain.Block, error) {
 				return nil, nil
 			}))
 			_, err := svc.Mine(context.Background(), f.tx())
@@ -344,9 +346,9 @@ var _ = Describe("Service", func() {
 		})
 
 		It("propagates a ValidationError from ValidateBlockRules, leaving the chain unchanged", func() {
-			svc, f := funded(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
-				b, err := GenerateBlockWithContext(ctx, c, prev, txs)
-				b.Timestamp = prev.Timestamp.Add(-time.Second)
+			svc, f := funded(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+				b, err := GenerateBlockWithContext(ctx, c, history, txs)
+				b.Timestamp = history[len(history)-1].Timestamp.Add(-time.Second)
 				return b, err
 			}))
 			_, err := svc.Mine(context.Background(), f.tx())
@@ -368,7 +370,7 @@ var _ = Describe("Service", func() {
 
 		DescribeTable("propagates context errors",
 			func(e error) {
-				svc, f := funded(repo, eng, WithGenerator(func(context.Context, consensus.Consensus, *domain.Block, []domain.Transaction) (*domain.Block, error) {
+				svc, f := funded(repo, eng, WithGenerator(func(context.Context, consensus.Consensus, []*domain.Block, []domain.Transaction) (*domain.Block, error) {
 					return nil, e
 				}))
 				_, err := svc.Mine(context.Background(), f.tx())
@@ -382,7 +384,7 @@ var _ = Describe("Service", func() {
 
 		It("propagates a generic generator error unchanged", func() {
 			boom := errors.New("boom")
-			svc, f := funded(repo, eng, WithGenerator(func(context.Context, consensus.Consensus, *domain.Block, []domain.Transaction) (*domain.Block, error) {
+			svc, f := funded(repo, eng, WithGenerator(func(context.Context, consensus.Consensus, []*domain.Block, []domain.Transaction) (*domain.Block, error) {
 				return nil, boom
 			}))
 			_, err := svc.Mine(context.Background(), f.tx())
@@ -391,13 +393,13 @@ var _ = Describe("Service", func() {
 		})
 
 		DescribeTable("releases the write lock when Mine fails",
-			func(failFirst func(context.Context, consensus.Consensus, *domain.Block, []domain.Transaction) (*domain.Block, error), recoverPanic bool) {
+			func(failFirst func(context.Context, consensus.Consensus, []*domain.Block, []domain.Transaction) (*domain.Block, error), recoverPanic bool) {
 				var calls atomic.Int32
-				svc, f := funded(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+				svc, f := funded(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 					if calls.Add(1) == 1 {
-						return failFirst(ctx, c, prev, txs)
+						return failFirst(ctx, c, history, txs)
 					}
-					return GenerateBlockWithContext(ctx, c, prev, txs)
+					return GenerateBlockWithContext(ctx, c, history, txs)
 				}))
 
 				func() {
@@ -418,19 +420,19 @@ var _ = Describe("Service", func() {
 				all, _ := repo.All()
 				Expect(all).To(HaveLen(2))
 			},
-			Entry("generator error", func(context.Context, consensus.Consensus, *domain.Block, []domain.Transaction) (*domain.Block, error) {
+			Entry("generator error", func(context.Context, consensus.Consensus, []*domain.Block, []domain.Transaction) (*domain.Block, error) {
 				return nil, errors.New("boom")
 			}, false),
-			Entry("generator panic", func(context.Context, consensus.Consensus, *domain.Block, []domain.Transaction) (*domain.Block, error) {
+			Entry("generator panic", func(context.Context, consensus.Consensus, []*domain.Block, []domain.Transaction) (*domain.Block, error) {
 				panic("boom")
 			}, true),
 		)
 
 		It("returns the context error without generating or appending when ctx is already done and the lock is free", func() {
 			var called atomic.Bool
-			svc, f := funded(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+			svc, f := funded(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 				called.Store(true)
-				return GenerateBlockWithContext(ctx, c, prev, txs)
+				return GenerateBlockWithContext(ctx, c, history, txs)
 			}))
 			// Done() never fires, so Mine's select always takes the free
 			// semaphore and only the post-lock ctx.Err() check can stop it.
@@ -475,10 +477,10 @@ var _ = Describe("Service", func() {
 		It("lets exactly one of two services mining on the same tip append, the other gets ErrConflict", func() {
 			var read sync.WaitGroup
 			read.Add(2)
-			barrier := func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+			barrier := func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 				read.Done()
 				read.Wait()
-				return GenerateBlockWithContext(ctx, c, prev, txs)
+				return GenerateBlockWithContext(ctx, c, history, txs)
 			}
 			a, f := funded(repo, eng, WithGenerator(barrier))
 			b, err := NewService(repo, eng, WithGenerator(barrier))
@@ -509,7 +511,7 @@ var _ = Describe("Service", func() {
 
 			all, _ := repo.All()
 			Expect(all).To(HaveLen(2))
-			Expect(eng.Verify(all[0], all[1])).To(Succeed())
+			Expect(eng.Verify([]*domain.Block{all[0]}, all[1])).To(Succeed())
 		})
 
 		It("serializes concurrent Mine calls into a valid chain", func() {
@@ -532,7 +534,7 @@ var _ = Describe("Service", func() {
 			Expect(all).To(HaveLen(n + 1))
 			for i := 1; i < len(all); i++ {
 				Expect(all[i].Index).To(Equal(i))
-				Expect(eng.Verify(all[i-1], all[i])).To(Succeed())
+				Expect(eng.Verify(all[:i], all[i])).To(Succeed())
 			}
 		})
 
@@ -551,12 +553,12 @@ var _ = Describe("Service", func() {
 				release = make(chan struct{})
 				holderCh = make(chan error, 1)
 				calls.Store(0)
-				svc, f = funded(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+				svc, f = funded(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 					if calls.Add(1) == 1 {
 						close(entered)
 						<-release
 					}
-					return GenerateBlockWithContext(ctx, c, prev, txs)
+					return GenerateBlockWithContext(ctx, c, history, txs)
 				}))
 				go func() {
 					defer GinkgoRecover()

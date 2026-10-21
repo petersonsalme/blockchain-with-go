@@ -28,9 +28,10 @@ var ErrNilConsensus = errors.New("chain: nil consensus")
 // the repository and the UTXO set diverged. The service stops accepting writes.
 var ErrStateDiverged = errors.New("chain: state diverged")
 
-// Generator builds the candidate successor of prev holding txs. The returned
+// Generator builds the candidate successor of the last block of history,
+// ordered oldest to newest, holding txs. The returned
 // block must contain exactly txs, in the same order.
-type Generator func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error)
+type Generator func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error)
 
 // Option customises a Service.
 type Option func(*Service)
@@ -253,6 +254,10 @@ func (s *Service) Mine(ctx context.Context, txs []domain.Transaction) (*domain.B
 	if err != nil {
 		return nil, err
 	}
+	history, err := s.repo.All()
+	if err != nil {
+		return nil, err
+	}
 
 	delta, err := domain.BlockDelta(s.utxos, &domain.Block{Index: prev.Index + 1, Transactions: txs}, false)
 	if err != nil {
@@ -262,7 +267,7 @@ func (s *Service) Mine(ctx context.Context, txs []domain.Transaction) (*domain.B
 		return nil, err
 	}
 
-	block, err := s.generate(ctx, s.consensus, prev, txs)
+	block, err := s.generate(ctx, s.consensus, history, txs)
 	if err != nil {
 		return nil, err
 	}
@@ -273,7 +278,7 @@ func (s *Service) Mine(ctx context.Context, txs []domain.Transaction) (*domain.B
 		}
 	}
 
-	if block == nil || s.consensus.Verify(prev, block) != nil {
+	if block == nil || s.consensus.Verify(history, block) != nil {
 		return nil, ErrInvalidBlock
 	}
 

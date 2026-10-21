@@ -50,7 +50,7 @@ var _ = Describe("ProofOfAuthority", func() {
 		p = newPoA(alice)
 
 		prev = &domain.Block{Index: 0, Timestamp: time.Date(2021, 8, 15, 14, 30, 45, 0, time.UTC)}
-		Expect(p.Seal(context.Background(), prev)).To(Succeed())
+		Expect(p.Seal(context.Background(), nil, prev)).To(Succeed())
 		b = &domain.Block{
 			Index:     1,
 			Timestamp: time.Date(2021, 8, 15, 14, 31, 45, 0, time.UTC),
@@ -91,14 +91,14 @@ var _ = Describe("ProofOfAuthority", func() {
 			Expect(err).NotTo(HaveOccurred())
 			key[0] ^= 0xff
 
-			Expect(p.Seal(context.Background(), b)).To(Succeed())
-			Expect(p.Verify(prev, b)).To(Succeed())
+			Expect(p.Seal(context.Background(), nil, b)).To(Succeed())
+			Expect(p.Verify([]*domain.Block{prev}, b)).To(Succeed())
 		})
 	})
 
 	Describe("Seal", func() {
 		It("fills the consensus fields", func() {
-			Expect(p.Seal(context.Background(), b)).To(Succeed())
+			Expect(p.Seal(context.Background(), nil, b)).To(Succeed())
 
 			Expect(b.Nonce).To(BeZero())
 			Expect(b.Difficulty).To(BeZero())
@@ -116,19 +116,19 @@ var _ = Describe("ProofOfAuthority", func() {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 
-			Expect(p.Seal(ctx, b)).To(MatchError(context.Canceled))
+			Expect(p.Seal(ctx, nil, b)).To(MatchError(context.Canceled))
 			Expect(b.Validator).To(BeEmpty())
 			Expect(b.Signature).To(BeEmpty())
 		})
 
 		It("treats a nil context as background", func() {
-			Expect(p.Seal(nil, b)).To(Succeed()) //nolint:staticcheck
+			Expect(p.Seal(nil, nil, b)).To(Succeed()) //nolint:staticcheck
 		})
 	})
 
 	Describe("Verify", func() {
 		sealed := func() *domain.Block {
-			Expect(p.Seal(context.Background(), b)).To(Succeed())
+			Expect(p.Seal(context.Background(), nil, b)).To(Succeed())
 			return b
 		}
 
@@ -143,15 +143,15 @@ var _ = Describe("ProofOfAuthority", func() {
 		It("accepts blocks sealed by any validator in the set", func() {
 			multi := newPoA(alice, bob)
 			other := newPoA(bob, alice)
-			Expect(other.Seal(context.Background(), b)).To(Succeed())
-			Expect(multi.Verify(prev, b)).To(Succeed())
+			Expect(other.Seal(context.Background(), nil, b)).To(Succeed())
+			Expect(multi.Verify([]*domain.Block{prev}, b)).To(Succeed())
 		})
 
 		DescribeTable("rejects a single-field mutation",
 			func(mutate func(b *domain.Block), want error) {
 				sealed()
 				mutate(b)
-				Expect(p.Verify(prev, b)).To(MatchError(want))
+				Expect(p.Verify([]*domain.Block{prev}, b)).To(MatchError(want))
 			},
 			Entry("Index", func(b *domain.Block) { b.Index++ }, consensus.ErrInvalidIndex),
 			Entry("PrevHash", func(b *domain.Block) { b.PrevHash = "x" }, consensus.ErrInvalidPrevHash),
@@ -167,7 +167,7 @@ var _ = Describe("ProofOfAuthority", func() {
 				sealed()
 				mutate(b)
 				resign(alice)
-				Expect(p.Verify(prev, b)).To(MatchError(consensus.ErrInvalidSeal))
+				Expect(p.Verify([]*domain.Block{prev}, b)).To(MatchError(consensus.ErrInvalidSeal))
 			},
 			Entry("Nonce != 0", func(b *domain.Block) { b.Nonce = 1 }),
 			Entry("Difficulty != 0", func(b *domain.Block) { b.Difficulty = 1 }),
@@ -181,7 +181,7 @@ var _ = Describe("ProofOfAuthority", func() {
 			func(signature string) {
 				sealed()
 				b.Signature = signature
-				Expect(p.Verify(prev, b)).To(MatchError(consensus.ErrInvalidSignature))
+				Expect(p.Verify([]*domain.Block{prev}, b)).To(MatchError(consensus.ErrInvalidSignature))
 			},
 			Entry("empty", ""),
 			Entry("non-hex", "zz"),
@@ -192,44 +192,44 @@ var _ = Describe("ProofOfAuthority", func() {
 		It("rejects a non-canonical (uppercase) signature", func() {
 			sealed()
 			b.Signature = strings.ToUpper(b.Signature)
-			Expect(p.Verify(prev, b)).To(MatchError(consensus.ErrInvalidSignature))
+			Expect(p.Verify([]*domain.Block{prev}, b)).To(MatchError(consensus.ErrInvalidSignature))
 		})
 
 		It("rejects an uppercase validator through the hash", func() {
 			sealed()
 			b.Validator = strings.ToUpper(b.Validator)
-			Expect(p.Verify(prev, b)).To(MatchError(consensus.ErrInvalidHash))
+			Expect(p.Verify([]*domain.Block{prev}, b)).To(MatchError(consensus.ErrInvalidHash))
 		})
 
 		It("rejects a signature by a different key than the validator", func() {
 			sealed()
 			resign(bob)
-			Expect(p.Verify(prev, b)).To(MatchError(consensus.ErrInvalidSignature))
+			Expect(p.Verify([]*domain.Block{prev}, b)).To(MatchError(consensus.ErrInvalidSignature))
 		})
 
 		It("rejects an outsider with a valid signature as unknown validator", func() {
 			outsider := newPoA(bob)
-			Expect(outsider.Seal(context.Background(), b)).To(Succeed())
-			Expect(p.Verify(prev, b)).To(MatchError(consensus.ErrUnknownValidator))
+			Expect(outsider.Seal(context.Background(), nil, b)).To(Succeed())
+			Expect(p.Verify([]*domain.Block{prev}, b)).To(MatchError(consensus.ErrUnknownValidator))
 		})
 
 		It("checks unknown validator before the signature", func() {
 			outsider := newPoA(bob)
-			Expect(outsider.Seal(context.Background(), b)).To(Succeed())
+			Expect(outsider.Seal(context.Background(), nil, b)).To(Succeed())
 			b.Signature = "zz"
-			Expect(p.Verify(prev, b)).To(MatchError(consensus.ErrUnknownValidator))
+			Expect(p.Verify([]*domain.Block{prev}, b)).To(MatchError(consensus.ErrUnknownValidator))
 		})
 
 		It("rejects PoW blocks and PoW rejects PoA blocks", func() {
 			work := pow.New(1)
-			Expect(work.Seal(context.Background(), b)).To(Succeed())
-			Expect(p.Verify(prev, b)).To(MatchError(consensus.ErrInvalidSeal))
+			Expect(work.Seal(context.Background(), nil, b)).To(Succeed())
+			Expect(p.Verify([]*domain.Block{prev}, b)).To(MatchError(consensus.ErrInvalidSeal))
 
 			powPrev := &domain.Block{Index: 0}
-			Expect(work.Seal(context.Background(), powPrev)).To(Succeed())
+			Expect(work.Seal(context.Background(), nil, powPrev)).To(Succeed())
 			b2 := &domain.Block{Index: 1, PrevHash: powPrev.Hash}
-			Expect(p.Seal(context.Background(), b2)).To(Succeed())
-			Expect(work.Verify(powPrev, b2)).To(MatchError(consensus.ErrInvalidSeal))
+			Expect(p.Seal(context.Background(), nil, b2)).To(Succeed())
+			Expect(work.Verify([]*domain.Block{powPrev}, b2)).To(MatchError(consensus.ErrInvalidSeal))
 		})
 	})
 })

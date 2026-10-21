@@ -57,13 +57,14 @@ func DifficultyFromEnv() int {
 	return difficulty
 }
 
-func (p *ProofOfWork) Seal(ctx context.Context, b *domain.Block) error {
+func (p *ProofOfWork) Seal(ctx context.Context, _ []*domain.Block, b *domain.Block) error {
 	return MineWithContext(ctx, b, p.Difficulty)
 }
 
 // Verify checks the block against its predecessor, validating the proof of
 // work against the block's own recorded difficulty.
-func (p *ProofOfWork) Verify(prev, b *domain.Block) error {
+func (p *ProofOfWork) Verify(history []*domain.Block, b *domain.Block) error {
+	prev := history[len(history)-1]
 	if prev.Index+1 != b.Index {
 		return consensus.ErrInvalidIndex
 	}

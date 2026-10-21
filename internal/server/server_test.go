@@ -30,11 +30,11 @@ import (
 // rejectingConsensus seals with inner but never accepts a block.
 type rejectingConsensus struct{ inner consensus.Consensus }
 
-func (r rejectingConsensus) Seal(ctx context.Context, b *domain.Block) error {
-	return r.inner.Seal(ctx, b)
+func (r rejectingConsensus) Seal(ctx context.Context, history []*domain.Block, b *domain.Block) error {
+	return r.inner.Seal(ctx, nil, b)
 }
 
-func (rejectingConsensus) Verify(prev, b *domain.Block) error {
+func (rejectingConsensus) Verify(history []*domain.Block, b *domain.Block) error {
 	return errors.New("rejected by fake consensus")
 }
 
@@ -217,8 +217,8 @@ var _ = Describe("Server", func() {
 
 		Context("when the generator produces an invalid block", func() {
 			It("returns 422 Unprocessable Entity, error JSON, and leaves the chain unchanged", func() {
-				withGenerator(func(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
-					b, err := chain.GenerateBlockWithContext(ctx, c, oldBlock, txs)
+				withGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+					b, err := chain.GenerateBlockWithContext(ctx, c, history, txs)
 					if err != nil {
 						return nil, err
 					}
@@ -250,7 +250,7 @@ var _ = Describe("Server", func() {
 
 		Context("when mining times out (deadline exceeded)", func() {
 			It("returns 504 Gateway Timeout, error JSON, and leaves the chain unchanged", func() {
-				withGenerator(func(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+				withGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 					return nil, context.DeadlineExceeded
 				})
 
@@ -278,7 +278,7 @@ var _ = Describe("Server", func() {
 
 		Context("when mining context is canceled", func() {
 			It("returns 408 Request Timeout, error JSON, and leaves the chain unchanged", func() {
-				withGenerator(func(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+				withGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 					return nil, context.Canceled
 				})
 
@@ -402,17 +402,17 @@ var _ = Describe("Server", func() {
 				Expect(b.Index).To(Equal(i))
 				if i > 0 {
 					Expect(b.PrevHash).To(Equal(blocks[i-1].Hash))
-					Expect(engine.Verify(blocks[i-1], b)).To(Succeed())
+					Expect(engine.Verify(blocks[:i], b)).To(Succeed())
 				}
 			}
 		})
 
 		It("returns 409 chain_conflict when another writer extends the chain mid-mining", func() {
-			withGenerator(func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
-				rival, err := chain.GenerateBlockWithContext(ctx, c, prev, txs)
+			withGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+				rival, err := chain.GenerateBlockWithContext(ctx, c, history, txs)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(repo.Append(rival)).To(Succeed())
-				return chain.GenerateBlockWithContext(ctx, c, prev, txs)
+				return chain.GenerateBlockWithContext(ctx, c, history, txs)
 			})
 			initialLen := chainLen()
 
@@ -453,10 +453,10 @@ var _ = Describe("Server", func() {
 		})
 
 		It("returns 422 with the code of a timestamp violation after mining", func() {
-			withGenerator(func(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
-				b, err := chain.GenerateBlockWithContext(ctx, c, oldBlock, txs)
+			withGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+				b, err := chain.GenerateBlockWithContext(ctx, c, history, txs)
 				if err == nil {
-					b.Timestamp = oldBlock.Timestamp.Add(-time.Second)
+					b.Timestamp = history[len(history)-1].Timestamp.Add(-time.Second)
 				}
 				return b, err
 			})
@@ -470,8 +470,8 @@ var _ = Describe("Server", func() {
 		})
 
 		It("returns 422 timestamp_too_far_in_future for a far-future block", func() {
-			withGenerator(func(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
-				b, err := chain.GenerateBlockWithContext(ctx, c, oldBlock, txs)
+			withGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+				b, err := chain.GenerateBlockWithContext(ctx, c, history, txs)
 				if err == nil {
 					b.Timestamp = time.Now().Add(3 * time.Hour)
 				}
@@ -561,7 +561,7 @@ var _ = Describe("Server", func() {
 		})
 
 		It("returns 500 with the error message on a generic generator error", func() {
-			withGenerator(func(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+			withGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 				return nil, errors.New("boom")
 			})
 			initialLen := chainLen()
@@ -976,7 +976,7 @@ var _ = Describe("Server", func() {
 				mineN(1)
 				entered := make(chan struct{})
 				release := make(chan struct{})
-				withGenerator(func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+				withGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 					close(entered)
 					select {
 					case <-release:
@@ -1375,7 +1375,7 @@ var _ = Describe("Server", func() {
 			})
 
 			cfg = Config{MiningTimeout: 60 * time.Second}
-			svc, err := chain.NewService(repo, engine, chain.WithGenerator(func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+			svc, err := chain.NewService(repo, engine, chain.WithGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 				handlerStarted.Store(true)
 				defer close(handlerDone)
 				time.Sleep(11 * time.Second)
