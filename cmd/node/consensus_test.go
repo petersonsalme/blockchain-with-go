@@ -185,7 +185,7 @@ func mineFirstBlock(t *testing.T) []domain.Block {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close() // response body of a test request; close error is irrelevant
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("POST / = %d, want 201", resp.StatusCode)
 	}
@@ -194,7 +194,7 @@ func mineFirstBlock(t *testing.T) []domain.Block {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }() // response body of a test request; close error is irrelevant
 	var got struct{ Blocks []domain.Block }
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatal(err)

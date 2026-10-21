@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -146,12 +145,12 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	response, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("HTTP 500: Internal Server Error"))
+		_, _ = w.Write([]byte("HTTP 500: Internal Server Error")) // headers are sent; a failed write to the client cannot be reported
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	w.Write(response)
+	_, _ = w.Write(response) // headers are sent; a failed write to the client cannot be reported
 }
 
 func (s *Server) handleGetBlockchain(w http.ResponseWriter, r *http.Request) {
@@ -166,7 +165,7 @@ func (s *Server) handleGetBlockchain(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	io.WriteString(w, string(bytes))
+	_, _ = w.Write(bytes) // headers are sent; a failed write to the client cannot be reported
 }
 
 // queryInt reads a non-negative integer query parameter, or def when absent.
@@ -351,7 +350,7 @@ func (s *Server) mineAndRespond(w http.ResponseWriter, r *http.Request, txs []do
 }
 
 func (s *Server) handleWriteBlock(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }() // closing a server request body cannot fail usefully
 
 	var m Message
 
@@ -396,7 +395,7 @@ func (s *Server) handleWriteBlock(w http.ResponseWriter, r *http.Request) {
 
 // handleLegacyBPM answers 410 Gone: BPM payloads cannot be signed, so the node can no longer accept them.
 func (s *Server) handleLegacyBPM(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }() // closing a server request body cannot fail usefully
 
 	w.Header().Set("Deprecation", "true")
 	respondWithJSON(w, http.StatusGone, errorResponse{Error: "endpoint removed; send signed transactions to POST /", Code: endpointGoneCode})
