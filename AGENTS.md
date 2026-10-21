@@ -57,6 +57,11 @@ Everything else (HTTP handlers and DTOs, logging, docs, README, CLI, build files
    - Standard Go formatting: `gofmt -s -w .` or `goimports`
    - Build check: `go build -o /dev/null ./cmd/node`
    - Run the node locally: `go run ./cmd/node`
+   - CI quality gates (`.github/workflows/go-ci.yml`), local equivalents:
+     - Tests with race detector and coverage profile: `go test -race -covermode=atomic -coverprofile=coverage.out ./...`
+     - Coverage floor: `scripts/check-coverage.sh coverage.out 90.0` (fails when total statement coverage is below **90.0%**; ignores the `consensustest`/`storagetest` helper packages). Reference measurement: 93,2% at `eb838fd` (the script-filtered figure on master 450f42e is 94,6%).
+     - Lint: `golangci-lint run ./...` (golangci-lint v2.15.0, default linters)
+     - Vulnerabilities: `go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...`
    - Mutation testing (gremlins v0.6.0) — two supported forms:
      - Per package: `go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --timeout-coefficient 20 ./internal/<package>` (or `./pkg/wallet`)
      - Per diff: `go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --timeout-coefficient 20 --diff <base>` (run at the root and **without** a package)
