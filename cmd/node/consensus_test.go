@@ -63,6 +63,23 @@ func TestNewConsensusPoW(t *testing.T) {
 	}
 }
 
+func TestNewConsensusPoWReadsRetargetSettings(t *testing.T) {
+	t.Setenv("POW_DIFFICULTY", "3")
+	t.Setenv("POW_RETARGET_INTERVAL", "7")
+	t.Setenv("TARGET_BLOCK_TIME", "3s")
+	eng, err := newConsensus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, ok := eng.(*pow.ProofOfWork)
+	if !ok {
+		t.Fatalf("engine = %T, want *pow.ProofOfWork", eng)
+	}
+	if p.Difficulty != 3 || p.RetargetInterval != 7 || p.TargetBlockTime != 3*time.Second {
+		t.Fatalf("engine = %+v, want difficulty 3, interval 7, target 3s", *p)
+	}
+}
+
 func TestNewConsensusRejectsUnknownValue(t *testing.T) {
 	for _, v := range []string{"POA", "Pow", "pos", " poa", "poa ", "x"} {
 		t.Run(v, func(t *testing.T) {
