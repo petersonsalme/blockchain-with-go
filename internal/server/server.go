@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gorilla/mux"
 	"github.com/petersonsalme/blockchain-with-go/internal/chain"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
@@ -98,20 +97,38 @@ func maxRequestBodyBytes() int64 {
 }
 
 // Handler returns the routes of s.
+//
+// Each path also registers a method-less fallback: it is less specific than the method
+// patterns, so it only catches the other methods and answers 405 with an Allow header.
 func (s *Server) Handler() http.Handler {
-	r := mux.NewRouter()
-	r.HandleFunc("/", s.handleGetBlockchain).Methods("GET")
-	r.HandleFunc("/", s.handleWriteBlock).Methods("POST")
-	r.HandleFunc("/blocks", s.handleGetBlocks).Methods("GET")
-	r.HandleFunc("/block/{ref}", s.handleGetBlock).Methods("GET")
-	r.HandleFunc("/tx/{id}", s.handleGetTx).Methods("GET")
-	r.HandleFunc("/balance/{addr}", s.handleGetBalance).Methods("GET")
-	r.HandleFunc("/health", s.handleHealth).Methods("GET")
-	r.HandleFunc("/legacy/bpm", s.handleLegacyBPM).Methods("POST")
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", s.handleGetBlockchain)
+	mux.HandleFunc("POST /{$}", s.handleWriteBlock)
+	mux.HandleFunc("GET /blocks", s.handleGetBlocks)
+	mux.HandleFunc("GET /block/{ref}", s.handleGetBlock)
+	mux.HandleFunc("GET /tx/{id}", s.handleGetTx)
+	mux.HandleFunc("GET /balance/{addr}", s.handleGetBalance)
+	mux.HandleFunc("GET /health", s.handleHealth)
+	mux.HandleFunc("POST /legacy/bpm", s.handleLegacyBPM)
+	mux.Handle("/{$}", methodNotAllowed("GET, HEAD, POST"))
+	mux.Handle("/blocks", methodNotAllowed("GET, HEAD"))
+	mux.Handle("/block/{ref}", methodNotAllowed("GET, HEAD"))
+	mux.Handle("/tx/{id}", methodNotAllowed("GET, HEAD"))
+	mux.Handle("/balance/{addr}", methodNotAllowed("GET, HEAD"))
+	mux.Handle("/health", methodNotAllowed("GET, HEAD"))
+	mux.Handle("/legacy/bpm", methodNotAllowed("POST"))
 	if s.limiter != nil {
-		return s.limiter.middleware(r)
+		return s.limiter.middleware(mux)
 	}
-	return r
+	return mux
+}
+
+// methodNotAllowed answers 405 with an empty body and the Allow header set to allow.
+func methodNotAllowed(allow string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Allow", allow)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	})
 }
 
 // HTTPServer wraps Handler in an http.Server listening on addr with the service timeouts.
@@ -199,7 +216,7 @@ func (s *Server) handleGetBlocks(w http.ResponseWriter, r *http.Request) {
 
 // handleGetBlock serves one block by hash (64 lowercase hex) or height (decimal).
 func (s *Server) handleGetBlock(w http.ResponseWriter, r *http.Request) {
-	ref := mux.Vars(r)["ref"]
+	ref := r.PathValue("ref")
 
 	var (
 		block *domain.Block
@@ -268,7 +285,7 @@ func isHeight(ref string) bool {
 
 // handleGetTx serves one transaction by its 64-character lowercase hex ID.
 func (s *Server) handleGetTx(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	id := r.PathValue("id")
 	if !isHash(id) {
 		respondWithJSON(w, http.StatusBadRequest, errorResponse{
 			Error: "transaction id must be a 64-character lowercase hex string",
@@ -299,7 +316,7 @@ func (s *Server) handleGetTx(w http.ResponseWriter, r *http.Request) {
 
 // handleGetBalance serves the balance and unspent outputs for addr.
 func (s *Server) handleGetBalance(w http.ResponseWriter, r *http.Request) {
-	addr := mux.Vars(r)["addr"]
+	addr := r.PathValue("addr")
 	if err := wallet.ValidateAddress(addr); err != nil {
 		respondWithJSON(w, http.StatusBadRequest, errorResponse{
 			Error: err.Error(),

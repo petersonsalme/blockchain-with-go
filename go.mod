@@ -3,7 +3,6 @@ module github.com/petersonsalme/blockchain-with-go
 go 1.26.4
 
 require (
-	github.com/gorilla/mux v1.8.0
 	github.com/joho/godotenv v1.4.0
 	github.com/onsi/ginkgo/v2 v2.1.4
 	github.com/onsi/gomega v1.20.0

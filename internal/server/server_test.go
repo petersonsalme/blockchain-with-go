@@ -1265,6 +1265,30 @@ var _ = Describe("Server", func() {
 			Expect(atomic.LoadInt64(&spy.mineCalls)).To(Equal(int64(4)))
 		})
 
+		It("rate limits the 405 and 404 routes too (ADR-0006)", func() {
+			now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+			srv, err := NewServer(&spyMineChain{}, Config{RateLimit: 1, Now: func() time.Time { return now }})
+			Expect(err).NotTo(HaveOccurred())
+
+			h := srv.Handler()
+			for _, rt := range []struct {
+				method, path string
+				first        int
+			}{
+				{http.MethodPut, "/blocks", http.StatusMethodNotAllowed},
+				{http.MethodGet, "/nao-existe", http.StatusNotFound},
+			} {
+				now = now.Add(time.Hour) // refill the single token
+				for i, want := range []int{rt.first, http.StatusTooManyRequests} {
+					req := httptest.NewRequest(rt.method, rt.path, nil)
+					req.RemoteAddr = "192.168.10.51:9999"
+					rec := httptest.NewRecorder()
+					h.ServeHTTP(rec, req)
+					Expect(rec.Code).To(Equal(want), "%s %s request %d", rt.method, rt.path, i+1)
+				}
+			}
+		})
+
 		It("never rate limits through Handler() when RateLimit is 0", func() {
 			spy := &spyMineChain{}
 			srv, err := NewServer(spy, Config{RateLimit: 0})
@@ -1568,6 +1592,59 @@ var _ = Describe("Server", func() {
 			Expect(created).To(Equal(1))
 			Expect(conflict).To(Equal(n - 1))
 			Expect(chainLen()).To(Equal(2))
+		})
+	})
+
+	Describe("routing (ADR-0006)", func() {
+		DescribeTable("unsupported methods return 405 with empty body and Allow",
+			func(method, path, allow string) {
+				req := httptest.NewRequest(method, path, nil)
+				rec := httptest.NewRecorder()
+
+				router.ServeHTTP(rec, req)
+
+				Expect(rec.Code).To(Equal(http.StatusMethodNotAllowed))
+				Expect(rec.Body.String()).To(BeEmpty())
+				Expect(rec.Header().Get("Allow")).To(Equal(allow))
+			},
+			Entry("PUT /", http.MethodPut, "/", "GET, HEAD, POST"),
+			Entry("DELETE /", http.MethodDelete, "/", "GET, HEAD, POST"),
+			Entry("PUT /blocks", http.MethodPut, "/blocks", "GET, HEAD"),
+			Entry("POST /blocks", http.MethodPost, "/blocks", "GET, HEAD"),
+			Entry("POST /block/abc", http.MethodPost, "/block/abc", "GET, HEAD"),
+			Entry("POST /tx/abc", http.MethodPost, "/tx/abc", "GET, HEAD"),
+			Entry("POST /balance/abc", http.MethodPost, "/balance/abc", "GET, HEAD"),
+			Entry("POST /health", http.MethodPost, "/health", "GET, HEAD"),
+			Entry("GET /legacy/bpm", http.MethodGet, "/legacy/bpm", "POST"),
+			Entry("PUT /legacy/bpm", http.MethodPut, "/legacy/bpm", "POST"),
+		)
+
+		It("returns 404 for unregistered paths", func() {
+			for _, path := range []string{"/nao-existe", "/blocks/extra", "/block/", "/health/x"} {
+				rec := httptest.NewRecorder()
+				router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+				Expect(rec.Code).To(Equal(http.StatusNotFound), path)
+			}
+		})
+
+		It("serves HEAD /health with 200 and no body", func() {
+			// ResponseRecorder keeps HEAD bodies; a real server drops them.
+			ts := httptest.NewServer(router)
+			defer ts.Close()
+			resp, err := http.Head(ts.URL + "/health")
+			Expect(err).NotTo(HaveOccurred())
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(resp.StatusCode).To(Equal(http.StatusOK))
+			Expect(body).To(BeEmpty())
+		})
+
+		It("rejects an escaped slash in the block ref with 400 invalid_block_ref", func() {
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/block/a%2Fb", nil))
+			Expect(rec.Code).To(Equal(http.StatusBadRequest))
+			Expect(rec.Body.String()).To(ContainSubstring("invalid_block_ref"))
 		})
 	})
 })
