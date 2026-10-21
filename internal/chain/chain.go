@@ -21,6 +21,7 @@ func GenerateBlockWithContext(ctx context.Context, c consensus.Consensus, histor
 	newBlock.Index = oldBlock.Index + 1
 	newBlock.Timestamp = time.Now()
 	newBlock.Transactions = txs
+	newBlock.MerkleRoot = domain.MerkleRoot(txs)
 	newBlock.PrevHash = oldBlock.Hash
 
 	// Check size before mining, using a full-length hash placeholder for a fair estimate.

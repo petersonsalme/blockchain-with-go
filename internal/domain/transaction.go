@@ -98,18 +98,6 @@ func (t *Transaction) Validate() error {
 	return nil
 }
 
-// TransactionsHash commits to every transaction and to the signatures of all its inputs.
-func TransactionsHash(txs []Transaction) string {
-	h := sha256.New()
-	for _, tx := range txs {
-		h.Write([]byte(tx.CalculateHash()))
-		for _, in := range tx.Inputs {
-			h.Write([]byte(in.Signature))
-		}
-	}
-	return hex.EncodeToString(h.Sum(nil))
-}
-
 type utxoInPayload struct {
 	PrevTxID string `json:"prev_txid"`
 	OutIndex uint32 `json:"out_index"`

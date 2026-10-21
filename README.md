@@ -92,7 +92,7 @@ $ CONSENSUS=poa POA_VALIDATORS=<hex> POA_KEYSTORE=validator.key POA_KEYSTORE_PAS
 3. **Sybil Protection (Proof of Work)**: A Proof of Work (PoW) mechanism is implemented to require computational effort for block creation and mitigate spam. The difficulty (number of leading zeros required in the block hash) is configured via the `POW_DIFFICULTY` environment variable, defaulting to `2`. The logic lives in the `consensus` package behind the `Consensus` interface (`Seal`/`Verify`); `consensus.ProofOfWork` is the default implementation, and `POW_DIFFICULTY` is read once at startup (`cmd/node`).
    - **Difficulty Retargeting**: Each block records its difficulty in `b.Difficulty` (included in the SHA-256 hash), and validation requires it to equal the difficulty the rule expects for that position in the chain, then checks the proof of work against it. The child of genesis uses `POW_DIFFICULTY`; every `POW_RETARGET_INTERVAL` blocks the difficulty moves by one towards `TARGET_BLOCK_TIME` (up when the window took less than half the target, down when it took more than twice), within `1..8`; other blocks inherit the parent's difficulty. `Seal` and `Verify` receive the chain history for this ([ADR-0008](docs/adr/0008-difficulty-retargeting.md)). Miners still choose block timestamps within the ENG-18 bounds, so time-warp attacks are not prevented.
    - **Context Cancellation & Timeouts**: Mining supports cooperative cancellation via `context.Context` (`consensus.MineWithContext`, `GenerateBlockWithContext`). The HTTP handler applies a configurable mining timeout via `MINING_TIMEOUT` (defaulting to 10 seconds) and aborts immediately if the client disconnects or cancels the request, preventing request processing from blocking indefinitely.
-4. **Transaction List Payload**: Blocks store a slice of transactions committed via `TransactionsHash`. Full Merkle tree support with inclusion proofs is deferred to a subsequent milestone (ENG-20).
+4. **Transaction List Payload**: Each block header carries `MerkleRoot`, the root of a Merkle tree over its transactions, and the block hash covers the root instead of the transaction list. A leaf is `SHA-256(0x00 || tx hash || per-input public key and signature)`, an inner node is `SHA-256(0x01 || left || right)`, and an odd node without a pair moves up a level unchanged (RFC 6962), so `[a,b,c]` and `[a,b,c,c]` have different roots. A block with zero transactions has the root `SHA-256("")`. `Mine` rejects a block whose root does not match its transactions with the code `merkle_root_mismatch` ([ADR-0009](docs/adr/0009-merkle-tree.md)). Inclusion proofs over HTTP are a separate story of ENG-20.
 
 ## Architecture Decision Records
 
@@ -108,6 +108,7 @@ Design decisions live in [`docs/adr/`](docs/adr):
 | [0006](docs/adr/0006-stdlib-servemux-routing.md) | HTTP routing with the standard library `ServeMux` instead of gorilla/mux |
 | [0007](docs/adr/0007-openapi-contract.md) | OpenAPI spec as the HTTP contract, with a generated Go client |
 | [0008](docs/adr/0008-difficulty-retargeting.md) | Difficulty retargeting; the `Consensus` port receives the block history |
+| [0009](docs/adr/0009-merkle-tree.md) | Transaction Merkle tree in the block header (RFC 6962 odd-node rule) |
 
 ## Configuration & Environment Variables
 
@@ -241,6 +242,7 @@ $ curl http://localhost:8080/
       "Index": 1,
       "Timestamp": "2026-10-16T12:00:00Z",
       "Transactions": [],
+      "MerkleRoot": "e3b0c442...",
       "Hash": "9f3a1c...",
       "PrevHash": "00a1b2c3...",
       "Nonce": 0,

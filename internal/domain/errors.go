@@ -7,6 +7,7 @@ const (
 	CodeBlockTooLarge              = "block_too_large"
 	CodeTimestampBeforeParent      = "timestamp_before_parent"
 	CodeTimestampTooFarInTheFuture = "timestamp_too_far_in_future"
+	CodeMerkleRootMismatch         = "merkle_root_mismatch"
 )
 
 // Transaction error codes.

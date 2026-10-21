@@ -88,9 +88,27 @@ func ValidateTimestamp(b, parent *Block, now time.Time) error {
 	return nil
 }
 
-// ValidateBlockRules applies the structural block rules (size and timestamp).
+// ValidateMerkleRoot rejects blocks whose MerkleRoot does not match their transactions.
+func ValidateMerkleRoot(b *Block) error {
+	expected := MerkleRoot(b.Transactions)
+	if b.MerkleRoot != expected {
+		return &ValidationError{
+			Code:    CodeMerkleRootMismatch,
+			Message: "block merkle root does not match its transactions",
+			Details: map[string]any{"expected": expected, "got": b.MerkleRoot},
+		}
+	}
+
+	return nil
+}
+
+// ValidateBlockRules applies the structural block rules (size, merkle root and timestamp).
 func ValidateBlockRules(b, parent *Block, now time.Time) error {
 	if err := ValidateSize(b, MaxBlockBytes()); err != nil {
+		return err
+	}
+
+	if err := ValidateMerkleRoot(b); err != nil {
 		return err
 	}
 

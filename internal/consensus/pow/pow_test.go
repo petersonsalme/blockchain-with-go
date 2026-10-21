@@ -379,8 +379,10 @@ var _ = Describe("ProofOfWork", func() {
 			It("should return false", func() {
 				newBlock.Transactions[0].Outputs[0].Amount = 999
 
-				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
-				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(HaveOccurred())
+				// The seal covers the transactions only through MerkleRoot, so the
+				// edit is caught by the block rules rather than by Verify.
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(Succeed())
+				Expect(domain.ValidateMerkleRoot(newBlock)).To(HaveOccurred())
 			})
 		})
 
@@ -388,8 +390,10 @@ var _ = Describe("ProofOfWork", func() {
 			It("should return false", func() {
 				newBlock.Transactions[0].Inputs[0].PrevTxID = "mallory"
 
-				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
-				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(HaveOccurred())
+				// The seal covers the transactions only through MerkleRoot, so the
+				// edit is caught by the block rules rather than by Verify.
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(Succeed())
+				Expect(domain.ValidateMerkleRoot(newBlock)).To(HaveOccurred())
 			})
 		})
 
@@ -397,8 +401,10 @@ var _ = Describe("ProofOfWork", func() {
 			It("should return false", func() {
 				newBlock.Transactions[0].Outputs[0].Address = "mallory"
 
-				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
-				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(HaveOccurred())
+				// The seal covers the transactions only through MerkleRoot, so the
+				// edit is caught by the block rules rather than by Verify.
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(Succeed())
+				Expect(domain.ValidateMerkleRoot(newBlock)).To(HaveOccurred())
 			})
 		})
 
@@ -406,8 +412,10 @@ var _ = Describe("ProofOfWork", func() {
 			It("should return false", func() {
 				newBlock.Transactions[0].Inputs[0].OutIndex = 99
 
-				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
-				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(HaveOccurred())
+				// The seal covers the transactions only through MerkleRoot, so the
+				// edit is caught by the block rules rather than by Verify.
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(Succeed())
+				Expect(domain.ValidateMerkleRoot(newBlock)).To(HaveOccurred())
 			})
 		})
 
@@ -415,8 +423,10 @@ var _ = Describe("ProofOfWork", func() {
 			It("should return false", func() {
 				newBlock.Transactions[0].Timestamp = time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
 
-				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
-				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(HaveOccurred())
+				// The seal covers the transactions only through MerkleRoot, so the
+				// edit is caught by the block rules rather than by Verify.
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(Succeed())
+				Expect(domain.ValidateMerkleRoot(newBlock)).To(HaveOccurred())
 			})
 		})
 
@@ -426,8 +436,10 @@ var _ = Describe("ProofOfWork", func() {
 					Outputs: []domain.TxOut{{Amount: 30, Address: "frank"}},
 				})
 
-				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
-				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(HaveOccurred())
+				// The seal covers the transactions only through MerkleRoot, so the
+				// edit is caught by the block rules rather than by Verify.
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(Succeed())
+				Expect(domain.ValidateMerkleRoot(newBlock)).To(HaveOccurred())
 			})
 		})
 
@@ -435,8 +447,10 @@ var _ = Describe("ProofOfWork", func() {
 			It("should return false", func() {
 				newBlock.Transactions = newBlock.Transactions[:1]
 
-				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
-				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(HaveOccurred())
+				// The seal covers the transactions only through MerkleRoot, so the
+				// edit is caught by the block rules rather than by Verify.
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(Succeed())
+				Expect(domain.ValidateMerkleRoot(newBlock)).To(HaveOccurred())
 			})
 		})
 
@@ -444,8 +458,10 @@ var _ = Describe("ProofOfWork", func() {
 			It("should return false", func() {
 				newBlock.Transactions[0], newBlock.Transactions[1] = newBlock.Transactions[1], newBlock.Transactions[0]
 
-				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
-				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(HaveOccurred())
+				// The seal covers the transactions only through MerkleRoot, so the
+				// edit is caught by the block rules rather than by Verify.
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(Succeed())
+				Expect(domain.ValidateMerkleRoot(newBlock)).To(HaveOccurred())
 			})
 		})
 
@@ -453,8 +469,19 @@ var _ = Describe("ProofOfWork", func() {
 			It("should return false", func() {
 				newBlock.Transactions[0].Inputs[0].Signature = "tampered-sig"
 
+				// The seal covers the transactions only through MerkleRoot, so the
+				// edit is caught by the block rules rather than by Verify.
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(Succeed())
+				Expect(domain.ValidateMerkleRoot(newBlock)).To(HaveOccurred())
+			})
+		})
+
+		When("the merkle root is altered after mining", func() {
+			It("should return false", func() {
+				newBlock.MerkleRoot = domain.MerkleRoot(nil)
+
 				Expect(newBlock.CalculateHash()).NotTo(Equal(newBlock.Hash))
-				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(HaveOccurred())
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(MatchError(consensus.ErrInvalidHash))
 			})
 		})
 	})

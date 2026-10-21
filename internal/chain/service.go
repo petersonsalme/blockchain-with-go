@@ -122,6 +122,7 @@ func (s *Service) genesis() *domain.Block {
 		alloc.ID = alloc.CalculateHash()
 		block.Transactions = append(block.Transactions, alloc)
 	}
+	block.MerkleRoot = domain.MerkleRoot(block.Transactions)
 	return block
 }
 

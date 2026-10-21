@@ -24,6 +24,10 @@ func cloneBlock(b domain.Block) domain.Block {
 	return b
 }
 
+// errTxEdit marks a transaction edit: the seal covers transactions only through
+// MerkleRoot, so Verify still passes and the block rules must reject it.
+var errTxEdit = errors.New("transaction edited")
+
 // tamper changes exactly one field of the hash preimage chosen by sel and
 // returns the error Verify must report. A selector that needs a transaction
 // part the block lacks falls back to the nonce.
@@ -53,37 +57,37 @@ func tamper(b *domain.Block, sel uint8) error {
 		if len(txs) > 0 {
 			t := tx(sel / 13)
 			t.Timestamp = t.Timestamp.Add(time.Nanosecond)
-			return consensus.ErrInvalidHash
+			return errTxEdit
 		}
 	case 7:
 		if len(txs) > 0 && len(tx(sel/13).Inputs) > 0 {
 			t := tx(sel / 13)
 			t.Inputs[int(sel/13)%len(t.Inputs)].PrevTxID += "x"
-			return consensus.ErrInvalidHash
+			return errTxEdit
 		}
 	case 8:
 		if len(txs) > 0 && len(tx(sel/13).Inputs) > 0 {
 			t := tx(sel / 13)
 			t.Inputs[int(sel/13)%len(t.Inputs)].OutIndex++
-			return consensus.ErrInvalidHash
+			return errTxEdit
 		}
 	case 9:
 		if len(txs) > 0 && len(tx(sel/13).Inputs) > 0 {
 			t := tx(sel / 13)
 			t.Inputs[int(sel/13)%len(t.Inputs)].Signature += "x"
-			return consensus.ErrInvalidHash
+			return errTxEdit
 		}
 	case 10:
 		if len(txs) > 0 && len(tx(sel/13).Outputs) > 0 {
 			t := tx(sel / 13)
 			t.Outputs[int(sel/13)%len(t.Outputs)].Amount++
-			return consensus.ErrInvalidHash
+			return errTxEdit
 		}
 	case 11:
 		if len(txs) > 0 && len(tx(sel/13).Outputs) > 0 {
 			t := tx(sel / 13)
 			t.Outputs[int(sel/13)%len(t.Outputs)].Address += "x"
-			return consensus.ErrInvalidHash
+			return errTxEdit
 		}
 	case 12:
 		// A consistent hash carrying an (unreachable) difficulty the rule never expects.
@@ -132,6 +136,15 @@ func FuzzVerifyTamper(f *testing.F) {
 
 		tampered := cloneBlock(b)
 		want := tamper(&tampered, sel)
+		if want == errTxEdit {
+			if err := p.Verify([]*domain.Block{prev}, &tampered); err != nil {
+				t.Fatalf("tamper %d: Verify = %v, want nil", sel%13, err)
+			}
+			if domain.ValidateMerkleRoot(&tampered) == nil {
+				t.Fatalf("tamper %d: ValidateMerkleRoot accepted an edited transaction", sel%13)
+			}
+			return
+		}
 		if err := p.Verify([]*domain.Block{prev}, &tampered); !errors.Is(err, want) {
 			t.Fatalf("tamper %d: Verify = %v, want %v", sel%13, err, want)
 		}
