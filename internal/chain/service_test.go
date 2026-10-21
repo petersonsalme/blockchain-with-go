@@ -22,7 +22,7 @@ import (
 type rejectingConsensus struct{ inner *pow.ProofOfWork }
 
 func (r rejectingConsensus) Seal(ctx context.Context, history []*domain.Block, b *domain.Block) error {
-	return r.inner.Seal(ctx, nil, b)
+	return r.inner.Seal(ctx, history, b)
 }
 
 func (rejectingConsensus) Verify(history []*domain.Block, b *domain.Block) error {

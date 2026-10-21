@@ -35,7 +35,7 @@ blockchain-with-go/
 
 - Dependencies point inward: `cmd/node` → `server`/`chain`/adapters → `domain`. `internal/domain` never imports `storage`, `chain`, `server`, `net/http` or `os/signal`; `internal/chain` does not import `server` or `net/http`.
 - No global state: `internal/server` and `internal/chain` only have `const` and `errors.New` sentinels at package level. Dependencies (repository, consensus, block generator) are injected through constructors (`chain.NewService(repo, consensus, opts...)`, `server.NewServer(svc, cfg)`).
-- Composition root in `cmd/node/main.go`; it is the only place that triggers configuration reading (`PORT`, `MINING_TIMEOUT` and `DATA_DIR` directly; `CONSENSUS` (`pow`|`poa`) picks the engine, `POW_DIFFICULTY` is read via `pow.NewProofOfWorkFromEnv`, `POA_VALIDATORS`/`POA_KEYSTORE`/`POA_KEYSTORE_PASSWORD` are parsed in `cmd/node`; `GENESIS_ALLOCATIONS`, genesis outputs as `address:amount[,...]`, parsed in `cmd/node` and ignored when the repository is not empty).
+- Composition root in `cmd/node/main.go`; it is the only place that triggers configuration reading (`PORT`, `MINING_TIMEOUT` and `DATA_DIR` directly; `CONSENSUS` (`pow`|`poa`) picks the engine, `POW_DIFFICULTY`, `POW_RETARGET_INTERVAL` and `TARGET_BLOCK_TIME` are read via `pow.NewProofOfWorkFromEnv`, `POA_VALIDATORS`/`POA_KEYSTORE`/`POA_KEYSTORE_PASSWORD` are parsed in `cmd/node`; `GENESIS_ALLOCATIONS`, genesis outputs as `address:amount[,...]`, parsed in `cmd/node` and ignored when the repository is not empty).
 
 ## Core Areas (Risk: core)
 
