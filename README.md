@@ -106,6 +106,7 @@ Design decisions live in [`docs/adr/`](docs/adr):
 | [0004](docs/adr/0004-disk-storage.md) | Disk storage: bbolt adapter with in-memory derived UTXO set |
 | [0005](docs/adr/0005-poa-block-seal.md) | Proof of Authority seal fields on Block |
 | [0006](docs/adr/0006-stdlib-servemux-routing.md) | HTTP routing with the standard library `ServeMux` instead of gorilla/mux |
+| [0007](docs/adr/0007-difficulty-retargeting.md) | Difficulty retargeting; the `Consensus` port receives the block history |
 
 ## Configuration & Environment Variables
 
