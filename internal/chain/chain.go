@@ -9,7 +9,13 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 )
 
-func GenerateBlockWithContext(ctx context.Context, c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+func GenerateBlockWithContext(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+	// The parent is the newest block; ranging avoids index arithmetic that a
+	// slip would turn into a panic inside a Mine goroutine.
+	var oldBlock *domain.Block
+	for _, b := range history {
+		oldBlock = b
+	}
 	var newBlock domain.Block
 
 	newBlock.Index = oldBlock.Index + 1
@@ -24,14 +30,14 @@ func GenerateBlockWithContext(ctx context.Context, c consensus.Consensus, oldBlo
 		return nil, err
 	}
 
-	if err := c.Seal(ctx, &newBlock); err != nil {
+	if err := c.Seal(ctx, history, &newBlock); err != nil {
 		return nil, err
 	}
 
 	return &newBlock, nil
 }
 
-func GenerateBlock(c consensus.Consensus, oldBlock *domain.Block, txs []domain.Transaction) *domain.Block {
-	newBlock, _ := GenerateBlockWithContext(context.Background(), c, oldBlock, txs)
+func GenerateBlock(c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) *domain.Block {
+	newBlock, _ := GenerateBlockWithContext(context.Background(), c, history, txs)
 	return newBlock
 }

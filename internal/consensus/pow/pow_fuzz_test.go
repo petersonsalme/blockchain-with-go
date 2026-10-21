@@ -86,10 +86,10 @@ func tamper(b *domain.Block, sel uint8) error {
 			return consensus.ErrInvalidHash
 		}
 	case 12:
-		// A consistent hash that does not meet the (unreachable) difficulty.
+		// A consistent hash carrying an (unreachable) difficulty the rule never expects.
 		b.Difficulty = 65
 		b.Hash = b.CalculateHash()
-		return consensus.ErrInvalidProofOfWork
+		return consensus.ErrInvalidDifficulty
 	}
 
 	if sel%13 >= 6 && sel%13 <= 11 {
@@ -126,13 +126,13 @@ func FuzzVerifyTamper(f *testing.F) {
 			t.Fatal(err)
 		}
 		p := powpkg.New(int(diff % 3))
-		if err := p.Verify(prev, &b); err != nil {
+		if err := p.Verify([]*domain.Block{prev}, &b); err != nil {
 			t.Fatalf("mined block rejected: %v", err)
 		}
 
 		tampered := cloneBlock(b)
 		want := tamper(&tampered, sel)
-		if err := p.Verify(prev, &tampered); !errors.Is(err, want) {
+		if err := p.Verify([]*domain.Block{prev}, &tampered); !errors.Is(err, want) {
 			t.Fatalf("tamper %d: Verify = %v, want %v", sel%13, err, want)
 		}
 	})

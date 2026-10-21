@@ -90,7 +90,7 @@ $ CONSENSUS=poa POA_VALIDATORS=<hex> POA_KEYSTORE=validator.key POA_KEYSTORE_PAS
 1. **In-Memory Storage vs. Persistence**: The node supports both in-memory and persistent disk storage. When `DATA_DIR` is set, blocks and hash indexes are persisted to `$DATA_DIR/chain.db` via the bbolt adapter (`internal/storage/bolt`). When `DATA_DIR` is empty, state lives in memory (`internal/storage/memory`) and is lost on restart. The UTXO set remains derived in memory and is rebuilt from the chain at startup (ADR-0001, ADR-0004).
 2. **Centralization vs. P2P Network**: Currently, the blockchain runs as a single centralized HTTP server rather than a decentralized peer-to-peer network. This eliminates the complexity of network discovery, peer management, and gossip protocols, but makes the system centralized.
 3. **Sybil Protection (Proof of Work)**: A Proof of Work (PoW) mechanism is implemented to require computational effort for block creation and mitigate spam. The difficulty (number of leading zeros required in the block hash) is configured via the `POW_DIFFICULTY` environment variable, defaulting to `2`. The logic lives in the `consensus` package behind the `Consensus` interface (`Seal`/`Verify`); `consensus.ProofOfWork` is the default implementation, and `POW_DIFFICULTY` is read once at startup (`cmd/node`).
-   - **Difficulty Decoupled from Validation**: Each block records its difficulty in `b.Difficulty` at mining time, and validation checks the block's proof of work against its own recorded difficulty (which is included in the SHA-256 hash). Dynamic difficulty adjustment (e.g. retargeting) across nodes is not implemented.
+   - **Difficulty Retargeting**: Each block records its difficulty in `b.Difficulty` (included in the SHA-256 hash), and validation requires it to equal the difficulty the rule expects for that position in the chain, then checks the proof of work against it. The child of genesis uses `POW_DIFFICULTY`; every `POW_RETARGET_INTERVAL` blocks the difficulty moves by one towards `TARGET_BLOCK_TIME` (up when the window took less than half the target, down when it took more than twice), within `1..8`; other blocks inherit the parent's difficulty. `Seal` and `Verify` receive the chain history for this ([ADR-0008](docs/adr/0008-difficulty-retargeting.md)). Miners still choose block timestamps within the ENG-18 bounds, so time-warp attacks are not prevented.
    - **Context Cancellation & Timeouts**: Mining supports cooperative cancellation via `context.Context` (`consensus.MineWithContext`, `GenerateBlockWithContext`). The HTTP handler applies a configurable mining timeout via `MINING_TIMEOUT` (defaulting to 10 seconds) and aborts immediately if the client disconnects or cancels the request, preventing request processing from blocking indefinitely.
 4. **Transaction List Payload**: Blocks store a slice of transactions committed via `TransactionsHash`. Full Merkle tree support with inclusion proofs is deferred to a subsequent milestone (ENG-20).
 
@@ -107,6 +107,7 @@ Design decisions live in [`docs/adr/`](docs/adr):
 | [0005](docs/adr/0005-poa-block-seal.md) | Proof of Authority seal fields on Block |
 | [0006](docs/adr/0006-stdlib-servemux-routing.md) | HTTP routing with the standard library `ServeMux` instead of gorilla/mux |
 | [0007](docs/adr/0007-openapi-contract.md) | OpenAPI spec as the HTTP contract, with a generated Go client |
+| [0008](docs/adr/0008-difficulty-retargeting.md) | Difficulty retargeting; the `Consensus` port receives the block history |
 
 ## Configuration & Environment Variables
 
@@ -117,6 +118,8 @@ The application can be configured via environment variables (e.g., in a `.env` f
 | `PORT` | HTTP server port | `8080` |
 | `CONSENSUS` | Consensus engine: `pow` or `poa`. Any other value stops the node at startup | empty (`pow`) |
 | `POW_DIFFICULTY` | Number of leading zeros required for block hashes (`CONSENSUS=pow`) | `2` |
+| `POW_RETARGET_INTERVAL` | Blocks between difficulty adjustments (`CONSENSUS=pow`); `0` disables retargeting. Invalid values use the default | `10` |
+| `TARGET_BLOCK_TIME` | Intended time between blocks, as a Go duration (`CONSENSUS=pow`). Invalid or non-positive values use the default | `10s` |
 | `POA_VALIDATORS` | Validator set for `CONSENSUS=poa`: Ed25519 public keys in hex, comma-separated (spaces around items ignored). Required; a non-hex, wrong-length or duplicate item stops the node, naming the item | empty |
 | `POA_KEYSTORE` | Path of the encrypted keystore (`wallet.Save`) holding this node's signing key. Its public key must be in `POA_VALIDATORS`; required with `CONSENSUS=poa` | empty |
 | `POA_KEYSTORE_PASSWORD` | Password that unlocks `POA_KEYSTORE`; required with `CONSENSUS=poa` | empty |

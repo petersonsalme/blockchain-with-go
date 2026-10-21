@@ -107,7 +107,7 @@ func contractCases() []contractCase {
 	}
 	generator := func(err error) func() (http.Handler, string, string) {
 		return func() (http.Handler, string, string) {
-			h, funds := real(Config{}, chain.WithGenerator(func(context.Context, consensus.Consensus, *domain.Block, []domain.Transaction) (*domain.Block, error) {
+			h, funds := real(Config{}, chain.WithGenerator(func(context.Context, consensus.Consensus, []*domain.Block, []domain.Transaction) (*domain.Block, error) {
 				return nil, err
 			}))
 			return h, "/", funds.payload()
