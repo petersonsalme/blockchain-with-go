@@ -126,6 +126,16 @@ var _ = Describe("ProofOfWork difficulty retargeting", func() {
 			Expect(p.ExpectedDifficulty(short)).To(Equal(4))
 		})
 
+		It("takes the height from the parent's index, not from the length of the history", func() {
+			// Blocks 13..19: the next height, 20, is a retarget height though 7 blocks are no multiple of 4.
+			suffix := history(20, 4, window(19, interval, time.Second))[13:]
+			Expect(p.ExpectedDifficulty(suffix)).To(Equal(5))
+
+			// Blocks 11..18: 8 blocks are a multiple of 4, but the next height, 19, is not a retarget height.
+			suffix = history(19, 4, every(time.Millisecond))[11:]
+			Expect(p.ExpectedDifficulty(suffix)).To(Equal(4))
+		})
+
 		It("always expects the initial difficulty when the interval is 0", func() {
 			off := powpkg.New(3).WithRetarget(0, target)
 			Expect(off.ExpectedDifficulty(history(8, 5, window(7, interval, time.Second)))).To(Equal(3))
