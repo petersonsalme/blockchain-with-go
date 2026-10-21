@@ -31,7 +31,7 @@ func Run(newConsensus func() consensus.Consensus) bool {
 				Timestamp:    time.Date(2021, 8, 15, 14, 30, 45, 0, time.UTC),
 				Transactions: []domain.Transaction{},
 			}
-			Expect(c.Seal(context.Background(), prev)).To(Succeed())
+			Expect(c.Seal(context.Background(), nil, prev)).To(Succeed())
 
 			b = &domain.Block{
 				Index:        1,
@@ -39,17 +39,17 @@ func Run(newConsensus func() consensus.Consensus) bool {
 				Transactions: []domain.Transaction{{Outputs: []domain.TxOut{{Amount: 1, Address: "b"}}}},
 				PrevHash:     prev.Hash,
 			}
-			Expect(c.Seal(context.Background(), b)).To(Succeed())
+			Expect(c.Seal(context.Background(), nil, b)).To(Succeed())
 		})
 
 		It("accepts a sealed block on a valid predecessor", func() {
-			Expect(c.Verify(prev, b)).To(Succeed())
+			Expect(c.Verify([]*domain.Block{prev}, b)).To(Succeed())
 		})
 
 		DescribeTable("rejects a tampered block",
 			func(tamper func(b *domain.Block), want error) {
 				tamper(b)
-				Expect(errors.Is(c.Verify(prev, b), want)).To(BeTrue())
+				Expect(errors.Is(c.Verify([]*domain.Block{prev}, b), want)).To(BeTrue())
 			},
 			Entry("Index", func(b *domain.Block) { b.Index = 99 }, consensus.ErrInvalidIndex),
 			Entry("PrevHash", func(b *domain.Block) { b.PrevHash = "bad" }, consensus.ErrInvalidPrevHash),
@@ -62,7 +62,7 @@ func Run(newConsensus func() consensus.Consensus) bool {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 
-			err := c.Seal(ctx, &domain.Block{Index: 2, PrevHash: b.Hash})
+			err := c.Seal(ctx, nil, &domain.Block{Index: 2, PrevHash: b.Hash})
 			Expect(errors.Is(err, context.Canceled)).To(BeTrue())
 		})
 	})
