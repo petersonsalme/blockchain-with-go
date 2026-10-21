@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Fails when total statement coverage is below the floor.
+# Usage: scripts/check-coverage.sh [profile] [floor-percent]
+# The contract suites below are only executed from other packages' tests, so
+# their own profile is 0% and would skew the total. They are excluded by exact
+# import path (no globs) so that every new package counts by default.
+set -euo pipefail
+
+profile="${1:-coverage.out}"
+floor="${2:-90.0}"
+
+module="github.com/petersonsalme/blockchain-with-go"
+excluded=(
+  "internal/consensus/consensustest"
+  "internal/storage/storagetest"
+)
+
+filtered="$(mktemp)"
+trap 'rm -f "$filtered"' EXIT
+cp "$profile" "$filtered"
+for pkg in "${excluded[@]}"; do
+  grep -v "^${module}/${pkg}/" "$filtered" > "$filtered.next" || true
+  mv "$filtered.next" "$filtered"
+done
+
+total="$(go tool cover -func="$filtered" | awk '/^total:/ { sub(/%/, "", $NF); print $NF }')"
+if [ -z "$total" ]; then
+  echo "could not read total coverage from $profile" >&2
+  exit 2
+fi
+
+if awk -v t="$total" -v f="$floor" 'BEGIN { exit !(t < f) }'; then
+  echo "FAIL: total coverage ${total}% is below the floor of ${floor}%" >&2
+  exit 1
+fi
+echo "OK: total coverage ${total}% meets the floor of ${floor}%"
