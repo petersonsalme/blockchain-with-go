@@ -23,7 +23,7 @@ const (
 	MaxDifficulty = 8
 
 	DefaultRetargetInterval = 10
-	DefaultTargetBlockTime  = 10 * time.Second
+	DefaultTargetBlockTime  = time.Duration(10_000_000_000) // 10s
 
 	// RetargetIntervalEnvVar overrides DefaultRetargetInterval with a
 	// non-negative integer; 0 disables retargeting.
@@ -120,22 +120,24 @@ func (p *ProofOfWork) ExpectedDifficulty(history []*domain.Block) int {
 	}
 
 	parent := history[len(history)-1]
-	height := parent.Index + 1
-	if height%n != 0 || height < n+1 || len(history) <= n {
+	// The window needs the block n places before the parent, so it only
+	// exists once the history is longer than n.
+	if (parent.Index+1)%n != 0 || len(history) <= n {
 		return parent.Difficulty
 	}
 
 	actual := parent.Timestamp.Sub(history[len(history)-1-n].Timestamp)
 	target := time.Duration(n) * p.TargetBlockTime
 
-	switch {
-	case 2*actual < target && parent.Difficulty < MaxDifficulty:
+	if 2*actual < target && parent.Difficulty < MaxDifficulty {
 		return parent.Difficulty + 1
-	case actual > 2*target && parent.Difficulty > MinDifficulty:
-		return parent.Difficulty - 1
-	default:
-		return parent.Difficulty
 	}
+
+	if actual > 2*target && parent.Difficulty > MinDifficulty {
+		return parent.Difficulty - 1
+	}
+
+	return parent.Difficulty
 }
 
 // Seal mines b at the difficulty ExpectedDifficulty names for history.
