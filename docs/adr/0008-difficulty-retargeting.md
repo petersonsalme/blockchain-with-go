@@ -1,4 +1,4 @@
-# ADR-0007: Difficulty retargeting with history-aware consensus
+# ADR-0008: Difficulty retargeting with history-aware consensus
 
 Status: Accepted (board, 2026-10-21, ENG-19)
 
@@ -28,7 +28,7 @@ Option A.
    - `TARGET_BLOCK_TIME` (Go duration, default `10s`);
    - invalid values fall back to the defaults, like `POW_DIFFICULTY`.
 5. `MinDifficulty = 1` and `MaxDifficulty = 8` are constants. Adjustment never crosses them; an initial difficulty outside them is kept.
-6. The factor-2 dead band is fixed: it prevents ±1 oscillation every window and makes convergence testable.
+6. The factor-2 dead band is fixed: it prevents ±1 oscillation every window (see What we learned) and makes convergence testable.
 
 ## Consequences
 - A block whose hash satisfies its recorded difficulty but whose difficulty is off-rule is now invalid.
@@ -40,4 +40,4 @@ Option A.
 ## What we learned
 - Decision item 6 holds only when one difficulty step changes the block time by less than the width of the dead band. Difficulty counts leading **hex** zeros, so one step multiplies the expected work by 16, and the band `[target/2, 2*target]` is only 4× wide. For about half of all hash rates no difficulty lands inside the band, and the difficulty then alternates ±1 on every window. The convergence test models block time as `2^d`, so it does not exercise this case. Measured in the ENG-19 review with the real `ExpectedDifficulty`, N=10, a 10s target and time = 16^d / hash rate: 100k H/s held at 5, 1M H/s held at 6, and 300k H/s alternated `5 6 5 6 ...`.
 - With the defaults, a fast machine settles on a difficulty whose mean mining time can exceed `MINING_TIMEOUT` (10s). The measurement was ~1.45M H/s, d=6, mean ≈ 11.6s, so ≈42% of `POST /` return `504`. Slow windows bring the difficulty back down, so the chain does not stall.
-- The design is unchanged. Known limitation: ±1 oscillation and `504`s under the defaults remain possible until the difficulty becomes finer-grained (a numeric or bit-based target) or the defaults are realigned with `MINING_TIMEOUT`. Both are tracked as a follow-up story.
+- The design is unchanged. Known limitation: ±1 oscillation and `504`s under the defaults remain possible until the difficulty becomes finer-grained (a numeric or bit-based target) or the defaults are realigned with `MINING_TIMEOUT`. Both are tracked as ENG-99.
