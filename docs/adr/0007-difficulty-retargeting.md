@@ -36,3 +36,8 @@ Option A.
 - `ExpectedDifficulty` is pure (no clock, environment or repository), so any chain can be re-verified, which a future `replaceChain` can reuse.
 - Miners still choose block timestamps, so time-warp within the ENG-18 timestamp bounds remains possible. Known limitation, out of scope.
 - README §3 and the environment variable table, and the composition-root line in AGENTS.md, must describe the new variables.
+
+## What we learned
+- Decision item 6 holds only when one difficulty step changes the block time by less than the width of the dead band. Difficulty counts leading **hex** zeros, so one step multiplies the expected work by 16, and the band `[target/2, 2*target]` is only 4× wide. For about half of all hash rates no difficulty lands inside the band, and the difficulty then alternates ±1 on every window. The convergence test models block time as `2^d`, so it does not exercise this case. Measured in the ENG-19 review with the real `ExpectedDifficulty`, N=10, a 10s target and time = 16^d / hash rate: 100k H/s held at 5, 1M H/s held at 6, and 300k H/s alternated `5 6 5 6 ...`.
+- With the defaults, a fast machine settles on a difficulty whose mean mining time can exceed `MINING_TIMEOUT` (10s). The measurement was ~1.45M H/s, d=6, mean ≈ 11.6s, so ≈42% of `POST /` return `504`. Slow windows bring the difficulty back down, so the chain does not stall.
+- The design is unchanged. Known limitation: ±1 oscillation and `504`s under the defaults remain possible until the difficulty becomes finer-grained (a numeric or bit-based target) or the defaults are realigned with `MINING_TIMEOUT`. Both are tracked as a follow-up story.
