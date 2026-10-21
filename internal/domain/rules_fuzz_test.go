@@ -24,6 +24,7 @@ func FuzzValidateBlockRules(f *testing.F) {
 	f.Add(int64(1_700_000_000), int64(0), int64(1_700_000_001), int64(0), int64(1_700_000_100), int64(0), 1, uint8(0), uint8(0), uint16(0))
 	f.Add(int64(1_700_000_000), int64(0), int64(1_699_999_000), int64(0), int64(1_600_000_000), int64(0), 1, uint8(1), uint8(1), uint16(0))
 	f.Add(int64(1_700_000_000), int64(0), int64(1_699_999_000), int64(0), int64(1_700_000_100), int64(0), 1, uint8(3), uint8(50), uint16(300))
+	f.Add(int64(1_700_000_000), int64(0), int64(1_699_999_000), int64(0), int64(1_700_000_100), int64(0), 1, uint8(1), uint8(3), uint16(0))
 	f.Add(int64(1<<40), int64(0), int64(0), int64(0), int64(0), int64(0), 0, uint8(0), uint8(0), uint16(0))
 
 	f.Fuzz(func(t *testing.T, sec, nsec, parentSec, parentNsec, nowSec, nowNsec int64, index int, nTx, txSize uint8, maxBytes uint16) {
@@ -37,6 +38,12 @@ func FuzzValidateBlockRules(f *testing.F) {
 				Timestamp: ts,
 				Outputs:   []domain.TxOut{{Amount: uint64(i), Address: strings.Repeat("a", int(txSize)*8)}},
 			})
+		}
+
+		b.MerkleRoot = domain.MerkleRoot(b.Transactions)
+		corrupt := txSize%7 == 3
+		if corrupt {
+			b.MerkleRoot = strings.Repeat("0", 64)
 		}
 
 		limit := domain.DefaultMaxBlockBytes
@@ -59,6 +66,8 @@ func FuzzValidateBlockRules(f *testing.F) {
 		switch {
 		case len(encoded) > limit:
 			wantCode = domain.CodeBlockTooLarge
+		case corrupt:
+			wantCode = domain.CodeMerkleRootMismatch
 		case ts.Before(parent.Timestamp):
 			wantCode = domain.CodeTimestampBeforeParent
 		case ts.After(now.Add(domain.MaxFutureDrift)):

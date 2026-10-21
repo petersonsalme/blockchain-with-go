@@ -117,6 +117,7 @@ var _ = Describe("Service", func() {
 			Expect(g.Index).To(Equal(0))
 			Expect(g.Timestamp).To(BeTemporally("~", time.Now(), time.Second))
 			Expect(g.Transactions).To(BeEmpty())
+			Expect(g.MerkleRoot).To(Equal(domain.MerkleRoot(nil)))
 			Expect(g.PrevHash).To(BeEmpty())
 			Expect(g.Hash).To(BeEmpty())
 		})

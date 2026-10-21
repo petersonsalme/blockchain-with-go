@@ -107,4 +107,54 @@ var _ = Describe("Block rules", func() {
 			Expect(ve.Code).To(Equal(domain.CodeBlockTooLarge))
 		})
 	})
+
+	Describe("ValidateMerkleRoot", func() {
+		var b *domain.Block
+
+		BeforeEach(func() {
+			b = &domain.Block{Index: 1, Timestamp: time.Now(), Transactions: merkleTxs(3)}
+			b.MerkleRoot = domain.MerkleRoot(b.Transactions)
+		})
+
+		It("accepts a block whose root matches its transactions", func() {
+			Expect(domain.ValidateMerkleRoot(b)).To(Succeed())
+		})
+
+		It("accepts an empty block carrying the empty root", func() {
+			empty := &domain.Block{MerkleRoot: domain.MerkleRoot(nil)}
+			Expect(domain.ValidateMerkleRoot(empty)).To(Succeed())
+		})
+
+		It("rejects a missing root, citing expected and got", func() {
+			expected := b.MerkleRoot
+			b.MerkleRoot = ""
+			var ve *domain.ValidationError
+			Expect(errors.As(domain.ValidateMerkleRoot(b), &ve)).To(BeTrue())
+			Expect(ve.Code).To(Equal("merkle_root_mismatch"))
+			Expect(ve.Details).To(HaveKeyWithValue("expected", expected))
+			Expect(ve.Details).To(HaveKeyWithValue("got", ""))
+		})
+
+		It("rejects a transaction changed after the root was set", func() {
+			b.Transactions[1].Outputs[0].Amount++
+			var ve *domain.ValidationError
+			Expect(errors.As(domain.ValidateMerkleRoot(b), &ve)).To(BeTrue())
+			Expect(ve.Code).To(Equal(domain.CodeMerkleRootMismatch))
+		})
+
+		It("is applied by ValidateBlockRules after the size check and before the timestamp check", func() {
+			now := time.Now()
+			parent := &domain.Block{Timestamp: now}
+			b.Timestamp = now.Add(-time.Hour)
+			b.MerkleRoot = "bad"
+
+			var ve *domain.ValidationError
+			Expect(errors.As(domain.ValidateBlockRules(b, parent, now), &ve)).To(BeTrue())
+			Expect(ve.Code).To(Equal(domain.CodeMerkleRootMismatch))
+
+			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "10")
+			Expect(errors.As(domain.ValidateBlockRules(b, parent, now), &ve)).To(BeTrue())
+			Expect(ve.Code).To(Equal(domain.CodeBlockTooLarge))
+		})
+	})
 })

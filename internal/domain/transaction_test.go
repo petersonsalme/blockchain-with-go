@@ -56,48 +56,4 @@ var _ = Describe("Transaction", func() {
 			Expect(nilTx.Validate()).To(HaveOccurred())
 		})
 	})
-
-	Describe("TransactionsHash", func() {
-		It("returns the same deterministic hash for nil and empty slices", func() {
-			hashNil := domain.TransactionsHash(nil)
-			hashEmpty := domain.TransactionsHash([]domain.Transaction{})
-
-			Expect(hashNil).To(HaveLen(64))
-			Expect(hashEmpty).To(Equal(hashNil))
-		})
-
-		It("is sensitive to the order of transactions", func() {
-			tx2 := baseTx
-			tx2.Timestamp = fixedTime.Add(time.Second)
-
-			order1 := domain.TransactionsHash([]domain.Transaction{baseTx, tx2})
-			order2 := domain.TransactionsHash([]domain.Transaction{tx2, baseTx})
-
-			Expect(order1).NotTo(Equal(order2))
-		})
-
-		It("is sensitive to transaction content", func() {
-			original := domain.TransactionsHash([]domain.Transaction{baseTx})
-			modified := baseTx
-			modified.Outputs = []domain.TxOut{{Amount: 999, Address: "bob"}}
-			Expect(domain.TransactionsHash([]domain.Transaction{modified})).NotTo(Equal(original))
-		})
-
-		It("is sensitive to the signature of the first input", func() {
-			original := domain.TransactionsHash([]domain.Transaction{baseTx})
-			modified := baseTx
-			modified.Inputs = []domain.TxIn{{PrevTxID: "aa", OutIndex: 0, PublicKey: "pk", Signature: "changed"}}
-			Expect(domain.TransactionsHash([]domain.Transaction{modified})).NotTo(Equal(original))
-		})
-
-		It("is sensitive to the signature of every input, not just the first", func() {
-			baseTx.Inputs = append(baseTx.Inputs, domain.TxIn{PrevTxID: "bb", OutIndex: 1, PublicKey: "pk", Signature: "sig-2"})
-			original := domain.TransactionsHash([]domain.Transaction{baseTx})
-
-			modified := baseTx
-			modified.Inputs = append([]domain.TxIn(nil), baseTx.Inputs...)
-			modified.Inputs[1].Signature = "changed"
-			Expect(domain.TransactionsHash([]domain.Transaction{modified})).NotTo(Equal(original))
-		})
-	})
 })

@@ -216,6 +216,44 @@ var _ = Describe("Service UTXO rules", func() {
 	})
 
 	Describe("Mine", func() {
+		It("seals the merkle root of the mined transactions into the block", func() {
+			blk, err := mine(f.tx()...)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(blk.MerkleRoot).To(Equal(domain.MerkleRoot(blk.Transactions)))
+			Expect(blk.Hash).To(Equal(blk.CalculateHash()))
+		})
+
+		It("rejects a block whose merkle root does not match and changes nothing", func() {
+			wrong := domain.MerkleRoot(nil)
+			badSet := memory.NewUTXOSet()
+			bad, err := NewService(repo, eng, WithUTXOSet(badSet), WithGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+				b, err := GenerateBlockWithContext(ctx, c, history, txs)
+				if err != nil {
+					return nil, err
+				}
+				b.MerkleRoot = wrong
+				b.Hash = b.CalculateHash()
+				return b, nil
+			}))
+			Expect(err).NotTo(HaveOccurred())
+
+			before, err := repo.All()
+			Expect(err).NotTo(HaveOccurred())
+			snapshot := badSet.Snapshot()
+
+			blk, err := bad.Mine(context.Background(), f.tx())
+			Expect(blk).To(BeNil())
+			var ve *domain.ValidationError
+			Expect(errors.As(err, &ve)).To(BeTrue())
+			Expect(ve.Code).To(Equal(domain.CodeMerkleRootMismatch))
+			Expect(ve.Details).To(HaveKeyWithValue("got", wrong))
+
+			after, err := repo.All()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(after).To(Equal(before))
+			Expect(badSet.Snapshot()).To(Equal(snapshot))
+		})
+
 		It("applies the delta of a mined block to the set", func() {
 			tx := f.tx()[0]
 			blk, err := mine(tx)

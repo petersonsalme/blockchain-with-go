@@ -54,7 +54,7 @@ func Run(newConsensus func() consensus.Consensus) bool {
 			Entry("Index", func(b *domain.Block) { b.Index = 99 }, consensus.ErrInvalidIndex),
 			Entry("PrevHash", func(b *domain.Block) { b.PrevHash = "bad" }, consensus.ErrInvalidPrevHash),
 			Entry("Timestamp", func(b *domain.Block) { b.Timestamp = b.Timestamp.Add(time.Second) }, consensus.ErrInvalidHash),
-			Entry("Transactions", func(b *domain.Block) { b.Transactions[0].Outputs[0].Amount = 999 }, consensus.ErrInvalidHash),
+			Entry("MerkleRoot", func(b *domain.Block) { b.MerkleRoot = "bad" }, consensus.ErrInvalidHash),
 			Entry("Hash", func(b *domain.Block) { b.Hash = "bad" }, consensus.ErrInvalidHash),
 		)
 

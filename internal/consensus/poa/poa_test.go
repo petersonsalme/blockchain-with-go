@@ -156,7 +156,7 @@ var _ = Describe("ProofOfAuthority", func() {
 			Entry("Index", func(b *domain.Block) { b.Index++ }, consensus.ErrInvalidIndex),
 			Entry("PrevHash", func(b *domain.Block) { b.PrevHash = "x" }, consensus.ErrInvalidPrevHash),
 			Entry("Timestamp", func(b *domain.Block) { b.Timestamp = b.Timestamp.Add(time.Second) }, consensus.ErrInvalidHash),
-			Entry("Transactions", func(b *domain.Block) { b.Transactions = []domain.Transaction{{ID: "x"}} }, consensus.ErrInvalidHash),
+			Entry("MerkleRoot", func(b *domain.Block) { b.MerkleRoot = "x" }, consensus.ErrInvalidHash),
 			Entry("Validator", func(b *domain.Block) { b.Validator = hex.EncodeToString(make([]byte, 32)) }, consensus.ErrInvalidHash),
 			Entry("Hash", func(b *domain.Block) { b.Hash = "x" }, consensus.ErrInvalidHash),
 			Entry("Signature", func(b *domain.Block) { b.Signature = hex.EncodeToString(make([]byte, 64)) }, consensus.ErrInvalidSignature),

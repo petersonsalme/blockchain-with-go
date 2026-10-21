@@ -158,6 +158,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 					Index:        parent.Index + 1,
 					Timestamp:    time.Now(),
 					Transactions: txs,
+					MerkleRoot:   domain.MerkleRoot(txs),
 					PrevHash:     parent.Hash,
 					Hash:         strings.Repeat("0", 64),
 				}
