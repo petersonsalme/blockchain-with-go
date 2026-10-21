@@ -20,7 +20,7 @@ A simple blockchain implementation in Go, created as an exercise to demonstrate 
 
 ## Features Implemented
 - **Block & Transaction Structure**: Blocks containing index, timestamp, transaction list (`Transactions`), current hash, previous hash, nonce, and difficulty. Each transaction has `ID`, `Inputs` (spent outputs with key and signature), `Outputs` (amount and address) and `Timestamp`.
-- **Cryptographic Hashing**: Uses SHA-256 to ensure data integrity across all block attributes (including nonce, difficulty, and an aggregate hash of all transactions). Transaction content hashing is deterministic and independent of transaction ID, signature, and public key.
+- **Cryptographic Hashing**: Uses SHA-256 to ensure data integrity across all block attributes (including nonce, difficulty, and the Merkle root of all transactions). Transaction content hashing is deterministic and independent of transaction ID, signature, and public key.
 - **Proof of Work & Context-Aware Mining**: Nonce search satisfying leading-zero difficulty, supporting graceful context cancellation and mining timeouts.
 - **Chain Validation**: Validates new blocks by checking index sequentiality, cryptographic linkage (`PrevHash`), SHA-256 hash integrity, and Proof of Work against each block's recorded difficulty.
 - **HTTP API**: A RESTful API to view the blockchain, append new blocks with transactions, and report structured errors with appropriate HTTP status codes.
