@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ "master", "main" ]
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -15,13 +18,41 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.26'
-        
+        go-version-file: go.mod
+
     - name: Install dependencies
       run: go mod download
 
-    - name: Run Tests
-      run: go test -v ./...
-      
-    - name: Run Vet (Linting)
-      run: go vet ./...
+    - name: Run Tests (race + coverage profile)
+      run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
+
+    - name: Check coverage floor
+      run: scripts/check-coverage.sh coverage.out 90.0
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: golangci-lint
+      uses: golangci/golangci-lint-action@v9.3.0
+      with:
+        version: v2.15.0
+
+  vuln:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: govulncheck
+      run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
