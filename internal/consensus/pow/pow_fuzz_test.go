@@ -86,10 +86,10 @@ func tamper(b *domain.Block, sel uint8) error {
 			return consensus.ErrInvalidHash
 		}
 	case 12:
-		// A consistent hash that does not meet the (unreachable) difficulty.
+		// A consistent hash carrying an (unreachable) difficulty the rule never expects.
 		b.Difficulty = 65
 		b.Hash = b.CalculateHash()
-		return consensus.ErrInvalidProofOfWork
+		return consensus.ErrInvalidDifficulty
 	}
 
 	if sel%13 >= 6 && sel%13 <= 11 {

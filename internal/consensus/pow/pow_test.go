@@ -358,11 +358,11 @@ var _ = Describe("ProofOfWork", func() {
 		})
 
 		When("the block was mined with a difficulty lower than the current one", func() {
-			It("should validate the proof of work against the recorded difficulty", func() {
+			It("should reject it as off-rule even though the proof of work holds", func() {
 				Expect(powpkg.MineWithContext(context.Background(), newBlock, powpkg.DifficultyFromEnv()-1)).To(Succeed())
 
 				Expect(newBlock.Difficulty).To(Equal(powpkg.DifficultyFromEnv() - 1))
-				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(Succeed())
+				Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(MatchError(consensus.ErrInvalidDifficulty))
 			})
 		})
 
