@@ -1,0 +1,426 @@
+openapi: 3.0.3
+info:
+  title: blockchain-with-go node API
+  version: 1.0.0
+  description: |
+    HTTP API of the educational blockchain node. This file is the contract of
+    `internal/server`; `internal/server/contract_test.go` checks the server against it
+    and `client/` is generated from it (ADR-0007).
+
+    Every route can also answer 429 when the per-IP rate limit (`RATE_LIMIT`) is enabled.
+    The generic ServeMux answers (405 with `Allow`, `HEAD`) are not described.
+paths:
+  /:
+    get:
+      operationId: getBlockchain
+      summary: List the whole chain
+      responses:
+        "200":
+          description: Every block, genesis first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/blocksResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: writeBlock
+      summary: Mine a block with the given signed transactions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/message"
+      responses:
+        "201":
+          description: The mined block, already appended to the chain.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/block"
+        "400":
+          description: Malformed body, empty transaction list, bad ID, missing timestamp or a transaction rejected as malformed (missing/invalid signature or key, owner mismatch, invalid output, missing inputs).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "408":
+          description: Mining was cancelled (client went away).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "409":
+          description: An input is missing or already spent, the transaction double-spends, or the chain changed during mining (`chain_conflict`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "413":
+          description: Request body exceeds the maximum size (`request_too_large`; `details.max` is the limit).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "422":
+          description: Inputs do not cover the outputs, or the block was rejected by validation or consensus.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "504":
+          description: Mining exceeded `MINING_TIMEOUT`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+  /blocks:
+    get:
+      operationId: getBlocks
+      summary: Page through the chain
+      parameters:
+        - name: from
+          in: query
+          description: First height of the page.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          description: Page size; values above 100 are capped at 100.
+          schema:
+            type: integer
+            minimum: 1
+            default: 20
+      responses:
+        "200":
+          description: One page of blocks.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/pageResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /block/{ref}:
+    get:
+      operationId: getBlock
+      summary: Get one block by hash or height
+      parameters:
+        - name: ref
+          in: path
+          required: true
+          description: Block hash (64 lowercase hex characters) or height (decimal).
+          schema:
+            type: string
+            pattern: '^([0-9]{1,63}|[0-9a-f]{64})$'
+      responses:
+        "200":
+          description: The block.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/block"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /tx/{id}:
+    get:
+      operationId: getTx
+      summary: Get one transaction and the block that contains it
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Transaction ID (64 lowercase hex characters).
+          schema:
+            type: string
+            pattern: '^[0-9a-f]{64}$'
+      responses:
+        "200":
+          description: The transaction with its block hash and height.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/txResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /balance/{addr}:
+    get:
+      operationId: getBalance
+      summary: Get the balance and unspent outputs of an address
+      parameters:
+        - name: addr
+          in: path
+          required: true
+          description: Wallet address (lowercase hex with version and checksum).
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The balance and the unspent outputs of the address.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/balanceResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /health:
+    get:
+      operationId: getHealth
+      summary: Report the chain tip
+      responses:
+        "200":
+          description: The node is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/healthResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          description: The chain cannot be read (`unhealthy`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+  /legacy/bpm:
+    post:
+      operationId: legacyBpm
+      deprecated: true
+      summary: Removed endpoint that accepted unsigned BPM payloads
+      description: Always answers 410 with the `Deprecation` header. Send signed transactions to `POST /`.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "410":
+          description: The endpoint was removed (`endpoint_gone`).
+          headers:
+            Deprecation:
+              description: Always `true`.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+components:
+  responses:
+    BadRequest:
+      description: A path or query value is malformed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/errorResponse"
+    NotFound:
+      description: No such block or transaction.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/errorResponse"
+    RateLimited:
+      description: The per-IP rate limit was exceeded (`rate_limited`).
+      headers:
+        Retry-After:
+          description: Seconds until a request is accepted again.
+          required: true
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/errorResponse"
+    InternalError:
+      description: The chain could not be read or written.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/errorResponse"
+  schemas:
+    errorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+          description: Stable machine-readable error code.
+        details:
+          type: object
+          additionalProperties: true
+    message:
+      type: object
+      required: [Transactions]
+      properties:
+        Transactions:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/transaction"
+    transaction:
+      type: object
+      required: [Inputs, Outputs, Timestamp]
+      properties:
+        ID:
+          type: string
+          description: Optional in requests (the node fills it in); when present it must equal the calculated hash.
+        Inputs:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/txIn"
+        Outputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/txOut"
+        Timestamp:
+          type: string
+          format: date-time
+    txIn:
+      type: object
+      required: [PrevTxID, OutIndex, PublicKey, Signature]
+      properties:
+        PrevTxID:
+          type: string
+        OutIndex:
+          type: integer
+          format: uint32
+        PublicKey:
+          type: string
+        Signature:
+          type: string
+    txOut:
+      type: object
+      required: [Amount, Address]
+      properties:
+        Amount:
+          type: integer
+          format: uint64
+        Address:
+          type: string
+    block:
+      type: object
+      required: [Index, Timestamp, Transactions, Hash, PrevHash, Nonce, Difficulty, Validator, Signature]
+      properties:
+        Index:
+          type: integer
+        Timestamp:
+          type: string
+          format: date-time
+        Transactions:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/transaction"
+        Hash:
+          type: string
+        PrevHash:
+          type: string
+        Nonce:
+          type: integer
+        Difficulty:
+          type: integer
+        Validator:
+          type: string
+        Signature:
+          type: string
+    blocksResponse:
+      type: object
+      required: [Blocks]
+      properties:
+        Blocks:
+          type: array
+          items:
+            $ref: "#/components/schemas/block"
+    pageResponse:
+      type: object
+      required: [blocks, from, limit]
+      properties:
+        blocks:
+          type: array
+          items:
+            $ref: "#/components/schemas/block"
+        from:
+          type: integer
+        limit:
+          type: integer
+        next:
+          type: integer
+          description: Height of the next page; present only when a block exists there.
+    healthResponse:
+      type: object
+      required: [status, height, tip]
+      properties:
+        status:
+          type: string
+        height:
+          type: integer
+        tip:
+          type: string
+    txResponse:
+      type: object
+      required: [transaction, block_hash, height]
+      properties:
+        transaction:
+          $ref: "#/components/schemas/transaction"
+        block_hash:
+          type: string
+        height:
+          type: integer
+    utxo:
+      type: object
+      required: [txid, index, amount]
+      properties:
+        txid:
+          type: string
+        index:
+          type: integer
+          format: uint32
+        amount:
+          type: integer
+          format: uint64
+    balanceResponse:
+      type: object
+      required: [address, balance, utxos]
+      properties:
+        address:
+          type: string
+        balance:
+          type: integer
+          format: uint64
+        utxos:
+          type: array
+          items:
+            $ref: "#/components/schemas/utxo"
