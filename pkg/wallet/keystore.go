@@ -115,7 +115,11 @@ func (w *Wallet) Save(path, password string) error {
 		return fmt.Errorf("wallet: creating temp file: %w", err)
 	}
 	tmpName := tmp.Name()
-	cleanup := func() { tmp.Close(); os.Remove(tmpName) }
+	cleanup := func() {
+		// Best-effort cleanup on a failure path: the original error is the one to report.
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+	}
 	if err := tmp.Chmod(0o600); err != nil {
 		cleanup()
 		return fmt.Errorf("wallet: setting permissions: %w", err)
@@ -129,11 +133,11 @@ func (w *Wallet) Save(path, password string) error {
 		return fmt.Errorf("wallet: syncing keystore: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName) // best-effort cleanup; the close error is the one to report
 		return fmt.Errorf("wallet: closing keystore: %w", err)
 	}
 	if err := os.Rename(tmpName, path); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName) // best-effort cleanup; the rename error is the one to report
 		return fmt.Errorf("wallet: replacing keystore: %w", err)
 	}
 	return nil

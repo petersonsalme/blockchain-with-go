@@ -260,7 +260,6 @@ var _ = Describe("Bolt Repository", func() {
 		genesis := &domain.Block{Index: 0, Hash: "h0"}
 		Expect(repo.Append(genesis)).To(Succeed())
 
-		const writers = 1
 		const blocksToMine = 50
 
 		var wg sync.WaitGroup

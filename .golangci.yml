@@ -1,0 +1,8 @@
+version: "2"
+linters:
+  exclusions:
+    rules:
+      # Ginkgo/Gomega contract suites use dot imports by convention.
+      - path: internal/(consensus/consensustest|storage/storagetest)/
+        linters: [staticcheck]
+        text: "ST1001"

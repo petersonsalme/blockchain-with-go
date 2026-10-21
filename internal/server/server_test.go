@@ -1328,7 +1328,7 @@ var _ = Describe("Server", func() {
 			Eventually(func() error {
 				conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
 				if err == nil {
-					conn.Close()
+					_ = conn.Close() // probe connection; close error is irrelevant
 				}
 				return err
 			}, 5*time.Second, 20*time.Millisecond).Should(Succeed())
@@ -1353,7 +1353,7 @@ var _ = Describe("Server", func() {
 			client := &http.Client{Timeout: 5 * time.Second}
 			resp, err := client.Get("http://" + addr + "/")
 			Expect(err).NotTo(HaveOccurred())
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }() // response body of a test request; close error is irrelevant
 			body, err := io.ReadAll(resp.Body)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -1398,7 +1398,7 @@ var _ = Describe("Server", func() {
 			Eventually(func() error {
 				conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
 				if err == nil {
-					conn.Close()
+					_ = conn.Close() // probe connection; close error is irrelevant
 				}
 				return err
 			}, 5*time.Second, 20*time.Millisecond).Should(Succeed())
@@ -1411,7 +1411,7 @@ var _ = Describe("Server", func() {
 					readErr <- err
 					return
 				}
-				defer conn.Close()
+				defer func() { _ = conn.Close() }() // test connection; close error is irrelevant
 				_ = conn.SetReadDeadline(time.Now().Add(15 * time.Second))
 				_, err = conn.Read(make([]byte, 1))
 				readErr <- err
@@ -1633,7 +1633,7 @@ var _ = Describe("Server", func() {
 			defer ts.Close()
 			resp, err := http.Head(ts.URL + "/health")
 			Expect(err).NotTo(HaveOccurred())
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }() // response body of a test request; close error is irrelevant
 			body, err := io.ReadAll(resp.Body)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(resp.StatusCode).To(Equal(http.StatusOK))

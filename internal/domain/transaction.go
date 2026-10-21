@@ -142,6 +142,7 @@ func (t *Transaction) CalculateHash() string {
 		payload.Inputs[i] = utxoInPayload{PrevTxID: in.PrevTxID, OutIndex: in.OutIndex}
 	}
 	for i, out := range t.Outputs {
+		//nolint:staticcheck // S1016: explicit field copy pins the hashed payload shape
 		payload.Outputs[i] = utxoOutPayload{Amount: out.Amount, Address: out.Address}
 	}
 

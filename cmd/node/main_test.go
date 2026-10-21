@@ -26,7 +26,7 @@ func freePort(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }() // test listener; close error is irrelevant
 	_, port, _ := net.SplitHostPort(l.Addr().String())
 	return port
 }
@@ -55,7 +55,7 @@ func TestRunServesAndShutsDownGracefully(t *testing.T) {
 		cancel()
 		t.Fatalf("server did not come up: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close() // response body of a test request; close error is irrelevant
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET / = %d, want 200", resp.StatusCode)
 	}
@@ -125,9 +125,10 @@ func TestBootstrapLoadsDotEnvAndRuns(t *testing.T) {
 	}
 	t.Chdir(dir)
 	// godotenv does not override existing variables; clear them so the file is used.
-	os.Unsetenv("PORT")
-	os.Unsetenv("POW_DIFFICULTY")
-	t.Cleanup(func() { os.Unsetenv("PORT"); os.Unsetenv("POW_DIFFICULTY") })
+	// Unsetenv only fails for an invalid name; these names are constants.
+	_ = os.Unsetenv("PORT")
+	_ = os.Unsetenv("POW_DIFFICULTY")
+	t.Cleanup(func() { _ = os.Unsetenv("PORT"); _ = os.Unsetenv("POW_DIFFICULTY") })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -137,7 +138,7 @@ func TestBootstrapLoadsDotEnvAndRuns(t *testing.T) {
 	up := false
 	for i := 0; i < 100 && !up; i++ {
 		if resp, err := http.Get(url); err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close() // response body of a test request; close error is irrelevant
 			up = true
 		} else {
 			time.Sleep(50 * time.Millisecond)
@@ -350,7 +351,7 @@ func TestRunServesAndShutsDownGracefullyWithDataDir(t *testing.T) {
 		cancel()
 		t.Fatalf("server did not come up: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close() // response body of a test request; close error is irrelevant
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET / = %d, want 200", resp.StatusCode)
 	}
