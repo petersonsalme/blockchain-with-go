@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
@@ -14,14 +15,38 @@ import (
 // POW_DIFFICULTY is not set.
 const DefaultDifficulty = 2
 
+// Retargeting bounds and defaults. The factor-2 dead band is fixed.
+const (
+	// MinDifficulty and MaxDifficulty bound retargeting; an initial difficulty
+	// outside them is kept, but an adjustment never crosses them.
+	MinDifficulty = 1
+	MaxDifficulty = 8
+
+	DefaultRetargetInterval = 10
+	DefaultTargetBlockTime  = time.Duration(10_000_000_000) // 10s
+
+	// RetargetIntervalEnvVar overrides DefaultRetargetInterval with a
+	// non-negative integer; 0 disables retargeting.
+	RetargetIntervalEnvVar = "POW_RETARGET_INTERVAL"
+	// TargetBlockTimeEnvVar overrides DefaultTargetBlockTime with a positive Go duration.
+	TargetBlockTimeEnvVar = "TARGET_BLOCK_TIME"
+)
+
 // DifficultyEnvVar overrides DefaultDifficulty when it holds a non-negative integer.
 const DifficultyEnvVar = "POW_DIFFICULTY"
 
 var _ consensus.Consensus = (*ProofOfWork)(nil)
 
-// ProofOfWork is a Consensus that requires block hashes to start with Difficulty zeros.
+// ProofOfWork is a Consensus that requires block hashes to start with as many
+// zeros as ExpectedDifficulty names for their position in the chain.
 type ProofOfWork struct {
+	// Difficulty is the initial difficulty, used by the child of genesis.
 	Difficulty int
+	// RetargetInterval is the number of blocks between adjustments; 0 disables
+	// retargeting, so every block is expected at the initial difficulty.
+	RetargetInterval int
+	// TargetBlockTime is the intended time between blocks.
+	TargetBlockTime time.Duration
 }
 
 func New(difficulty int) *ProofOfWork {
@@ -32,12 +57,12 @@ func NewProofOfWork(difficulty int) *ProofOfWork {
 	return New(difficulty)
 }
 
-// NewFromEnv builds a ProofOfWork using the difficulty from POW_DIFFICULTY.
+// NewFromEnv builds a ProofOfWork from POW_DIFFICULTY, POW_RETARGET_INTERVAL and TARGET_BLOCK_TIME.
 func NewFromEnv() *ProofOfWork {
-	return New(DifficultyFromEnv())
+	return New(DifficultyFromEnv()).WithRetarget(RetargetIntervalFromEnv(), TargetBlockTimeFromEnv())
 }
 
-// NewProofOfWorkFromEnv builds a ProofOfWork using the difficulty from POW_DIFFICULTY.
+// NewProofOfWorkFromEnv builds a ProofOfWork from POW_DIFFICULTY, POW_RETARGET_INTERVAL and TARGET_BLOCK_TIME.
 func NewProofOfWorkFromEnv() *ProofOfWork {
 	return NewFromEnv()
 }
@@ -57,13 +82,73 @@ func DifficultyFromEnv() int {
 	return difficulty
 }
 
-func (p *ProofOfWork) Seal(ctx context.Context, b *domain.Block) error {
-	return MineWithContext(ctx, b, p.Difficulty)
+// RetargetIntervalFromEnv returns the retarget interval configured in the environment.
+func RetargetIntervalFromEnv() int {
+	interval, err := strconv.Atoi(os.Getenv(RetargetIntervalEnvVar))
+	if err != nil || interval < 0 {
+		return DefaultRetargetInterval
+	}
+
+	return interval
 }
 
-// Verify checks the block against its predecessor, validating the proof of
-// work against the block's own recorded difficulty.
-func (p *ProofOfWork) Verify(prev, b *domain.Block) error {
+// TargetBlockTimeFromEnv returns the target block time configured in the environment.
+func TargetBlockTimeFromEnv() time.Duration {
+	target, err := time.ParseDuration(os.Getenv(TargetBlockTimeEnvVar))
+	if err != nil || target <= 0 {
+		return DefaultTargetBlockTime
+	}
+
+	return target
+}
+
+// WithRetarget enables retargeting every interval blocks towards target per
+// block, and returns p. An interval of 0 disables it.
+func (p *ProofOfWork) WithRetarget(interval int, target time.Duration) *ProofOfWork {
+	p.RetargetInterval = interval
+	p.TargetBlockTime = target
+	return p
+}
+
+// ExpectedDifficulty returns the difficulty the successor of the last block of
+// history must carry. history is ordered oldest to newest. It depends on
+// nothing but its arguments.
+func (p *ProofOfWork) ExpectedDifficulty(history []*domain.Block) int {
+	n := p.RetargetInterval
+	if n == 0 || len(history) == 0 || history[len(history)-1].Index == 0 {
+		return p.Difficulty
+	}
+
+	parent := history[len(history)-1]
+	// The window needs the block n places before the parent, so it only
+	// exists once the history is longer than n.
+	if (parent.Index+1)%n != 0 || len(history) <= n {
+		return parent.Difficulty
+	}
+
+	actual := parent.Timestamp.Sub(history[len(history)-1-n].Timestamp)
+	target := time.Duration(n) * p.TargetBlockTime
+
+	if 2*actual < target && parent.Difficulty < MaxDifficulty {
+		return parent.Difficulty + 1
+	}
+
+	if actual > 2*target && parent.Difficulty > MinDifficulty {
+		return parent.Difficulty - 1
+	}
+
+	return parent.Difficulty
+}
+
+// Seal mines b at the difficulty ExpectedDifficulty names for history.
+func (p *ProofOfWork) Seal(ctx context.Context, history []*domain.Block, b *domain.Block) error {
+	return MineWithContext(ctx, b, p.ExpectedDifficulty(history))
+}
+
+// Verify checks the block against its predecessor, the last block of history,
+// then that it carries the expected difficulty and solves it.
+func (p *ProofOfWork) Verify(history []*domain.Block, b *domain.Block) error {
+	prev := history[len(history)-1]
 	if prev.Index+1 != b.Index {
 		return consensus.ErrInvalidIndex
 	}
@@ -78,6 +163,10 @@ func (p *ProofOfWork) Verify(prev, b *domain.Block) error {
 
 	if b.Validator != "" || b.Signature != "" {
 		return consensus.ErrInvalidSeal
+	}
+
+	if b.Difficulty != p.ExpectedDifficulty(history) {
+		return consensus.ErrInvalidDifficulty
 	}
 
 	if !solvesDifficulty(b.Hash, b.Difficulty) {

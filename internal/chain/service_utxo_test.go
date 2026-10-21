@@ -380,9 +380,9 @@ var _ = Describe("Service UTXO rules", func() {
 			failing := &failingUTXOSet{UTXOSet: memory.NewUTXOSet()}
 			memRepo := memory.New()
 			var genCalls atomic.Int32
-			s, ff := funded(memRepo, eng, WithUTXOSet(failing), WithGenerator(func(ctx context.Context, c consensus.Consensus, prev *domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+			s, ff := funded(memRepo, eng, WithUTXOSet(failing), WithGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 				genCalls.Add(1)
-				return GenerateBlockWithContext(ctx, c, prev, txs)
+				return GenerateBlockWithContext(ctx, c, history, txs)
 			}))
 			failing.applyErr = boom
 

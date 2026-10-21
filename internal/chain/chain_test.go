@@ -37,7 +37,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 		})
 
 		It("should generate new block successfully", func() {
-			newBlock = GenerateBlock(pow, oldBlock, sampleTxs)
+			newBlock = GenerateBlock(pow, []*domain.Block{oldBlock}, sampleTxs)
 			Expect(newBlock).NotTo(BeNil())
 		})
 
@@ -52,12 +52,12 @@ var _ = Describe("Blockchain", Ordered, func() {
 		It("Should be mined with the configured difficulty", func() {
 			Expect(newBlock.Difficulty).To(Equal(pow.Difficulty))
 			Expect(newBlock.Hash).To(Equal(newBlock.CalculateHash()))
-			Expect(pow.Verify(oldBlock, newBlock)).To(Succeed())
+			Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(Succeed())
 		})
 
 		It("should return nil when generation fails due to size limit", func() {
 			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "50")
-			result := GenerateBlock(pow, oldBlock, sampleTxs)
+			result := GenerateBlock(pow, []*domain.Block{oldBlock}, sampleTxs)
 			Expect(result).To(BeNil())
 		})
 
@@ -67,7 +67,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 					return errors.New("seal error")
 				},
 			}
-			result := GenerateBlock(failingConsensus, oldBlock, sampleTxs)
+			result := GenerateBlock(failingConsensus, []*domain.Block{oldBlock}, sampleTxs)
 			Expect(result).To(BeNil())
 		})
 	})
@@ -89,21 +89,21 @@ var _ = Describe("Blockchain", Ordered, func() {
 		})
 
 		It("should generate new block successfully with valid context", func() {
-			newBlock, err := GenerateBlockWithContext(context.Background(), pow, oldBlock, sampleTxs)
+			newBlock, err := GenerateBlockWithContext(context.Background(), pow, []*domain.Block{oldBlock}, sampleTxs)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(newBlock).NotTo(BeNil())
 			Expect(newBlock.Index).To(Equal(oldBlock.Index + 1))
 			Expect(newBlock.Transactions).To(Equal(sampleTxs))
 			Expect(newBlock.PrevHash).To(Equal(oldBlock.Hash))
 			Expect(newBlock.Hash).NotTo(BeEmpty())
-			Expect(pow.Verify(oldBlock, newBlock)).To(Succeed())
+			Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(Succeed())
 		})
 
 		It("should return an error when context is canceled", func() {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 
-			newBlock, err := GenerateBlockWithContext(ctx, pow, oldBlock, sampleTxs)
+			newBlock, err := GenerateBlockWithContext(ctx, pow, []*domain.Block{oldBlock}, sampleTxs)
 			Expect(err).To(MatchError(context.Canceled))
 			Expect(newBlock).To(BeNil())
 		})
@@ -114,7 +114,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 					return errors.New("seal error")
 				},
 			}
-			newBlock, err := GenerateBlockWithContext(context.Background(), failingConsensus, oldBlock, sampleTxs)
+			newBlock, err := GenerateBlockWithContext(context.Background(), failingConsensus, []*domain.Block{oldBlock}, sampleTxs)
 			Expect(err).To(MatchError("seal error"))
 			Expect(newBlock).To(BeNil())
 		})
@@ -133,7 +133,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 			)
 			go func() {
 				defer close(done)
-				block, err = GenerateBlockWithContext(context.Background(), slowPoW, parent, []domain.Transaction{{Outputs: []domain.TxOut{{Amount: 1, Address: "b"}}}})
+				block, err = GenerateBlockWithContext(context.Background(), slowPoW, []*domain.Block{parent}, []domain.Transaction{{Outputs: []domain.TxOut{{Amount: 1, Address: "b"}}}})
 			}()
 			Eventually(done, time.Second).Should(BeClosed())
 
@@ -178,7 +178,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 					return nil
 				}
 
-				block, err := GenerateBlockWithContext(context.Background(), spyConsensus, parent, txs)
+				block, err := GenerateBlockWithContext(context.Background(), spyConsensus, []*domain.Block{parent}, txs)
 				if miningAttempted {
 					// Check if timestamp in GenerateBlockWithContext had trailing zero (shorter JSON length)
 					if timestampJSONLen(capturedBlock.Timestamp) < fullTimestampLen {
@@ -206,7 +206,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 				// 2) Exact size: must accept candidate and invoke consensus seal
 				GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(exactSize))
 				miningAttempted = false
-				block, err = GenerateBlockWithContext(context.Background(), spyConsensus, parent, txs)
+				block, err = GenerateBlockWithContext(context.Background(), spyConsensus, []*domain.Block{parent}, txs)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(block).NotTo(BeNil())
 				Expect(miningAttempted).To(BeTrue())
@@ -220,19 +220,19 @@ var _ = Describe("Blockchain", Ordered, func() {
 
 type mockConsensus struct {
 	sealFn   func(ctx context.Context, b *domain.Block) error
-	verifyFn func(parent, block *domain.Block) error
+	verifyFn func(history []*domain.Block, block *domain.Block) error
 }
 
-func (m *mockConsensus) Seal(ctx context.Context, b *domain.Block) error {
+func (m *mockConsensus) Seal(ctx context.Context, history []*domain.Block, b *domain.Block) error {
 	if m.sealFn != nil {
 		return m.sealFn(ctx, b)
 	}
 	return nil
 }
 
-func (m *mockConsensus) Verify(parent, block *domain.Block) error {
+func (m *mockConsensus) Verify(history []*domain.Block, block *domain.Block) error {
 	if m.verifyFn != nil {
-		return m.verifyFn(parent, block)
+		return m.verifyFn(history, block)
 	}
 	return nil
 }

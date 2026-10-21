@@ -12,6 +12,7 @@ var (
 	ErrInvalidIndex       = errors.New("consensus: invalid block index")
 	ErrInvalidPrevHash    = errors.New("consensus: previous hash mismatch")
 	ErrInvalidHash        = errors.New("consensus: block hash mismatch")
+	ErrInvalidDifficulty  = errors.New("consensus: unexpected difficulty")
 	ErrInvalidProofOfWork = errors.New("consensus: invalid proof of work")
 	ErrInvalidSeal        = errors.New("consensus: invalid seal")
 	ErrUnknownValidator   = errors.New("consensus: unknown validator")
@@ -20,8 +21,10 @@ var (
 
 // Consensus decides how blocks are produced and accepted.
 type Consensus interface {
-	// Seal fills the consensus fields of b.
-	Seal(ctx context.Context, b *domain.Block) error
-	// Verify returns nil when b is a valid successor of prev.
-	Verify(prev, b *domain.Block) error
+	// Seal fills the consensus fields of b, a candidate successor of the last
+	// block of history. history is ordered oldest to newest.
+	Seal(ctx context.Context, history []*domain.Block, b *domain.Block) error
+	// Verify returns nil when b is a valid successor of the last block of
+	// history. history is ordered oldest to newest and must not be empty.
+	Verify(history []*domain.Block, b *domain.Block) error
 }
