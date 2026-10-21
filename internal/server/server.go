@@ -156,16 +156,11 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 func (s *Server) handleGetBlockchain(w http.ResponseWriter, r *http.Request) {
 	blocks, err := s.chain.Blocks()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		respondWithJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
 		return
 	}
 
-	bytes, err := json.MarshalIndent(blocksResponse{Blocks: blocks}, "", "  ")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	_, _ = w.Write(bytes) // headers are sent; a failed write to the client cannot be reported
+	respondWithJSON(w, http.StatusOK, blocksResponse{Blocks: blocks})
 }
 
 // queryInt reads a non-negative integer query parameter, or def when absent.
