@@ -167,6 +167,33 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
+  /tx/{id}/proof:
+    get:
+      operationId: getTxProof
+      summary: Get the Merkle inclusion proof of a transaction
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Transaction ID (64 lowercase hex characters).
+          schema:
+            type: string
+            pattern: '^[0-9a-f]{64}$'
+      responses:
+        "200":
+          description: The sibling path from the transaction leaf to the Merkle root of its block.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/proofResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /balance/{addr}:
     get:
       operationId: getBalance
@@ -515,6 +542,35 @@ components:
           type: string
         height:
           type: integer
+    proofStep:
+      type: object
+      required: [hash, side]
+      properties:
+        hash:
+          type: string
+        side:
+          type: string
+          enum: [left, right]
+    proofResponse:
+      type: object
+      required: [tx_id, block_index, block_hash, merkle_root, leaf_index, leaf_hash, proof]
+      properties:
+        tx_id:
+          type: string
+        block_index:
+          type: integer
+        block_hash:
+          type: string
+        merkle_root:
+          type: string
+        leaf_index:
+          type: integer
+        leaf_hash:
+          type: string
+        proof:
+          type: array
+          items:
+            $ref: "#/components/schemas/proofStep"
     utxo:
       type: object
       required: [txid, index, amount]

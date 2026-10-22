@@ -177,6 +177,15 @@ func contractCases() []contractCase {
 		{method: "GET", route: "/tx/{id}", status: 429, serve: limited("/tx/" + zeroHash), warmup: 1},
 		{method: "GET", route: "/tx/{id}", status: 500, serve: brokenAt("/tx/" + zeroHash)},
 
+		{method: "GET", route: "/tx/{id}/proof", status: 200, serve: func() (http.Handler, string, string) {
+			h, funds := real(Config{})
+			return h, "/tx/" + funds.txid + "/proof", ""
+		}},
+		{method: "GET", route: "/tx/{id}/proof", status: 400, specInvalid: true, serve: plain("/tx/xyz/proof")},
+		{method: "GET", route: "/tx/{id}/proof", status: 404, serve: plain("/tx/" + zeroHash + "/proof")},
+		{method: "GET", route: "/tx/{id}/proof", status: 429, serve: limited("/tx/" + zeroHash + "/proof"), warmup: 1},
+		{method: "GET", route: "/tx/{id}/proof", status: 500, serve: brokenAt("/tx/" + zeroHash + "/proof")},
+
 		{method: "GET", route: "/balance/{addr}", status: 200, serve: func() (http.Handler, string, string) {
 			h, funds := real(Config{})
 			return h, "/balance/" + funds.owner.Address(), ""
@@ -274,7 +283,7 @@ var _ = Describe("OpenAPI contract", func() {
 
 		It("declares exactly the routes registered in Server.Handler()", func() {
 			routes := []string{
-				"GET /", "POST /", "GET /blocks", "GET /block/{ref}", "GET /tx/{id}",
+				"GET /", "POST /", "GET /blocks", "GET /block/{ref}", "GET /tx/{id}", "GET /tx/{id}/proof",
 				"GET /balance/{addr}", "GET /health", "GET /metrics", "POST /legacy/bpm",
 				"POST /tx", "POST /mine", "GET /mempool",
 			}
@@ -417,6 +426,20 @@ var _ = Describe("OpenAPI contract", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(missing.JSON404).NotTo(BeNil())
 			Expect(missing.JSON404.Code).To(HaveValue(Equal("block_not_found")))
+		})
+
+		It("decodes GET /tx/{id}/proof into JSON200 and JSON404", func() {
+			resp, err := api.GetTxProofWithResponse(ctx, funds.txid)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(resp.StatusCode()).To(Equal(http.StatusOK), string(resp.Body))
+			Expect(resp.JSON200).NotTo(BeNil())
+			Expect(resp.JSON200.TxId).To(Equal(funds.txid))
+			Expect(resp.JSON200.MerkleRoot).NotTo(BeEmpty())
+
+			missing, err := api.GetTxProofWithResponse(ctx, zeroHash)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(missing.JSON404).NotTo(BeNil())
+			Expect(missing.JSON404.Code).To(HaveValue(Equal("tx_not_found")))
 		})
 
 		It("posts transactions with POST / and decodes JSON201 and JSON422", func() {
