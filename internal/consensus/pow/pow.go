@@ -262,13 +262,8 @@ func MineParallel(ctx context.Context, b *domain.Block, difficulty, workers int)
 		ctx = context.Background()
 	}
 
-	if difficulty < 0 {
-		difficulty = 0
-	}
-
-	if workers < 1 {
-		workers = 1
-	}
+	difficulty = max(difficulty, 0)
+	workers = max(workers, 1)
 
 	searchCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
