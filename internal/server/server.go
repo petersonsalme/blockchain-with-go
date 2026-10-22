@@ -61,6 +61,8 @@ type Server struct {
 	miningTimeout time.Duration
 	limiter       *rateLimiter
 	logger        *slog.Logger
+	now           func() time.Time
+	metrics       *metrics
 }
 
 // ErrNilService is returned by NewServer when svc is nil.
@@ -83,7 +85,11 @@ func NewServer(svc Chain, cfg Config) (*Server, error) {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
-	return &Server{chain: svc, miningTimeout: timeout, limiter: limiter, logger: logger}, nil
+	now := cfg.Now
+	if now == nil {
+		now = time.Now
+	}
+	return &Server{chain: svc, miningTimeout: timeout, limiter: limiter, logger: logger, now: now, metrics: newMetrics()}, nil
 }
 
 // ParseMiningTimeout reads a MINING_TIMEOUT value: a Go duration or integer seconds.
@@ -119,6 +125,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /tx/{id}/proof", s.handleGetTxProof)
 	mux.HandleFunc("GET /balance/{addr}", s.handleGetBalance)
 	mux.HandleFunc("GET /health", s.handleHealth)
+	mux.HandleFunc("GET /metrics", s.handleMetrics)
 	mux.HandleFunc("POST /legacy/bpm", s.handleLegacyBPM)
 	mux.Handle("/{$}", methodNotAllowed("GET, HEAD, POST"))
 	mux.Handle("/blocks", methodNotAllowed("GET, HEAD"))
@@ -127,12 +134,13 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/tx/{id}/proof", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/balance/{addr}", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/health", methodNotAllowed("GET, HEAD"))
+	mux.Handle("/metrics", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/legacy/bpm", methodNotAllowed("POST"))
 	var h http.Handler = mux
 	if s.limiter != nil {
 		h = s.limiter.middleware(h)
 	}
-	return logRequests(s.logger, h)
+	return logRequests(s.logger, s.metrics.middleware(h))
 }
 
 // methodNotAllowed answers 405 with an empty body and the Allow header set to allow.
@@ -393,11 +401,13 @@ func (s *Server) mineAndRespond(w http.ResponseWriter, r *http.Request, txs []do
 	ctx, cancel := context.WithTimeout(r.Context(), s.miningTimeout)
 	defer cancel()
 
+	start := s.now()
 	newBlock, err := s.chain.Mine(ctx, txs)
 	if err != nil {
 		respondWithMineError(w, err)
 		return
 	}
+	s.metrics.observeMining(s.now().Sub(start))
 
 	respondWithJSON(w, http.StatusCreated, newBlock)
 }
