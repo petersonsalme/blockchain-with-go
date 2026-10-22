@@ -28,6 +28,9 @@ var ErrNilConsensus = errors.New("chain: nil consensus")
 // the repository and the UTXO set diverged. The service stops accepting writes.
 var ErrStateDiverged = errors.New("chain: state diverged")
 
+// ErrTxNotFound is returned by TxProof when no block holds the transaction.
+var ErrTxNotFound = errors.New("chain: transaction not found")
+
 // Generator builds the candidate successor of the last block of history,
 // ordered oldest to newest, holding txs. The returned
 // block must contain exactly txs, in the same order.
@@ -199,6 +202,47 @@ func (s *Service) Transaction(id string) (*domain.Transaction, string, int, erro
 		}
 	}
 	return nil, "", 0, storage.ErrNotFound
+}
+
+// InclusionProof proves that a transaction belongs to the block at BlockIndex:
+// folding Steps over LeafHash yields MerkleRoot, the root in that block's header.
+type InclusionProof struct {
+	BlockIndex int
+	BlockHash  string
+	MerkleRoot string
+	LeafIndex  int
+	LeafHash   string
+	Steps      []domain.MerkleStep
+}
+
+// TxProof returns the inclusion proof of the first transaction with the given
+// ID, scanning from genesis, or ErrTxNotFound. It reads a snapshot and never
+// waits for Mine.
+func (s *Service) TxProof(id string) (*InclusionProof, error) {
+	blocks, err := s.repo.All()
+	if err != nil {
+		return nil, err
+	}
+	for _, b := range blocks {
+		for i := range b.Transactions {
+			if b.Transactions[i].ID != id {
+				continue
+			}
+			proof, err := domain.BuildMerkleProof(b.Transactions, i)
+			if err != nil {
+				return nil, err
+			}
+			return &InclusionProof{
+				BlockIndex: b.Index,
+				BlockHash:  b.Hash,
+				MerkleRoot: b.MerkleRoot,
+				LeafIndex:  i,
+				LeafHash:   domain.MerkleLeafHash(&b.Transactions[i]),
+				Steps:      proof.Steps,
+			}, nil
+		}
+	}
+	return nil, ErrTxNotFound
 }
 
 // Balance returns the unspent outputs owned by addr, sorted by (TxID, Index),

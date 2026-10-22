@@ -127,6 +127,9 @@ func (brokenChain) Blocks() ([]*domain.Block, error) { return nil, errors.New("r
 func (brokenChain) Transaction(string) (*domain.Transaction, string, int, error) {
 	return nil, "", 0, errors.New("read failed")
 }
+func (brokenChain) TxProof(string) (*chain.InclusionProof, error) {
+	return nil, errors.New("read failed")
+}
 func (brokenChain) Balance(string) (uint64, []chain.UTXO) {
 	return 0, []chain.UTXO{}
 }
