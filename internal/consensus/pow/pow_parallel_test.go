@@ -182,7 +182,7 @@ func sealWorkerGoroutines(t *testing.T, p *powpkg.ProofOfWork) int {
 	n := runtime.NumGoroutine() - base - 1
 
 	cancel()
-	<-done
+	_ = <-done
 
 	return n
 }
