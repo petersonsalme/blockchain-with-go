@@ -1,15 +1,19 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -39,7 +43,7 @@ func TestRunServesAndShutsDownGracefully(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- run(ctx) }()
+	go func() { done <- run(ctx, discardLogger()) }()
 
 	url := "http://127.0.0.1:" + port + "/"
 	var resp *http.Response
@@ -75,25 +79,76 @@ func TestRunFailsOnInvalidPort(t *testing.T) {
 	t.Setenv("PORT", "not-a-port")
 	t.Setenv("POW_DIFFICULTY", "1")
 
-	if err := run(context.Background()); err == nil {
+	if err := run(context.Background(), discardLogger()); err == nil {
 		t.Fatal("run succeeded with an invalid PORT, want error")
 	}
 }
 
+func discardLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
+
 func TestFatalIf(t *testing.T) {
-	var got []any
-	fatal := func(v ...any) { got = v }
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+	code := -1
+	exit := func(c int) { code = c }
 
-	fatalIf(nil, fatal)
-	if got != nil {
-		t.Fatalf("fatal called for nil error: %v", got)
+	fatalIf(nil, logger, exit)
+	if code != -1 || buf.Len() != 0 {
+		t.Fatalf("nil error: exit code %d, log %q; want no exit and no log", code, buf.String())
 	}
 
-	boom := errors.New("boom")
-	fatalIf(boom, fatal)
-	if len(got) != 1 || got[0] != boom {
-		t.Fatalf("fatal called with %v, want [boom]", got)
+	fatalIf(errors.New("boom"), logger, exit)
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
 	}
+	var rec map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &rec); err != nil {
+		t.Fatalf("log is not JSON: %v: %q", err, buf.String())
+	}
+	if rec["level"] != "ERROR" || rec["error"] != "boom" {
+		t.Fatalf("log = %v, want level ERROR and error boom", rec)
+	}
+}
+
+func TestRunLogsListeningAddress(t *testing.T) {
+	port := freePort(t)
+	t.Setenv("PORT", port)
+	t.Setenv("POW_DIFFICULTY", "1")
+
+	var buf syncBuffer
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- run(ctx, slog.New(slog.NewJSONHandler(&buf, nil))) }()
+
+	want := `"addr":":` + port + `"`
+	for i := 0; i < 100 && !strings.Contains(buf.String(), want); i++ {
+		time.Sleep(50 * time.Millisecond)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("run returned %v, want nil", err)
+	}
+	if got := buf.String(); !strings.Contains(got, `"msg":"listening"`) || !strings.Contains(got, want) {
+		t.Fatalf("log = %q, want a listening record with %s", got, want)
+	}
+}
+
+// syncBuffer is a bytes.Buffer safe for the run goroutine and the test to share.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 func TestShutdownContextDeadline(t *testing.T) {
@@ -112,7 +167,7 @@ func TestShutdownContextDeadline(t *testing.T) {
 func TestBootstrapFailsWithoutDotEnv(t *testing.T) {
 	t.Chdir(t.TempDir())
 
-	if err := bootstrap(context.Background()); err == nil {
+	if err := bootstrap(context.Background(), discardLogger()); err == nil {
 		t.Fatal("bootstrap succeeded without a .env file, want error")
 	}
 }
@@ -132,7 +187,7 @@ func TestBootstrapLoadsDotEnvAndRuns(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- bootstrap(ctx) }()
+	go func() { done <- bootstrap(ctx, discardLogger()) }()
 
 	url := "http://127.0.0.1:" + port + "/"
 	up := false
@@ -223,7 +278,7 @@ func TestRunFailsOnInvalidGenesisAllocations(t *testing.T) {
 	t.Setenv("POW_DIFFICULTY", "1")
 	t.Setenv(genesisAllocationsEnvVar, "bad:5")
 
-	err := run(context.Background())
+	err := run(context.Background(), discardLogger())
 	if err == nil || !strings.Contains(err.Error(), "bad:5") {
 		t.Fatalf("run = %v, want error citing bad:5", err)
 	}
@@ -335,7 +390,7 @@ func TestRunServesAndShutsDownGracefullyWithDataDir(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- run(ctx) }()
+	go func() { done <- run(ctx, discardLogger()) }()
 
 	url := "http://127.0.0.1:" + port + "/"
 	var resp *http.Response
@@ -379,7 +434,7 @@ func TestRunReleasesBoltLockWhenBootstrapFails(t *testing.T) {
 	t.Setenv("DATA_DIR", dataDir)
 	t.Setenv(genesisAllocationsEnvVar, "bad:5")
 
-	err := run(context.Background())
+	err := run(context.Background(), discardLogger())
 	if err == nil {
 		t.Fatal("run succeeded, want error")
 	}

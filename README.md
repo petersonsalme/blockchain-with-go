@@ -196,6 +196,18 @@ $ go clean -testcache
 $ go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --timeout-coefficient 20 ./internal/<pacote>
 ```
 
+### Logs and shutdown
+
+The node writes one structured JSON log line (`log/slog`) to stderr for every HTTP request, including `429` answers from the rate limiter:
+
+```json
+{"time":"2026-10-21T12:00:00.000000000-03:00","level":"INFO","msg":"http request","method":"GET","route":"GET /block/{ref}","status":404,"duration_ms":0}
+```
+
+`route` is the registered `ServeMux` pattern, never the raw path; requests that match no pattern and rate-limited requests are logged as `unmatched`. `status` is the code the client received.
+
+On `SIGINT`/`SIGTERM` the node cancels the context of every request: a block being mined answers `408` with `{"error":"mining cancelled"}` and no block is appended. The other in-flight requests are drained for up to 10 seconds before the server closes. A fatal error is logged at `ERROR` level and the process exits with code 1.
+
 ### Fuzzing
 
 Native Go fuzz targets (`testing.F`) check that `POST /` decoding, block JSON/hash and the block rules never panic and keep their properties. Seeds live in `testdata/fuzz/<FuzzName>/` of each package and run with a plain `go test ./...`. To fuzz for 60 seconds each:

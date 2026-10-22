@@ -7,7 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -32,24 +32,26 @@ import (
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	fatalIf(bootstrap(ctx), log.Fatal)
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	err := bootstrap(ctx, logger)
+	stop() // os.Exit skips deferred calls
+	fatalIf(err, logger, os.Exit)
 }
 
-// fatalIf calls fatal with err unless err is nil.
-func fatalIf(err error, fatal func(v ...any)) {
+// fatalIf logs err at error level and calls exit(1) unless err is nil.
+func fatalIf(err error, logger *slog.Logger, exit func(code int)) {
 	if err != nil {
-		fatal(err)
+		logger.Error("node stopped", "error", err)
+		exit(1)
 	}
 }
 
 // bootstrap loads .env and runs the node until ctx is done.
-func bootstrap(ctx context.Context) error {
+func bootstrap(ctx context.Context, logger *slog.Logger) error {
 	if err := godotenv.Load(); err != nil {
 		return err
 	}
-	return run(ctx)
+	return run(ctx, logger)
 }
 
 // shutdownContext bounds the graceful shutdown to 10 seconds.
@@ -185,7 +187,7 @@ func openRepository(dataDir string) (storage.BlockRepository, func() error, erro
 }
 
 // run wires repository, consensus, service and server, then serves until ctx is done.
-func run(ctx context.Context) error {
+func run(ctx context.Context, logger *slog.Logger) error {
 	repo, closeRepo, err := openRepository(os.Getenv(dataDirEnvVar))
 	if err != nil {
 		return err
@@ -205,17 +207,18 @@ func run(ctx context.Context) error {
 	srv, err := server.NewServer(svc, server.Config{
 		MiningTimeout: server.ParseMiningTimeout(os.Getenv(server.MiningTimeoutEnvVar)),
 		RateLimit:     server.ParseRateLimit(os.Getenv(server.RateLimitEnvVar)),
+		Logger:        logger,
 	})
 	if err != nil {
 		return err
 	}
 
 	addr := ":" + os.Getenv("PORT")
-	httpSrv := srv.HTTPServer(addr)
+	httpSrv := srv.HTTPServer(ctx, addr)
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Println("Listening on ", addr)
+		logger.Info("listening", "addr", addr)
 		errCh <- httpSrv.ListenAndServe()
 	}()
 
