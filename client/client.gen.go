@@ -276,6 +276,13 @@ type ClientInterface interface {
 	// Deprecated: this operation has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	LegacyBpm(ctx context.Context, body LegacyBpmJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetMetrics Expose Prometheus metrics
+	//
+	// Prometheus text exposition format 0.0.4 (ADR-0010): `http_requests_total{method,route,code}`, `blockchain_blocks` (omitted when the tip cannot be read) and `blockchain_mining_duration_seconds`.
+	//
+	// Corresponds with GET /metrics (the `GetMetrics` operationId).
+	GetMetrics(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetTx Get one transaction and the block that contains it
 	//
 	// Corresponds with GET /tx/{id} (the `GetTx` operationId).
@@ -421,6 +428,23 @@ func (c *Client) LegacyBpmWithBody(ctx context.Context, contentType string, body
 // Deprecated: this operation has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 func (c *Client) LegacyBpm(ctx context.Context, body LegacyBpmJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewLegacyBpmRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetMetrics Expose Prometheus metrics
+//
+// Prometheus text exposition format 0.0.4 (ADR-0010): `http_requests_total{method,route,code}`, `blockchain_blocks` (omitted when the tip cannot be read) and `blockchain_mining_duration_seconds`.
+//
+// Corresponds with GET /metrics (the `GetMetrics` operationId).
+func (c *Client) GetMetrics(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetMetricsRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -714,6 +738,33 @@ func NewLegacyBpmRequestWithBody(server string, contentType string, body io.Read
 	return req, nil
 }
 
+// NewGetMetricsRequest constructs an http.Request for the GetMetrics method
+func NewGetMetricsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/metrics")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetTxRequest constructs an http.Request for the GetTx method
 func NewGetTxRequest(server string, id string) (*http.Request, error) {
 	var err error
@@ -862,6 +913,15 @@ type ClientWithResponsesInterface interface {
 	//
 	// Deprecated: this operation has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	LegacyBpmWithResponse(ctx context.Context, body LegacyBpmJSONRequestBody, reqEditors ...RequestEditorFn) (*LegacyBpmResponse, error)
+
+	// GetMetricsWithResponse Expose Prometheus metrics
+	//
+	// Prometheus text exposition format 0.0.4 (ADR-0010): `http_requests_total{method,route,code}`, `blockchain_blocks` (omitted when the tip cannot be read) and `blockchain_mining_duration_seconds`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /metrics (the `GetMetrics` operationId).
+	GetMetricsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetMetricsResponse, error)
 
 	// GetTxWithResponse Get one transaction and the block that contains it
 	//
@@ -1368,6 +1428,54 @@ func (r LegacyBpmResponse) ContentType() string {
 	return ""
 }
 
+// GetMetricsResponse429Headers the declared response headers of an HTTP 429 response for GetMetrics
+type GetMetricsResponse429Headers struct {
+	RetryAfter int
+}
+
+type GetMetricsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *RateLimited
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *GetMetricsResponse429Headers
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r GetMetricsResponse) GetJSON429() *RateLimited {
+	return r.JSON429
+}
+
+// GetBody returns the raw response body bytes
+func (r GetMetricsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetMetricsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetMetricsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetMetricsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // GetTxResponse429Headers the declared response headers of an HTTP 429 response for GetTx
 type GetTxResponse429Headers struct {
 	RetryAfter int
@@ -1566,6 +1674,21 @@ func (c *ClientWithResponses) LegacyBpmWithResponse(ctx context.Context, body Le
 		return nil, err
 	}
 	return ParseLegacyBpmResponse(rsp)
+}
+
+// GetMetricsWithResponse Expose Prometheus metrics
+//
+// Prometheus text exposition format 0.0.4 (ADR-0010): `http_requests_total{method,route,code}`, `blockchain_blocks` (omitted when the tip cannot be read) and `blockchain_mining_duration_seconds`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /metrics (the `GetMetrics` operationId).
+func (c *ClientWithResponses) GetMetricsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetMetricsResponse, error) {
+	rsp, err := c.GetMetrics(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetMetricsResponse(rsp)
 }
 
 // GetTxWithResponse Get one transaction and the block that contains it
@@ -2005,6 +2128,45 @@ func ParseLegacyBpmResponse(rsp *http.Response) (*LegacyBpmResponse, error) {
 		response.Headers410 = &headers
 	case rsp.StatusCode == 429:
 		var headers LegacyBpmResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseGetMetricsResponse parses an HTTP response from a GetMetricsWithResponse call
+func ParseGetMetricsResponse(rsp *http.Response) (*GetMetricsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetMetricsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest RateLimited
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers GetMetricsResponse429Headers
 		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
 			var value int
 			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {

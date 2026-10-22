@@ -32,6 +32,14 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 // Unwrap lets http.ResponseController reach the underlying writer.
 func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
 
+// routeOf is the ServeMux pattern that served r, or unmatchedRoute.
+func routeOf(r *http.Request) string {
+	if r.Pattern == "" {
+		return unmatchedRoute
+	}
+	return r.Pattern
+}
+
 // logRequests emits one INFO record per request served by next.
 //
 // route is the ServeMux pattern, never the raw path, so its cardinality is bounded.
@@ -41,10 +49,7 @@ func logRequests(logger *slog.Logger, next http.Handler) http.Handler {
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
 
-		route := r.Pattern
-		if route == "" {
-			route = unmatchedRoute
-		}
+		route := routeOf(r)
 		logger.LogAttrs(r.Context(), slog.LevelInfo, "http request",
 			slog.String("method", r.Method),
 			slog.String("route", route),

@@ -109,6 +109,7 @@ Design decisions live in [`docs/adr/`](docs/adr/0009-merkle-tree.md):
 | [0007](docs/adr/0007-openapi-contract.md) | OpenAPI spec as the HTTP contract, with a generated Go client |
 | [0008](docs/adr/0008-difficulty-retargeting.md) | Difficulty retargeting; the `Consensus` port receives the block history |
 | [0009](docs/adr/0009-merkle-tree.md) | Transaction Merkle tree in the block header (RFC 6962 odd-node rule) |
+| [0010](docs/adr/0010-prometheus-metrics.md) | Prometheus metrics written by hand, no client library |
 
 ## Configuration & Environment Variables
 
@@ -321,6 +322,22 @@ Outputs are sorted by `(TxID, Index)`. If `wallet.ValidateAddress` fails, return
 `200` `{"status": "ok", "height": 12, "tip": "<hash>"}` with the current tip; `503` `{"error": "...", "code": "unhealthy"}` when the repository cannot be read.
 
 None of these reads waits for a `POST /` that is mining.
+
+### GET /metrics
+
+Prometheus text exposition (format 0.0.4, `Content-Type: text/plain; version=0.0.4; charset=utf-8`), written by hand without a client library ([ADR-0010](docs/adr/0010-prometheus-metrics.md)). Other methods answer `405` with `Allow: GET, HEAD`; the rate limiter applies as on every other route.
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `http_requests_total{method,route,code}` | counter | Requests answered. `route` is the `ServeMux` pattern (same value as the log), `unmatched` otherwise; methods outside the standard set are folded into `OTHER`, so the series count stays bounded. |
+| `blockchain_blocks` | gauge | `Tip().Index + 1`, read on each scrape. Omitted if the tip cannot be read. |
+| `blockchain_mining_duration_seconds` | summary | `_sum` and `_count` of the `Mine` calls that returned a block (no quantiles). |
+
+```
+curl -s localhost:8080/metrics
+```
+
+Counters live inside each `Server` and reset when the node restarts; a scrape is counted after it is answered.
 
 ### POST /
 Create and mine a new block with a list of **signed** transactions. The node never changes a signed field: `Timestamp` is required (`400 missing_timestamp`), and `ID` is filled in only when empty (a wrong `ID` is `400`).

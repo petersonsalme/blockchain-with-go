@@ -208,6 +208,23 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/errorResponse"
+  /metrics:
+    get:
+      operationId: getMetrics
+      summary: Expose Prometheus metrics
+      description: >-
+        Prometheus text exposition format 0.0.4 (ADR-0010):
+        `http_requests_total{method,route,code}`, `blockchain_blocks` (omitted when the
+        tip cannot be read) and `blockchain_mining_duration_seconds`.
+      responses:
+        "200":
+          description: The metrics in the Prometheus text format.
+          content:
+            text/plain; version=0.0.4; charset=utf-8:
+              schema:
+                type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /legacy/bpm:
     post:
       operationId: legacyBpm

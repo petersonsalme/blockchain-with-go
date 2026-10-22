@@ -180,6 +180,9 @@ func contractCases() []contractCase {
 		{method: "GET", route: "/health", status: 429, serve: limited("/health"), warmup: 1},
 		{method: "GET", route: "/health", status: 503, serve: brokenAt("/health")},
 
+		{method: "GET", route: "/metrics", status: 200, serve: plain("/metrics")},
+		{method: "GET", route: "/metrics", status: 429, serve: limited("/metrics"), warmup: 1},
+
 		{method: "POST", route: "/legacy/bpm", status: 410, serve: func() (http.Handler, string, string) {
 			h, _ := real(Config{})
 			return h, "/legacy/bpm", `{"BPM":70}`
@@ -224,7 +227,7 @@ var _ = Describe("OpenAPI contract", func() {
 		It("declares exactly the routes registered in Server.Handler()", func() {
 			routes := []string{
 				"GET /", "POST /", "GET /blocks", "GET /block/{ref}", "GET /tx/{id}",
-				"GET /balance/{addr}", "GET /health", "POST /legacy/bpm",
+				"GET /balance/{addr}", "GET /health", "GET /metrics", "POST /legacy/bpm",
 			}
 			var declared []string
 			for path, item := range doc.Paths.Map() {
@@ -288,7 +291,11 @@ var _ = Describe("OpenAPI contract", func() {
 				defer func() { _ = result.Body.Close() }()
 				respBody, err := io.ReadAll(result.Body)
 				Expect(err).NotTo(HaveOccurred())
-				Expect(result.Header.Get("Content-Type")).To(Equal("application/json"))
+				wantType := "application/json"
+				if c.route == "/metrics" && c.status == 200 {
+					wantType = metricsContentType
+				}
+				Expect(result.Header.Get("Content-Type")).To(Equal(wantType))
 				Expect(openapi3filter.ValidateResponse(context.Background(), &openapi3filter.ResponseValidationInput{
 					RequestValidationInput: input,
 					Status:                 result.StatusCode,
