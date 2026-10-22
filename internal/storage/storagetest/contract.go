@@ -12,6 +12,13 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 )
 
+type rejection int
+
+const (
+	conflict rejection = iota
+	nilBlock
+)
+
 // BlockRepositoryContract registers Ginkgo specs that every storage.BlockRepository
 // implementation must satisfy.
 func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
@@ -292,4 +299,214 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 			wg.Wait()
 		})
 	})
+	Describe("ReplaceFrom", func() {
+		// link builds n blocks from index `from`, chained to prev, with hashes tag0, tag1, ...
+		link := func(tag string, from, n int, prev string) []*domain.Block {
+			out := make([]*domain.Block, 0, n)
+			for i := 0; i < n; i++ {
+				b := &domain.Block{Index: from + i, PrevHash: prev, Hash: fmt.Sprintf("%s%d", tag, from+i)}
+				out = append(out, b)
+				prev = b.Hash
+			}
+			return out
+		}
+		var chain []*domain.Block
+
+		BeforeEach(func() {
+			chain = link("h", 0, 5, "")
+			for _, b := range chain {
+				Expect(repo.Append(b)).To(Succeed())
+			}
+		})
+
+		expectChain := func(want []*domain.Block) {
+			all, err := repo.All()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(all).To(HaveLen(len(want)))
+			for i, w := range want {
+				Expect(all[i].Index).To(Equal(w.Index))
+				Expect(all[i].PrevHash).To(Equal(w.PrevHash))
+				Expect(all[i].Hash).To(Equal(w.Hash))
+
+				byHeight, err := repo.ByHeight(i)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(byHeight.Hash).To(Equal(w.Hash))
+				byHash, err := repo.ByHash(w.Hash)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(byHash.Index).To(Equal(w.Index))
+			}
+			last, err := repo.Last()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(last.Hash).To(Equal(want[len(want)-1].Hash))
+			_, err = repo.ByHeight(len(want))
+			Expect(err).To(MatchError(storage.ErrNotFound))
+			window, err := repo.Range(0, 1000)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(window).To(HaveLen(len(want)))
+			for i, w := range want {
+				Expect(window[i].Hash).To(Equal(w.Hash))
+			}
+		}
+
+		DescribeTable("replaces the tail and reflects chain[:height] ++ blocks everywhere",
+			func(height, n int) {
+				old := append([]*domain.Block(nil), chain...)
+				fork := link("n", height, n, chain[height-1].Hash)
+
+				Expect(repo.ReplaceFrom(height, fork)).To(Succeed())
+
+				expectChain(append(append([]*domain.Block(nil), old[:height]...), fork...))
+				for _, removed := range old[height:] {
+					_, err := repo.ByHash(removed.Hash)
+					Expect(err).To(MatchError(storage.ErrNotFound))
+				}
+			},
+			Entry("everything but the genesis, longer", 1, 6),
+			Entry("everything but the genesis, shorter", 1, 2),
+			Entry("the last block only", 4, 1),
+			Entry("the middle, longer", 2, 5),
+			Entry("the middle, shorter", 3, 1),
+			Entry("height == len extends the chain", 5, 3),
+		)
+
+		It("accepts the same blocks again (a no-op swap)", func() {
+			Expect(repo.ReplaceFrom(2, chain[2:])).To(Succeed())
+			expectChain(chain)
+		})
+
+		It("keeps accepting Append after a swap", func() {
+			fork := link("n", 2, 1, chain[1].Hash)
+			Expect(repo.ReplaceFrom(2, fork)).To(Succeed())
+			next := link("m", 3, 1, fork[0].Hash)
+			Expect(repo.Append(next[0])).To(Succeed())
+			expectChain(append(append(append([]*domain.Block(nil), chain[:2]...), fork...), next...))
+		})
+
+		DescribeTable("rejects and leaves the repository as it was",
+			func(height int, mk func() []*domain.Block, want rejection) {
+				blocks := mk()
+				err := repo.ReplaceFrom(height, blocks)
+				if want == conflict {
+					Expect(err).To(MatchError(storage.ErrConflict))
+				} else {
+					Expect(err).To(HaveOccurred())
+					Expect(err).NotTo(MatchError(storage.ErrConflict))
+				}
+				expectChain(chain)
+				for _, b := range blocks {
+					if b != nil {
+						_, err := repo.ByHash(b.Hash)
+						Expect(err).To(MatchError(storage.ErrNotFound))
+					}
+				}
+			},
+			Entry("height 0 (the genesis never leaves)", 0, func() []*domain.Block { return link("n", 0, 3, "") }, conflict),
+			Entry("negative height", -1, func() []*domain.Block { return link("n", -1, 3, "") }, conflict),
+			Entry("height past len", 6, func() []*domain.Block { return link("n", 6, 2, "h5") }, conflict),
+			Entry("empty blocks", 2, func() []*domain.Block { return []*domain.Block{} }, conflict),
+			Entry("nil blocks", 2, func() []*domain.Block { return nil }, conflict),
+			Entry("first Index below height", 2, func() []*domain.Block { return link("n", 1, 2, "h0") }, conflict),
+			Entry("first Index above height", 2, func() []*domain.Block { return link("n", 3, 2, "h1") }, conflict),
+			Entry("first PrevHash not chain[height-1]", 2, func() []*domain.Block { return link("n", 2, 2, "other") }, conflict),
+			Entry("first PrevHash is the old tip instead of the fork parent", 2, func() []*domain.Block { return link("n", 2, 2, "h4") }, conflict),
+			Entry("broken PrevHash in the middle", 1, func() []*domain.Block {
+				bs := link("n", 1, 4, "h0")
+				bs[2].PrevHash = "other"
+				return bs
+			}, conflict),
+			Entry("broken PrevHash in the last block", 1, func() []*domain.Block {
+				bs := link("n", 1, 3, "h0")
+				bs[2].PrevHash = "other"
+				return bs
+			}, conflict),
+			Entry("skipped Index in the last block", 1, func() []*domain.Block {
+				bs := link("n", 1, 3, "h0")
+				bs[2].Index = 4
+				return bs
+			}, conflict),
+			Entry("repeated Index in the last block", 1, func() []*domain.Block {
+				bs := link("n", 1, 3, "h0")
+				bs[2].Index = 2
+				return bs
+			}, conflict),
+			Entry("nil in the middle", 1, func() []*domain.Block {
+				bs := link("n", 1, 3, "h0")
+				bs[1] = nil
+				return bs
+			}, nilBlock),
+			Entry("nil first", 1, func() []*domain.Block {
+				bs := link("n", 1, 3, "h0")
+				bs[0] = nil
+				return bs
+			}, nilBlock),
+			Entry("nil last", 1, func() []*domain.Block {
+				bs := link("n", 1, 3, "h0")
+				bs[2] = nil
+				return bs
+			}, nilBlock),
+		)
+
+		It("returns ErrConflict on an empty repository", func() {
+			empty := newRepo()
+			Expect(empty.ReplaceFrom(0, link("n", 0, 2, ""))).To(MatchError(storage.ErrConflict))
+			Expect(empty.ReplaceFrom(1, link("n", 1, 2, "h0"))).To(MatchError(storage.ErrConflict))
+			all, err := empty.All()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(all).To(BeEmpty())
+		})
+
+		It("shows readers either the old or the new chain under concurrent ReplaceFrom and Append", func() {
+			const rounds = 150
+			stop := make(chan struct{})
+			var readers, writers sync.WaitGroup
+			for r := 0; r < 4; r++ {
+				readers.Add(1)
+				go func() {
+					defer GinkgoRecover()
+					defer readers.Done()
+					for {
+						select {
+						case <-stop:
+							return
+						default:
+						}
+						all, err := repo.All()
+						Expect(err).NotTo(HaveOccurred())
+						Expect(len(all)).To(BeNumerically(">=", 2))
+						for i, b := range all {
+							Expect(b.Index).To(Equal(i))
+							if i > 0 {
+								Expect(b.PrevHash).To(Equal(all[i-1].Hash))
+							}
+						}
+					}
+				}()
+			}
+			writers.Add(2)
+			go func() {
+				defer GinkgoRecover()
+				defer writers.Done()
+				for i := 0; i < rounds; i++ {
+					tag := fmt.Sprintf("v%d-", i)
+					Expect(repo.ReplaceFrom(2, link(tag, 2, 1+i%4, "h1"))).To(Succeed())
+				}
+			}()
+			go func() {
+				defer GinkgoRecover()
+				defer writers.Done()
+				for i := 0; i < rounds; i++ {
+					last, err := repo.Last()
+					Expect(err).NotTo(HaveOccurred())
+					err = repo.Append(&domain.Block{Index: last.Index + 1, PrevHash: last.Hash, Hash: fmt.Sprintf("a%d-%d", i, last.Index+1)})
+					if err != nil {
+						Expect(err).To(MatchError(storage.ErrConflict))
+					}
+				}
+			}()
+			writers.Wait()
+			close(stop)
+			readers.Wait()
+		})
+	})
+
 }

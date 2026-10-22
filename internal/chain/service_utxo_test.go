@@ -44,6 +44,7 @@ func (s *stubRepo) All() ([]*domain.Block, error) {
 func (s *stubRepo) ByHeight(int) (*domain.Block, error)     { return nil, storage.ErrNotFound }
 func (s *stubRepo) ByHash(string) (*domain.Block, error)    { return nil, storage.ErrNotFound }
 func (s *stubRepo) Range(int, int) ([]*domain.Block, error) { return nil, storage.ErrNotFound }
+func (s *stubRepo) ReplaceFrom(int, []*domain.Block) error  { return storage.ErrConflict }
 
 var _ = Describe("Service UTXO rules", func() {
 	var (

@@ -95,6 +95,95 @@ var _ = Describe("Bolt Repository", func() {
 		Expect(byHash1.Index).To(Equal(1))
 	})
 
+	It("persists a replaced tail across Close and Open", func() {
+		dbPath := filepath.Join(GinkgoT().TempDir(), "replace.db")
+		repo, err := bolt.Open(dbPath)
+		Expect(err).NotTo(HaveOccurred())
+		for _, b := range []*domain.Block{
+			{Index: 0, Hash: "h0"},
+			{Index: 1, PrevHash: "h0", Hash: "h1"},
+			{Index: 2, PrevHash: "h1", Hash: "h2"},
+		} {
+			Expect(repo.Append(b)).To(Succeed())
+		}
+		Expect(repo.ReplaceFrom(1, []*domain.Block{{Index: 1, PrevHash: "h0", Hash: "n1"}})).To(Succeed())
+		Expect(repo.Close()).To(Succeed())
+
+		reopened, err := bolt.Open(dbPath)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() { _ = reopened.Close() })
+
+		all, err := reopened.All()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(all).To(HaveLen(2))
+		Expect(all[1].Hash).To(Equal("n1"))
+		for _, gone := range []string{"h1", "h2"} {
+			_, err = reopened.ByHash(gone)
+			Expect(err).To(MatchError(storage.ErrNotFound))
+		}
+		byHash, err := reopened.ByHash("n1")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(byHash.Index).To(Equal(1))
+	})
+
+	It("replaces blocks that carry no hash, which the hash index skips", func() {
+		repo, err := bolt.Open(filepath.Join(GinkgoT().TempDir(), "nohash.db"))
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() { _ = repo.Close() })
+		Expect(repo.Append(&domain.Block{Index: 0})).To(Succeed())
+		Expect(repo.Append(&domain.Block{Index: 1})).To(Succeed())
+
+		Expect(repo.ReplaceFrom(1, []*domain.Block{{Index: 1}, {Index: 2}})).To(Succeed())
+		all, err := repo.All()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(all).To(HaveLen(3))
+	})
+
+	It("returns ErrNilBlock from ReplaceFrom when a block is nil", func() {
+		repo, err := bolt.Open(filepath.Join(GinkgoT().TempDir(), "nil.db"))
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() { _ = repo.Close() })
+		Expect(repo.Append(&domain.Block{Index: 0, Hash: "h0"})).To(Succeed())
+
+		blocks := []*domain.Block{{Index: 1, PrevHash: "h0", Hash: "h1"}, nil}
+		Expect(repo.ReplaceFrom(1, blocks)).To(MatchError(bolt.ErrNilBlock))
+		_, err = repo.ByHash("h1")
+		Expect(err).To(MatchError(storage.ErrNotFound))
+	})
+
+	It("rolls ReplaceFrom back when a stored block cannot be decoded", func() {
+		dbPath := filepath.Join(GinkgoT().TempDir(), "corrupt-replace.db")
+		repo, err := bolt.Open(dbPath)
+		Expect(err).NotTo(HaveOccurred())
+		for _, b := range []*domain.Block{{Index: 0, Hash: "h0"}, {Index: 1, PrevHash: "h0", Hash: "h1"}, {Index: 2, PrevHash: "h1", Hash: "h2"}} {
+			Expect(repo.Append(b)).To(Succeed())
+		}
+		Expect(repo.Close()).To(Succeed())
+
+		rawDB, err := bbolt.Open(dbPath, 0o600, nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(rawDB.Update(func(tx *bbolt.Tx) error {
+			key := make([]byte, 8)
+			binary.BigEndian.PutUint64(key, 2)
+			return tx.Bucket([]byte("blocks")).Put(key, []byte("invalid-json{["))
+		})).To(Succeed())
+		Expect(rawDB.Close()).To(Succeed())
+
+		reopened, err := bolt.Open(dbPath)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() { _ = reopened.Close() })
+
+		err = reopened.ReplaceFrom(1, []*domain.Block{{Index: 1, PrevHash: "h0", Hash: "n1"}})
+		Expect(err).To(HaveOccurred())
+		Expect(err).NotTo(MatchError(storage.ErrConflict))
+		for _, kept := range []string{"h0", "h1"} {
+			_, err = reopened.ByHash(kept)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		_, err = reopened.ByHash("n1")
+		Expect(err).To(MatchError(storage.ErrNotFound))
+	})
+
 	It("fails a second Open on the same file within 1 second due to file lock", func() {
 		dbPath := filepath.Join(GinkgoT().TempDir(), "locked.db")
 		repo, err := bolt.Open(dbPath)
