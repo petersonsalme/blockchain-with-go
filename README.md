@@ -96,7 +96,7 @@ $ CONSENSUS=poa POA_VALIDATORS=<hex> POA_KEYSTORE=validator.key POA_KEYSTORE_PAS
 
 ## Architecture Decision Records
 
-Design decisions live in [`docs/adr/`](docs/adr):
+Design decisions live in [`docs/adr/`](docs/adr/0009-merkle-tree.md):
 
 | ADR | Decision |
 |---|---|
@@ -280,6 +280,20 @@ Lookup a mined transaction by its 64-character lowercase hex ID. Returns `200` w
 
 The genesis allocation transaction is found at height `0` with `"block_hash": ""`. An ID that is not 64 lowercase hex characters returns `400` with `"code": "invalid_tx_id"`. A non-existent transaction returns `404` with `"code": "tx_not_found"`.
 
+### GET /tx/{id}/proof
+
+Merkle inclusion proof of a mined transaction against the `MerkleRoot` in its block header. `id` follows the same rules as `GET /tx/{id}`.
+
+```json
+{
+  "tx_id": "...", "block_index": 2, "block_hash": "...",
+  "merkle_root": "...", "leaf_index": 1, "leaf_hash": "...",
+  "proof": [{"hash": "...", "side": "left"}, {"hash": "...", "side": "right"}]
+}
+```
+
+To verify, start with `cur = leaf_hash` and, for each step in order, hash with SHA-256 the bytes `0x01 || sibling || cur` when `side` is `"left"` (the sibling sits on the left) or `0x01 || cur || sibling` when `side` is `"right"`, using the raw 32-byte values of the hex hashes. The proof holds when the final `cur` equals `merkle_root`, which must also equal the `MerkleRoot` of block `block_index` in `GET /`. The leaf hash is SHA-256 of `0x00 || ascii(tx hash) || for each input: u32be(len(public key)) || public key || u32be(len(signature)) || signature` ( see [ADR-0009](docs/adr/0009-merkle-tree.md)). An odd node without a sibling moves up unchanged and adds no step, so `proof` is `[]` when the block has a single transaction. An ID that is not 64 lowercase hex characters returns `400` `invalid_tx_id`; an unknown transaction returns `404` `tx_not_found`. The search is linear and never waits for a `POST /` that is mining.
+
 ### GET /balance/{addr}
 
 Returns the balance and unspent outputs (UTXOs) for `addr` from a single snapshot of the UTXO set:
@@ -354,8 +368,8 @@ BPM payloads cannot be signed, so the endpoint answers `410 Gone` (with `Depreca
 |---|---|---|
 | `200 OK` | Blockchain retrieved successfully via `GET /` | JSON array of blocks |
 | `200 OK` | `GET /blocks`, `GET /block/{ref}`, `GET /tx/{id}`, `GET /balance/{addr}`, `GET /health` | page, block, transaction, balance or health object (see above) |
-| `400 Bad Request` | Malformed query on `/blocks`, malformed `ref` on `/block/{ref}`, malformed `id` on `/tx/{id}`, or invalid address on `/balance/{addr}` | `{"error": "...", "code": "invalid_query" \| "invalid_block_ref" \| "invalid_tx_id" \| "invalid_address"}` |
-| `404 Not Found` | `GET /block/{ref}` or `GET /tx/{id}` outside the chain | `{"error": "...", "code": "block_not_found" \| "tx_not_found"}` |
+| `400 Bad Request` | Malformed query on `/blocks`, malformed `ref` on `/block/{ref}`, malformed `id` on `/tx/{id}` or `/tx/{id}/proof`, or invalid address on `/balance/{addr}` | `{"error": "...", "code": "invalid_query" \| "invalid_block_ref" \| "invalid_tx_id" \| "invalid_address"}` |
+| `404 Not Found` | `GET /block/{ref}` or `GET /tx/{id}` or `GET /tx/{id}/proof` outside the chain | `{"error": "...", "code": "block_not_found" \| "tx_not_found"}` |
 | `503 Service Unavailable` | `GET /health` cannot read the chain tip | `{"error": "...", "code": "unhealthy"}` |
 | `201 Created` | Block mined and appended to the blockchain via `POST /` | JSON object of the new block |
 | `400 Bad Request` | Malformed JSON body or invalid transaction payload (e.g. empty list) | `{"error": "invalid request body"}` |

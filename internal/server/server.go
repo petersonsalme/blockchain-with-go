@@ -36,6 +36,7 @@ type Chain interface {
 	BlockByHash(hash string) (*domain.Block, error)
 	BlocksRange(from, limit int) ([]*domain.Block, error)
 	Transaction(id string) (*domain.Transaction, string, int, error)
+	TxProof(id string) (*chain.InclusionProof, error)
 	Balance(addr string) (uint64, []chain.UTXO)
 	Mine(ctx context.Context, txs []domain.Transaction) (*domain.Block, error)
 }
@@ -106,6 +107,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /blocks", s.handleGetBlocks)
 	mux.HandleFunc("GET /block/{ref}", s.handleGetBlock)
 	mux.HandleFunc("GET /tx/{id}", s.handleGetTx)
+	mux.HandleFunc("GET /tx/{id}/proof", s.handleGetTxProof)
 	mux.HandleFunc("GET /balance/{addr}", s.handleGetBalance)
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("POST /legacy/bpm", s.handleLegacyBPM)
@@ -113,6 +115,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/blocks", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/block/{ref}", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/tx/{id}", methodNotAllowed("GET, HEAD"))
+	mux.Handle("/tx/{id}/proof", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/balance/{addr}", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/health", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/legacy/bpm", methodNotAllowed("POST"))
@@ -305,6 +308,49 @@ func (s *Server) handleGetTx(w http.ResponseWriter, r *http.Request) {
 		Transaction: tx,
 		BlockHash:   blockHash,
 		Height:      height,
+	})
+}
+
+// handleGetTxProof serves the Merkle inclusion proof of a transaction by its ID.
+func (s *Server) handleGetTxProof(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !isHash(id) {
+		respondWithJSON(w, http.StatusBadRequest, errorResponse{
+			Error: "transaction id must be a 64-character lowercase hex string",
+			Code:  invalidTxIDCode,
+		})
+		return
+	}
+
+	p, err := s.chain.TxProof(id)
+	if errors.Is(err, chain.ErrTxNotFound) {
+		respondWithJSON(w, http.StatusNotFound, errorResponse{
+			Error: "transaction not found",
+			Code:  txNotFoundCode,
+		})
+		return
+	}
+	if err != nil {
+		respondWithJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+		return
+	}
+
+	steps := make([]proofStep, len(p.Steps))
+	for i, st := range p.Steps {
+		side := "right"
+		if st.Left {
+			side = "left"
+		}
+		steps[i] = proofStep{Hash: st.Hash, Side: side}
+	}
+	respondWithJSON(w, http.StatusOK, proofResponse{
+		TxID:       id,
+		BlockIndex: p.BlockIndex,
+		BlockHash:  p.BlockHash,
+		MerkleRoot: p.MerkleRoot,
+		LeafIndex:  p.LeafIndex,
+		LeafHash:   p.LeafHash,
+		Proof:      steps,
 	})
 }
 

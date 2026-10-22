@@ -48,3 +48,20 @@ type balanceResponse struct {
 	Balance uint64       `json:"balance"`
 	UTXOs   []chain.UTXO `json:"utxos"`
 }
+
+// proofStep is one sibling of the path from a leaf to the Merkle root; Side is "left" or "right".
+type proofStep struct {
+	Hash string `json:"hash"`
+	Side string `json:"side"`
+}
+
+// proofResponse is the body of GET /tx/{id}/proof.
+type proofResponse struct {
+	TxID       string      `json:"tx_id"`
+	BlockIndex int         `json:"block_index"`
+	BlockHash  string      `json:"block_hash"`
+	MerkleRoot string      `json:"merkle_root"`
+	LeafIndex  int         `json:"leaf_index"`
+	LeafHash   string      `json:"leaf_hash"`
+	Proof      []proofStep `json:"proof"`
+}
