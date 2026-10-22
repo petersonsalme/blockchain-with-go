@@ -161,3 +161,44 @@ func TestWithWorkersSetsField(t *testing.T) {
 		t.Fatalf("Workers = %d", p.Workers)
 	}
 }
+
+// sealWorkerGoroutines returns how many goroutines Seal runs on top of its
+// caller, observed while it searches an unsolvable difficulty.
+func sealWorkerGoroutines(t *testing.T, p *powpkg.ProofOfWork) int {
+	t.Helper()
+
+	genesis := &domain.Block{Index: 0, Timestamp: time.Date(2021, 8, 15, 14, 30, 45, 100, time.UTC)}
+	genesis.Hash = genesis.CalculateHash()
+	b := &domain.Block{Index: 1, Timestamp: genesis.Timestamp.Add(time.Second), PrevHash: genesis.Hash}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	base := runtime.NumGoroutine()
+	done := make(chan error, 1)
+
+	go func() { done <- p.Seal(ctx, []*domain.Block{genesis}, b) }()
+
+	time.Sleep(100 * time.Millisecond)
+	// Subtract the goroutine that runs Seal itself.
+	n := runtime.NumGoroutine() - base - 1
+
+	cancel()
+	<-done
+
+	return n
+}
+
+func TestSealWorkerCount(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	if got := sealWorkerGoroutines(t, powpkg.New(64).WithWorkers(1)); got != 1 {
+		t.Fatalf("WithWorkers(1): %d workers", got)
+	}
+
+	if got := sealWorkerGoroutines(t, powpkg.New(64).WithWorkers(3)); got != 3 {
+		t.Fatalf("WithWorkers(3): %d workers", got)
+	}
+
+	if got := sealWorkerGoroutines(t, powpkg.New(64)); got != runtime.NumCPU() {
+		t.Fatalf("default: %d workers, want %d", got, runtime.NumCPU())
+	}
+}
