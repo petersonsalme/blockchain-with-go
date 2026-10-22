@@ -158,7 +158,7 @@ func TestNewConsensusPoAInvalidConfig(t *testing.T) {
 func TestRunFailsOnInvalidConsensus(t *testing.T) {
 	t.Setenv("PORT", freePort(t))
 	t.Setenv(consensusEnvVar, "pos")
-	err := run(context.Background())
+	err := run(context.Background(), discardLogger())
 	if err == nil || !strings.Contains(err.Error(), consensusEnvVar) {
 		t.Fatalf("run = %v, want error citing %s", err, consensusEnvVar)
 	}

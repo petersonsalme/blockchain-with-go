@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -47,6 +49,8 @@ type Config struct {
 	MiningTimeout time.Duration
 	// RateLimit is requests per minute per IP; non-positive means disabled.
 	RateLimit int
+	// Logger receives one record per request; nil discards them.
+	Logger *slog.Logger
 	// Now returns the current time; nil means time.Now.
 	Now func() time.Time
 }
@@ -56,6 +60,7 @@ type Server struct {
 	chain         Chain
 	miningTimeout time.Duration
 	limiter       *rateLimiter
+	logger        *slog.Logger
 }
 
 // ErrNilService is returned by NewServer when svc is nil.
@@ -74,7 +79,11 @@ func NewServer(svc Chain, cfg Config) (*Server, error) {
 	if cfg.RateLimit > 0 {
 		limiter = newRateLimiter(cfg.RateLimit, cfg.Now)
 	}
-	return &Server{chain: svc, miningTimeout: timeout, limiter: limiter}, nil
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
+	return &Server{chain: svc, miningTimeout: timeout, limiter: limiter, logger: logger}, nil
 }
 
 // ParseMiningTimeout reads a MINING_TIMEOUT value: a Go duration or integer seconds.
@@ -119,10 +128,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/balance/{addr}", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/health", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/legacy/bpm", methodNotAllowed("POST"))
+	var h http.Handler = mux
 	if s.limiter != nil {
-		return s.limiter.middleware(mux)
+		h = s.limiter.middleware(h)
 	}
-	return mux
+	return logRequests(s.logger, h)
 }
 
 // methodNotAllowed answers 405 with an empty body and the Allow header set to allow.
@@ -134,10 +144,12 @@ func methodNotAllowed(allow string) http.Handler {
 }
 
 // HTTPServer wraps Handler in an http.Server listening on addr with the service timeouts.
-func (s *Server) HTTPServer(addr string) *http.Server {
+// Every request context derives from ctx, so cancelling ctx cancels the mining in progress.
+func (s *Server) HTTPServer(ctx context.Context, addr string) *http.Server {
 	return &http.Server{
 		Addr:           addr,
 		Handler:        s.Handler(),
+		BaseContext:    func(net.Listener) context.Context { return ctx },
 		ReadTimeout:    10 * time.Second,
 		WriteTimeout:   10 * time.Second,
 		MaxHeaderBytes: 1 << 20,

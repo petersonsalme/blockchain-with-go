@@ -1322,7 +1322,7 @@ var _ = Describe("Server", func() {
 			Expect(err).NotTo(HaveOccurred())
 			srv, err := NewServer(svc, cfg)
 			Expect(err).NotTo(HaveOccurred())
-			hs := srv.HTTPServer(addr)
+			hs := srv.HTTPServer(context.Background(), addr)
 			DeferCleanup(func() { _ = hs.Close() })
 			go func() {
 				defer GinkgoRecover()
@@ -1342,7 +1342,7 @@ var _ = Describe("Server", func() {
 			svc, _ := chain.NewService(memory.New(), engine)
 			srv, err := NewServer(svc, Config{})
 			Expect(err).NotTo(HaveOccurred())
-			hs := srv.HTTPServer(":1234")
+			hs := srv.HTTPServer(context.Background(), ":1234")
 			Expect(hs.Addr).To(Equal(":1234"))
 			Expect(hs.Handler).NotTo(BeNil())
 			Expect(hs.MaxHeaderBytes).To(Equal(1 << 20))
@@ -1392,7 +1392,7 @@ var _ = Describe("Server", func() {
 			Expect(l.Close()).To(Succeed())
 			srv, err := NewServer(svc, cfg)
 			Expect(err).NotTo(HaveOccurred())
-			hs := srv.HTTPServer(addr)
+			hs := srv.HTTPServer(context.Background(), addr)
 			DeferCleanup(func() { _ = hs.Close() })
 			go func() {
 				defer GinkgoRecover()
