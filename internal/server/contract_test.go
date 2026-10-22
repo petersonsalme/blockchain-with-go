@@ -282,10 +282,11 @@ var _ = Describe("OpenAPI contract", func() {
 		})
 
 		It("declares exactly the routes registered in Server.Handler()", func() {
-			routes := []string{
-				"GET /", "POST /", "GET /blocks", "GET /block/{ref}", "GET /tx/{id}", "GET /tx/{id}/proof",
-				"GET /balance/{addr}", "GET /health", "GET /metrics", "POST /legacy/bpm",
-				"POST /tx", "POST /mine", "GET /mempool",
+			srv, err := NewServer(brokenChain{}, Config{})
+			Expect(err).NotTo(HaveOccurred())
+			var routes []string
+			for _, rt := range srv.routes() {
+				routes = append(routes, strings.Replace(rt.pattern, "{$}", "", 1))
 			}
 			var declared []string
 			for path, item := range doc.Paths.Map() {
