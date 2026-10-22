@@ -1,7 +1,7 @@
 package server
 
 import (
-	"bufio"
+	"cmp"
 	"io"
 	"net/http"
 	"slices"
@@ -82,16 +82,10 @@ func (m *metrics) write(w io.Writer, blocks int, haveBlocks bool) {
 	m.mu.Unlock()
 
 	slices.SortFunc(keys, func(a, b requestKey) int {
-		if c := strings.Compare(a.route, b.route); c != 0 {
-			return c
-		}
-		if c := strings.Compare(a.method, b.method); c != 0 {
-			return c
-		}
-		return a.code - b.code
+		return cmp.Or(strings.Compare(a.route, b.route), strings.Compare(a.method, b.method), cmp.Compare(a.code, b.code))
 	})
 
-	bw := bufio.NewWriter(w)
+	var bw strings.Builder
 	bw.WriteString("# HELP http_requests_total HTTP requests served, by method, route pattern and status code.\n")
 	bw.WriteString("# TYPE http_requests_total counter\n")
 	for _, k := range keys {
@@ -108,7 +102,7 @@ func (m *metrics) write(w io.Writer, blocks int, haveBlocks bool) {
 	bw.WriteString("# TYPE blockchain_mining_duration_seconds summary\n")
 	bw.WriteString("blockchain_mining_duration_seconds_sum " + strconv.FormatFloat(sum.Seconds(), 'g', -1, 64) + "\n")
 	bw.WriteString("blockchain_mining_duration_seconds_count " + strconv.FormatUint(n, 10) + "\n")
-	_ = bw.Flush() // a failed write to the client cannot be reported
+	_, _ = io.WriteString(w, bw.String()) // a failed write to the client cannot be reported
 }
 
 // handleMetrics serves the Prometheus text exposition of s.

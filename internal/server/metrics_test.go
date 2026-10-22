@@ -392,7 +392,7 @@ func TestMetricsOrderIsDeterministic(t *testing.T) {
 	m := newMetrics()
 	m.observeRequest("POST", "b", 200)
 	m.observeRequest("GET", "b", 404)
-	m.observeRequest("GET", "a", 200)
+	m.observeRequest("GET", "a", 404)
 	m.observeRequest("GET", "a", 200)
 	var first, second bytes.Buffer
 	m.write(&first, 1, true)
@@ -400,10 +400,13 @@ func TestMetricsOrderIsDeterministic(t *testing.T) {
 	if first.String() != second.String() {
 		t.Error("two renderings differ")
 	}
+	if i, j := strings.Index(first.String(), `route="a",code="200"`), strings.Index(first.String(), `route="a",code="404"`); i < 0 || i >= j {
+		t.Errorf("series of one route and method not sorted by code:\n%s", first.String())
+	}
 	a := strings.Index(first.String(), `route="a"`)
 	b := strings.Index(first.String(), `method="GET",route="b"`)
 	c := strings.Index(first.String(), `method="POST"`)
-	if !(a < b && b < c) {
+	if a >= b || b >= c {
 		t.Errorf("series not sorted by route, method, code:\n%s", first.String())
 	}
 }
