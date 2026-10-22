@@ -444,12 +444,21 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 				bs[2] = nil
 				return bs
 			}, nilBlock),
+			Entry("nil with an invalid height", 0, func() []*domain.Block { return []*domain.Block{nil} }, nilBlock),
+			Entry("nil with a height past len", 6, func() []*domain.Block { return []*domain.Block{nil} }, nilBlock),
+			Entry("nil after a broken link", 1, func() []*domain.Block {
+				bs := link("n", 1, 1, "other")
+				return append(bs, nil)
+			}, nilBlock),
 		)
 
 		It("returns ErrConflict on an empty repository", func() {
 			empty := newRepo()
 			Expect(empty.ReplaceFrom(0, link("n", 0, 2, ""))).To(MatchError(storage.ErrConflict))
 			Expect(empty.ReplaceFrom(1, link("n", 1, 2, "h0"))).To(MatchError(storage.ErrConflict))
+			nilErr := empty.ReplaceFrom(1, []*domain.Block{nil})
+			Expect(nilErr).To(HaveOccurred())
+			Expect(nilErr).NotTo(MatchError(storage.ErrConflict))
 			all, err := empty.All()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(all).To(BeEmpty())

@@ -36,7 +36,7 @@ type BlockRepository interface {
 	// blocks[0].PrevHash == chain[height-1].Hash, and each following block
 	// chained to the one before it (Index+1, PrevHash == Hash). Anything else,
 	// or an empty repository, returns ErrConflict; a nil block returns the
-	// adapter's ErrNilBlock. Removed blocks are no longer found by ByHash.
+	// adapter's ErrNilBlock, checked before any other rule. Removed blocks are no longer found by ByHash.
 	ReplaceFrom(height int, blocks []*domain.Block) error
 	// ByHeight returns the block with Index h, or ErrNotFound.
 	ByHeight(h int) (*domain.Block, error)
