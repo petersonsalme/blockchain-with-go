@@ -182,7 +182,15 @@ func sealWorkerGoroutines(t *testing.T, p *powpkg.ProofOfWork) int {
 	n := runtime.NumGoroutine() - base - 1
 
 	cancel()
-	_ = <-done
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Seal returned %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Seal did not return after cancellation")
+	}
 
 	return n
 }
