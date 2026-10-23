@@ -2,6 +2,7 @@ package pow_test
 
 import (
 	"context"
+	"math"
 	"os"
 	"time"
 
@@ -146,6 +147,24 @@ var _ = Describe("ProofOfWork difficulty retargeting", func() {
 			h := history(8, 4, window(7, interval, time.Second))
 			Expect(p.ExpectedDifficulty(h)).To(Equal(p.ExpectedDifficulty(h)))
 			Expect(h[7].Difficulty).To(Equal(4))
+		})
+
+		It("lowers the difficulty after a window of 200 years", func() {
+			h := history(8, 4, every(time.Second))
+			h[7].Timestamp = h[3].Timestamp.Add(200 * 365 * 24 * time.Hour)
+			Expect(p.ExpectedDifficulty(h)).To(Equal(3))
+		})
+
+		It("keeps the difficulty when the window's timestamps go backwards", func() {
+			h := history(8, 4, every(time.Second))
+			h[7].Timestamp = h[3].Timestamp.Add(-time.Hour)
+			Expect(p.ExpectedDifficulty(h)).To(Equal(4))
+		})
+
+		It("saturates the window target instead of overflowing", func() {
+			huge := powpkg.New(3).WithRetarget(interval, time.Duration(math.MaxInt64/2))
+			h := history(8, 4, window(7, interval, time.Hour))
+			Expect(huge.ExpectedDifficulty(h)).To(Equal(5))
 		})
 	})
 

@@ -2,6 +2,7 @@ package pow
 
 import (
 	"context"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -127,13 +128,23 @@ func (p *ProofOfWork) ExpectedDifficulty(history []*domain.Block) int {
 	}
 
 	actual := parent.Timestamp.Sub(history[len(history)-1-n].Timestamp)
-	target := time.Duration(n) * p.TargetBlockTime
+	// Timestamps going backwards say nothing about the hash rate.
+	if actual < 0 {
+		return parent.Difficulty
+	}
 
-	if 2*actual < target && parent.Difficulty < MaxDifficulty {
+	target := time.Duration(math.MaxInt64)
+	if p.TargetBlockTime <= target/time.Duration(n) {
+		target = time.Duration(n) * p.TargetBlockTime
+	}
+
+	// actual < target-actual is 2*actual < target, and actual-target > target
+	// is actual > 2*target, without overflowing for actual >= 0.
+	if actual < target-actual && parent.Difficulty < MaxDifficulty {
 		return parent.Difficulty + 1
 	}
 
-	if actual > 2*target && parent.Difficulty > MinDifficulty {
+	if actual-target > target && parent.Difficulty > MinDifficulty {
 		return parent.Difficulty - 1
 	}
 

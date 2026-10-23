@@ -21,6 +21,7 @@ Option A.
      - `actual < target/2` → parent + 1, only while parent < `MaxDifficulty`;
      - `actual > 2*target` → parent − 1, only while parent > `MinDifficulty`;
      - otherwise the parent's difficulty;
+     - `actual < 0` (timestamps going backwards) keeps the parent's difficulty; the comparisons and `target` (saturated at the maximum duration) never overflow (ENG-99);
    - every other height uses the parent's difficulty.
 3. `Seal` mines with the expected difficulty. `Verify` returns `consensus.ErrInvalidDifficulty` when `b.Difficulty != ExpectedDifficulty(history)`, checked before the proof of work.
 4. Configuration, read through `pow.NewProofOfWorkFromEnv` and triggered only from `cmd/node`:
