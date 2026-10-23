@@ -454,15 +454,6 @@ var _ = Describe("Service", func() {
 			Expect(err).To(MatchError(boom))
 		})
 
-		It("propagates repository Last errors", func() {
-			boom := errors.New("boom")
-			fr := &failingRepo{BlockRepository: repo}
-			svc, f := funded(fr, eng)
-			fr.lastErr = boom
-			_, err := svc.Mine(context.Background(), f.tx())
-			Expect(err).To(MatchError(boom))
-		})
-
 		It("keeps services over separate repositories independent", func() {
 			a, fa := funded(memory.New(), eng)
 			b, _ := funded(memory.New(), eng)

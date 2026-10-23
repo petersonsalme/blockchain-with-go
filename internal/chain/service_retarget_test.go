@@ -30,6 +30,26 @@ func (r *allFailingRepo) All() ([]*domain.Block, error) {
 	return r.BlockRepository.All()
 }
 
+// snapshotRepo fails Last, or returns an empty All, once armed.
+type snapshotRepo struct {
+	storage.BlockRepository
+	failLast, emptyAll atomic.Bool
+}
+
+func (r *snapshotRepo) Last() (*domain.Block, error) {
+	if r.failLast.Load() {
+		return nil, errors.New("last failed")
+	}
+	return r.BlockRepository.Last()
+}
+
+func (r *snapshotRepo) All() ([]*domain.Block, error) {
+	if r.emptyAll.Load() {
+		return nil, nil
+	}
+	return r.BlockRepository.All()
+}
+
 var _ = Describe("Service difficulty retargeting", func() {
 	var repo *memory.Repository
 
@@ -99,5 +119,33 @@ var _ = Describe("Service difficulty retargeting", func() {
 
 		_, err := svc.Mine(context.Background(), f.tx())
 		Expect(err).To(MatchError("all failed"))
+	})
+
+	It("mines on the parent taken from the history snapshot, without calling Last", func() {
+		wrapped := &snapshotRepo{BlockRepository: repo}
+		svc, f := funded(wrapped, pow.New(1))
+		before, err := repo.All()
+		Expect(err).NotTo(HaveOccurred())
+		parent := before[len(before)-1]
+		wrapped.failLast.Store(true)
+
+		blk, err := svc.Mine(context.Background(), f.tx())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(blk.PrevHash).To(Equal(parent.Hash))
+		Expect(blk.Index).To(Equal(parent.Index + 1))
+	})
+
+	It("returns storage.ErrEmpty when the history snapshot is empty", func() {
+		wrapped := &snapshotRepo{BlockRepository: repo}
+		called := false
+		svc, f := funded(wrapped, pow.New(1), WithGenerator(func(context.Context, consensus.Consensus, []*domain.Block, []domain.Transaction) (*domain.Block, error) {
+			called = true
+			return nil, nil
+		}))
+		wrapped.emptyAll.Store(true)
+
+		_, err := svc.Mine(context.Background(), f.tx())
+		Expect(err).To(MatchError(storage.ErrEmpty))
+		Expect(called).To(BeFalse())
 	})
 })
