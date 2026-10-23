@@ -329,7 +329,7 @@ var _ = Describe("Server", func() {
 		Context("when Config.MiningTimeout is configured", func() {
 			It("aborts mining when timeout expires with real mining", func() {
 				cfg = Config{MiningTimeout: 15 * time.Millisecond}
-				engine = pow.NewProofOfWork(10)
+				engine = pow.NewProofOfWork(60)
 				build()
 
 				initialLen := chainLen()

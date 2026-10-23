@@ -1,6 +1,6 @@
 # ADR-0008: Difficulty retargeting with history-aware consensus
 
-Status: Accepted (board, 2026-10-21, ENG-19)
+Status: Accepted (board, 2026-10-21, ENG-19). Amended by ADR-0012 (unit of `Difficulty`, bounds and defaults)
 
 ## Context
 - PoW difficulty is fixed by `POW_DIFFICULTY`, and `pow.Verify` accepts any `b.Difficulty` that the hash satisfies.

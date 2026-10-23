@@ -2,9 +2,9 @@ package pow_test
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"os"
-	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -15,6 +15,21 @@ import (
 	powpkg "github.com/petersonsalme/blockchain-with-go/internal/consensus/pow"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 )
+
+// zeroBits counts the leading zero bits of a hex hash, decoding it with
+// encoding/hex and looking at the bits one by one.
+func zeroBits(hash string) int {
+	raw, err := hex.DecodeString(hash)
+	Expect(err).NotTo(HaveOccurred())
+
+	for i := 0; i < len(raw)*8; i++ {
+		if raw[i/8]&(0x80>>(i%8)) != 0 {
+			return i
+		}
+	}
+
+	return len(raw) * 8
+}
 
 // pinDifficultyEnv sets POW_DIFFICULTY for the current spec (an empty value
 // unsets it) and restores the previous value afterwards.
@@ -67,7 +82,7 @@ var _ = Describe("ProofOfWork", func() {
 			Expect(powpkg.NewProofOfWork(2).Seal(context.Background(), nil, b)).To(Succeed())
 
 			Expect(b.Difficulty).To(Equal(2))
-			Expect(b.Hash).To(HavePrefix("00"))
+			Expect(zeroBits(b.Hash)).To(BeNumerically(">=", 2))
 			Expect(b.Hash).To(Equal(b.CalculateHash()))
 		})
 
@@ -84,7 +99,7 @@ var _ = Describe("ProofOfWork", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 			defer cancel()
 
-			err := mineAsync(func() error { return powpkg.NewProofOfWork(12).Seal(ctx, nil, b) })
+			err := mineAsync(func() error { return powpkg.NewProofOfWork(60).Seal(ctx, nil, b) })
 			Expect(errors.Is(err, context.DeadlineExceeded)).To(BeTrue())
 			Expect(b.Hash).To(BeEmpty())
 		})
@@ -141,13 +156,17 @@ var _ = Describe("ProofOfWork", func() {
 			}
 		})
 
-		It("should find a hash with the required leading zeros", func() {
-			Expect(powpkg.MineWithContext(context.Background(), b, 3)).To(Succeed())
+		It("should find a hash with the required leading zero bits", func() {
+			Expect(powpkg.MineWithContext(context.Background(), b, 10)).To(Succeed())
 
-			Expect(b.Difficulty).To(Equal(3))
-			Expect(b.Hash).To(HavePrefix("000"))
+			Expect(b.Difficulty).To(Equal(10))
 			Expect(b.Hash).To(Equal(b.CalculateHash()))
-			Expect(strings.HasPrefix(b.Hash, strings.Repeat("0", b.Difficulty))).To(BeTrue())
+
+			raw, err := hex.DecodeString(b.Hash)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(raw[0]).To(BeZero())
+			Expect(raw[1] & 0xC0).To(BeZero())
+			Expect(zeroBits(b.Hash)).To(BeNumerically(">=", 10))
 		})
 
 		It("should keep the nonce that solved the proof of work", func() {
@@ -163,7 +182,7 @@ var _ = Describe("ProofOfWork", func() {
 
 			Expect(b.Difficulty).To(Equal(0))
 			Expect(b.Nonce).To(Equal(0))
-			Expect(strings.HasPrefix(b.Hash, strings.Repeat("0", b.Difficulty))).To(BeTrue())
+			Expect(zeroBits(b.Hash)).To(BeNumerically(">=", b.Difficulty))
 		})
 	})
 	Describe("MineWithContext", func() {
@@ -185,9 +204,9 @@ var _ = Describe("ProofOfWork", func() {
 
 			Expect(err).NotTo(HaveOccurred())
 			Expect(b.Difficulty).To(Equal(2))
-			Expect(b.Hash).To(HavePrefix("00"))
+			Expect(zeroBits(b.Hash)).To(BeNumerically(">=", 2))
 			Expect(b.Hash).To(Equal(b.CalculateHash()))
-			Expect(strings.HasPrefix(b.Hash, strings.Repeat("0", b.Difficulty))).To(BeTrue())
+			Expect(zeroBits(b.Hash)).To(BeNumerically(">=", b.Difficulty))
 		})
 
 		It("should treat a negative difficulty as zero", func() {
@@ -196,7 +215,7 @@ var _ = Describe("ProofOfWork", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(b.Difficulty).To(Equal(0))
 			Expect(b.Nonce).To(Equal(0))
-			Expect(strings.HasPrefix(b.Hash, strings.Repeat("0", b.Difficulty))).To(BeTrue())
+			Expect(zeroBits(b.Hash)).To(BeNumerically(">=", b.Difficulty))
 		})
 
 		It("should return the smallest non-negative nonce that solves the difficulty", func() {
@@ -207,7 +226,7 @@ var _ = Describe("ProofOfWork", func() {
 			solved := b.Nonce
 			for n := 0; n < solved; n++ {
 				b.Nonce = n
-				Expect(b.CalculateHash()).NotTo(HavePrefix("00"), "nonce %d already solves the difficulty", n)
+				Expect(zeroBits(b.CalculateHash())).To(BeNumerically("<", 2), "nonce %d already solves the difficulty", n)
 			}
 		})
 
@@ -216,7 +235,7 @@ var _ = Describe("ProofOfWork", func() {
 
 			Expect(err).NotTo(HaveOccurred())
 			Expect(b.Difficulty).To(Equal(1))
-			Expect(strings.HasPrefix(b.Hash, strings.Repeat("0", b.Difficulty))).To(BeTrue())
+			Expect(zeroBits(b.Hash)).To(BeNumerically(">=", b.Difficulty))
 		})
 
 		When("the context is already canceled before mining", func() {
@@ -253,7 +272,7 @@ var _ = Describe("ProofOfWork", func() {
 				}()
 
 				// Use high difficulty so mining will not finish before cancel is called
-				err := mineAsync(func() error { return powpkg.MineWithContext(ctx, b, 12) })
+				err := mineAsync(func() error { return powpkg.MineWithContext(ctx, b, 60) })
 
 				Expect(err).To(MatchError(context.Canceled))
 				Expect(b.Hash).To(BeEmpty())
@@ -266,7 +285,7 @@ var _ = Describe("ProofOfWork", func() {
 				defer cancel()
 
 				// Use high difficulty so mining will timeout
-				err := mineAsync(func() error { return powpkg.MineWithContext(ctx, b, 12) })
+				err := mineAsync(func() error { return powpkg.MineWithContext(ctx, b, 60) })
 
 				Expect(err).To(MatchError(context.DeadlineExceeded))
 				Expect(b.Hash).To(BeEmpty())
@@ -334,10 +353,9 @@ var _ = Describe("ProofOfWork", func() {
 			It("should return false", func() {
 				Expect(newBlock.Difficulty).To(BeNumerically(">", 0))
 
-				prefix := strings.Repeat("0", newBlock.Difficulty)
 				for newBlock.Nonce++; ; newBlock.Nonce++ {
 					newBlock.Hash = newBlock.CalculateHash()
-					if !strings.HasPrefix(newBlock.Hash, prefix) {
+					if zeroBits(newBlock.Hash) < newBlock.Difficulty {
 						break
 					}
 				}

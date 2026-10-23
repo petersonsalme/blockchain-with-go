@@ -2,7 +2,9 @@ package pow
 
 import (
 	"context"
+	"encoding/hex"
 	"math"
+	"math/bits"
 	"os"
 	"strconv"
 	"strings"
@@ -12,19 +14,19 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 )
 
-// DefaultDifficulty is the number of leading zeros a block hash must have when
-// POW_DIFFICULTY is not set.
-const DefaultDifficulty = 2
+// DefaultDifficulty is the number of leading zero bits a block hash must have
+// when POW_DIFFICULTY is not set.
+const DefaultDifficulty = 8
 
 // Retargeting bounds and defaults. The factor-2 dead band is fixed.
 const (
 	// MinDifficulty and MaxDifficulty bound retargeting; an initial difficulty
 	// outside them is kept, but an adjustment never crosses them.
 	MinDifficulty = 1
-	MaxDifficulty = 8
+	MaxDifficulty = 32
 
 	DefaultRetargetInterval = 10
-	DefaultTargetBlockTime  = time.Duration(10_000_000_000) // 10s
+	DefaultTargetBlockTime  = time.Duration(2_000_000_000) // 2s
 
 	// RetargetIntervalEnvVar overrides DefaultRetargetInterval with a
 	// non-negative integer; 0 disables retargeting.
@@ -33,13 +35,16 @@ const (
 	TargetBlockTimeEnvVar = "TARGET_BLOCK_TIME"
 )
 
+// hashBits is the size of a SHA-256 hash, the highest difficulty that can be solved.
+const hashBits = 256
+
 // DifficultyEnvVar overrides DefaultDifficulty when it holds a non-negative integer.
 const DifficultyEnvVar = "POW_DIFFICULTY"
 
 var _ consensus.Consensus = (*ProofOfWork)(nil)
 
 // ProofOfWork is a Consensus that requires block hashes to start with as many
-// zeros as ExpectedDifficulty names for their position in the chain.
+// zero bits as ExpectedDifficulty names for their position in the chain.
 type ProofOfWork struct {
 	// Difficulty is the initial difficulty, used by the child of genesis.
 	Difficulty int
@@ -195,9 +200,7 @@ func MineWithContext(ctx context.Context, b *domain.Block, difficulty int) error
 		ctx = context.Background()
 	}
 
-	if difficulty < 0 {
-		difficulty = 0
-	}
+	difficulty = max(difficulty, 0)
 
 	b.Difficulty = difficulty
 
@@ -214,6 +217,32 @@ func MineWithContext(ctx context.Context, b *domain.Block, difficulty int) error
 	}
 }
 
+// solvesDifficulty reports whether hash, 64 lowercase hex characters read as a
+// 256-bit big-endian number, has at least difficulty leading zero bits. A
+// difficulty <= 0 is always solved, one above 256 never, and a malformed hash
+// never (for difficulty > 0).
 func solvesDifficulty(hash string, difficulty int) bool {
-	return strings.HasPrefix(hash, strings.Repeat("0", difficulty))
+	if difficulty <= 0 {
+		return true
+	}
+
+	if difficulty > hashBits || len(hash) != hashBits/4 || hash != strings.ToLower(hash) {
+		return false
+	}
+
+	raw, err := hex.DecodeString(hash)
+	if err != nil {
+		return false
+	}
+
+	zeros := 0
+	for _, octet := range raw {
+		if octet != 0 {
+			zeros += bits.LeadingZeros8(octet)
+			break
+		}
+		zeros += 8
+	}
+
+	return zeros >= difficulty
 }
