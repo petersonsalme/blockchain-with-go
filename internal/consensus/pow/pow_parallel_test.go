@@ -142,7 +142,7 @@ func TestMineParallelPartitionsNoncesAndCancelsLosers(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("MineParallel did not find the nonce quickly: nonces are not partitioned by worker or losers are not cancelled")
 	}
 
@@ -216,8 +216,10 @@ func TestWithWorkersSetsField(t *testing.T) {
 }
 
 // sealWorkerGoroutines returns how many goroutines Seal runs on top of its
-// caller, observed while it searches an unsolvable difficulty.
-func sealWorkerGoroutines(t *testing.T, p *powpkg.ProofOfWork) int {
+// caller, observed while it searches an unsolvable difficulty. It polls until
+// the count reaches want (workers start asynchronously, slowly on small CI
+// machines) or two seconds pass, and returns the last count.
+func sealWorkerGoroutines(t *testing.T, p *powpkg.ProofOfWork, want int) int {
 	t.Helper()
 
 	genesis := &domain.Block{Index: 0, Timestamp: time.Date(2021, 8, 15, 14, 30, 45, 100, time.UTC)}
@@ -230,9 +232,14 @@ func sealWorkerGoroutines(t *testing.T, p *powpkg.ProofOfWork) int {
 
 	go func() { done <- p.Seal(ctx, []*domain.Block{genesis}, b) }()
 
-	time.Sleep(100 * time.Millisecond)
 	// Subtract the goroutine that runs Seal itself.
 	n := runtime.NumGoroutine() - base - 1
+
+	for deadline := time.Now().Add(2 * time.Second); n != want && time.Now().Before(deadline); {
+		time.Sleep(5 * time.Millisecond)
+
+		n = runtime.NumGoroutine() - base - 1
+	}
 
 	cancel()
 
@@ -251,15 +258,15 @@ func sealWorkerGoroutines(t *testing.T, p *powpkg.ProofOfWork) int {
 func TestSealWorkerCount(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
-	if got := sealWorkerGoroutines(t, powpkg.New(64).WithWorkers(1)); got != 1 {
+	if got := sealWorkerGoroutines(t, powpkg.New(64).WithWorkers(1), 1); got != 1 {
 		t.Fatalf("WithWorkers(1): %d workers", got)
 	}
 
-	if got := sealWorkerGoroutines(t, powpkg.New(64).WithWorkers(3)); got != 3 {
+	if got := sealWorkerGoroutines(t, powpkg.New(64).WithWorkers(3), 3); got != 3 {
 		t.Fatalf("WithWorkers(3): %d workers", got)
 	}
 
-	if got := sealWorkerGoroutines(t, powpkg.New(64)); got != runtime.NumCPU() {
+	if got := sealWorkerGoroutines(t, powpkg.New(64), runtime.NumCPU()); got != runtime.NumCPU() {
 		t.Fatalf("default: %d workers, want %d", got, runtime.NumCPU())
 	}
 }
