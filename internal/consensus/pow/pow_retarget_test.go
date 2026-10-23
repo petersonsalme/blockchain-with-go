@@ -170,7 +170,8 @@ var _ = Describe("ProofOfWork difficulty retargeting", func() {
 		It("does not saturate a window target that still fits", func() {
 			// n*T = MaxInt64-3: half of it is 2^62-2, so a window of 2^62-1 ns keeps.
 			edge := powpkg.New(3).WithRetarget(interval, time.Duration(math.MaxInt64/interval))
-			h := history(8, 4, window(7, interval, time.Duration(1<<62-1)))
+			h := history(8, 4, every(time.Second))
+			h[7].Timestamp = h[3].Timestamp.Add(time.Duration(1<<62 - 1))
 			Expect(edge.ExpectedDifficulty(h)).To(Equal(4))
 		})
 
