@@ -227,7 +227,7 @@ func sealWorkerGoroutines(t *testing.T, p *powpkg.ProofOfWork, want int) int {
 	b := &domain.Block{Index: 1, Timestamp: genesis.Timestamp.Add(time.Second), PrevHash: genesis.Hash}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	base := runtime.NumGoroutine()
+	base := settledGoroutines()
 	done := make(chan error, 1)
 
 	go func() { done <- p.Seal(ctx, []*domain.Block{genesis}, b) }()
@@ -269,4 +269,23 @@ func TestSealWorkerCount(t *testing.T) {
 	if got := sealWorkerGoroutines(t, powpkg.New(64), runtime.NumCPU()); got != runtime.NumCPU() {
 		t.Fatalf("default: %d workers, want %d", got, runtime.NumCPU())
 	}
+}
+
+// settledGoroutines returns the goroutine count once it has not changed for
+// 50 ms, so goroutines still winding down from an earlier step do not leak
+// into the baseline of the next one.
+func settledGoroutines() int {
+	n, stable := runtime.NumGoroutine(), 0
+
+	for deadline := time.Now().Add(2 * time.Second); stable < 10 && time.Now().Before(deadline); {
+		time.Sleep(5 * time.Millisecond)
+
+		if m := runtime.NumGoroutine(); m == n {
+			stable++
+		} else {
+			n, stable = m, 0
+		}
+	}
+
+	return n
 }
