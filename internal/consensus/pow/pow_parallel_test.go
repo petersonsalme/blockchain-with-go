@@ -100,6 +100,37 @@ func TestMineParallelSucceedsAndLeaksNothing(t *testing.T) {
 	}
 }
 
+// With 256 workers the smallest nonce that solves difficulty 5 for this block
+// is 359103 = 191 + 1402*256, so the search ends quickly (~1400 hashes per
+// worker) only if each worker starts at its own offset and steps by 256, and
+// only if the first finder cancels the other workers (otherwise each of them
+// keeps searching for its own solution, about a million hashes each).
+func TestMineParallelPartitionsNoncesAndCancelsLosers(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	b := parallelBlock()
+	b.PrevHash = "prev-14"
+
+	done := make(chan error, 1)
+
+	go func() { done <- powpkg.MineParallel(context.Background(), b, 5, 256) }()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("MineParallel did not find the nonce quickly: nonces are not partitioned by worker or losers are not cancelled")
+	}
+
+	// Another worker may win the race with a larger nonce, so only check
+	// that the result is valid.
+	if b.Hash != b.CalculateHash() || b.Hash[:5] != "00000" || b.Difficulty != 5 {
+		t.Fatalf("invalid block %+v", b)
+	}
+}
+
 func TestMineParallelOneWorkerMatchesSequential(t *testing.T) {
 	seq, par := parallelBlock(), parallelBlock()
 
