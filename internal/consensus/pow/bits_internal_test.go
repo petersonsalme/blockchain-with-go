@@ -64,6 +64,10 @@ func TestSolvesDifficultyRejectsMalformedHashes(t *testing.T) {
 		if solvesDifficulty(hash, 1) {
 			t.Errorf("%s hash %q must never solve", name, hash)
 		}
+
+		if !solvesDifficulty(hash, 0) {
+			t.Errorf("%s hash %q must solve d=0, which needs no zero bits", name, hash)
+		}
 	}
 }
 

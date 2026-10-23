@@ -26,7 +26,7 @@ const (
 	MaxDifficulty = 32
 
 	DefaultRetargetInterval = 10
-	DefaultTargetBlockTime  = 2 * time.Second
+	DefaultTargetBlockTime  = time.Duration(2_000_000_000) // 2s
 
 	// RetargetIntervalEnvVar overrides DefaultRetargetInterval with a
 	// non-negative integer; 0 disables retargeting.
@@ -200,9 +200,7 @@ func MineWithContext(ctx context.Context, b *domain.Block, difficulty int) error
 		ctx = context.Background()
 	}
 
-	if difficulty < 0 {
-		difficulty = 0
-	}
+	difficulty = max(difficulty, 0)
 
 	b.Difficulty = difficulty
 
