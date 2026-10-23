@@ -2,7 +2,9 @@ package pow_test
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
+	"math/bits"
 	"runtime"
 	"testing"
 	"time"
@@ -12,6 +14,26 @@ import (
 	powpkg "github.com/petersonsalme/blockchain-with-go/internal/consensus/pow"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 )
+
+func leadingZeroBits(t *testing.T, hash string) int {
+	t.Helper()
+
+	raw, err := hex.DecodeString(hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	zeros := 0
+	for _, octet := range raw {
+		if octet != 0 {
+			return zeros + bits.LeadingZeros8(octet)
+		}
+
+		zeros += 8
+	}
+
+	return zeros
+}
 
 func parallelBlock() *domain.Block {
 	b := &domain.Block{
@@ -94,14 +116,14 @@ func TestMineParallelSucceedsAndLeaksNothing(t *testing.T) {
 			t.Fatalf("workers=%d: %v", w, err)
 		}
 
-		if b.Hash != b.CalculateHash() || b.Hash[:3] != "000" || b.Difficulty != 3 {
+		if b.Hash != b.CalculateHash() || leadingZeroBits(t, b.Hash) < 3 || b.Difficulty != 3 {
 			t.Fatalf("workers=%d: invalid block %+v", w, b)
 		}
 	}
 }
 
-// With 256 workers the smallest nonce that solves difficulty 5 for this block
-// is 359103 = 191 + 1402*256, so the search ends quickly (~1400 hashes per
+// With 256 workers the smallest nonce that solves difficulty 20 (bits) for this
+// block is 361869 = 141 + 1413*256, so the search ends quickly (~1400 hashes per
 // worker) only if each worker starts at its own offset and steps by 256, and
 // only if the first finder cancels the other workers (otherwise each of them
 // keeps searching for its own solution, about a million hashes each).
@@ -109,11 +131,11 @@ func TestMineParallelPartitionsNoncesAndCancelsLosers(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	b := parallelBlock()
-	b.PrevHash = "prev-14"
+	b.PrevHash = "prev-15"
 
 	done := make(chan error, 1)
 
-	go func() { done <- powpkg.MineParallel(context.Background(), b, 5, 256) }()
+	go func() { done <- powpkg.MineParallel(context.Background(), b, 20, 256) }()
 
 	select {
 	case err := <-done:
@@ -126,7 +148,7 @@ func TestMineParallelPartitionsNoncesAndCancelsLosers(t *testing.T) {
 
 	// Another worker may win the race with a larger nonce, so only check
 	// that the result is valid.
-	if b.Hash != b.CalculateHash() || b.Hash[:5] != "00000" || b.Difficulty != 5 {
+	if b.Hash != b.CalculateHash() || leadingZeroBits(t, b.Hash) < 20 || b.Difficulty != 20 {
 		t.Fatalf("invalid block %+v", b)
 	}
 }
