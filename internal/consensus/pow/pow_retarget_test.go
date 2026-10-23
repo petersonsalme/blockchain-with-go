@@ -263,7 +263,7 @@ var _ = Describe("ProofOfWork difficulty retargeting", func() {
 			sealPrev(hist)
 			b := child(3)
 			b.Difficulty = 4
-			for b.Hash = b.CalculateHash(); b.Hash[:4] == "0000"; b.Nonce++ {
+			for b.Hash = b.CalculateHash(); zeroBits(b.Hash) >= 4; b.Nonce++ {
 				b.Hash = b.CalculateHash()
 			}
 			Expect(p.Verify(hist, b)).To(MatchError(consensus.ErrInvalidDifficulty))
@@ -273,7 +273,7 @@ var _ = Describe("ProofOfWork difficulty retargeting", func() {
 			hist = history(7, 3, every(time.Millisecond))
 			sealPrev(hist)
 			b := child(3)
-			for b.Nonce++; b.CalculateHash()[:3] == "000"; b.Nonce++ {
+			for b.Nonce++; zeroBits(b.CalculateHash()) >= 3; b.Nonce++ {
 			}
 			b.Hash = b.CalculateHash()
 			Expect(p.Verify(hist, b)).To(MatchError(consensus.ErrInvalidProofOfWork))
@@ -290,10 +290,10 @@ var _ = Describe("ProofOfWork difficulty retargeting", func() {
 	})
 
 	Describe("configuration", func() {
-		It("defaults to every 10 blocks and a 10s target", func() {
+		It("defaults to every 10 blocks and a 2s target", func() {
 			pinRetargetEnv("", "")
 			Expect(powpkg.RetargetIntervalFromEnv()).To(Equal(10))
-			Expect(powpkg.TargetBlockTimeFromEnv()).To(Equal(10 * time.Second))
+			Expect(powpkg.TargetBlockTimeFromEnv()).To(Equal(2 * time.Second))
 		})
 
 		It("reads valid values, including 0 to disable", func() {

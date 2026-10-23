@@ -123,7 +123,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 	Describe("GenerateBlockWithContext size limit", func() {
 		It("returns a ValidationError without mining when the candidate is too large", func() {
 			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "50")
-			slowPoW := powpkg.NewProofOfWork(8)
+			slowPoW := powpkg.NewProofOfWork(60)
 
 			parent := genesisBlock()
 			done := make(chan struct{})
