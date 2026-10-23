@@ -295,14 +295,14 @@ func (s *Service) Mine(ctx context.Context, txs []domain.Transaction) (*domain.B
 		return nil, err
 	}
 
-	prev, err := s.repo.Last()
-	if err != nil {
-		return nil, err
-	}
 	history, err := s.repo.All()
 	if err != nil {
 		return nil, err
 	}
+	if len(history) == 0 {
+		return nil, storage.ErrEmpty
+	}
+	prev := history[len(history)-1]
 
 	delta, err := domain.BlockDelta(s.utxos, &domain.Block{Index: prev.Index + 1, Transactions: txs}, false)
 	if err != nil {
