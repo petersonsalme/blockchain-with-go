@@ -161,6 +161,19 @@ var _ = Describe("ProofOfWork difficulty retargeting", func() {
 			Expect(p.ExpectedDifficulty(h)).To(Equal(4))
 		})
 
+		It("raises the difficulty when the window spans no time at all", func() {
+			h := history(8, 4, every(time.Second))
+			h[7].Timestamp = h[3].Timestamp
+			Expect(p.ExpectedDifficulty(h)).To(Equal(5))
+		})
+
+		It("does not saturate a window target that still fits", func() {
+			// n*T = MaxInt64-3: half of it is 2^62-2, so a window of 2^62-1 ns keeps.
+			edge := powpkg.New(3).WithRetarget(interval, time.Duration(math.MaxInt64/interval))
+			h := history(8, 4, window(7, interval, time.Duration(1<<62-1)))
+			Expect(edge.ExpectedDifficulty(h)).To(Equal(4))
+		})
+
 		It("saturates the window target instead of overflowing", func() {
 			huge := powpkg.New(3).WithRetarget(interval, time.Duration(math.MaxInt64/2))
 			h := history(8, 4, window(7, interval, time.Hour))
