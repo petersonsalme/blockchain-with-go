@@ -373,11 +373,19 @@ func (s *Service) MinePending(ctx context.Context) (*domain.Block, error) {
 	return s.mineLocked(ctx, s.dropStale(txs))
 }
 
-// fit picks the pool transactions whose sealed block fits domain.MaxBlockBytes:
-// it shrinks the budget handed to the pool by the excess until it does.
+// fit picks the pool transactions whose sealed block fits domain.MaxBlockBytes.
+// The room left by an empty block is the budget handed to the pool, but each
+// transaction after the first also costs a separator byte, so when the block
+// is too large the budget drops to that room less the separators of the
+// selection just made. It falls on every pass, so the loop ends.
 func (s *Service) fit() ([]domain.Transaction, error) {
 	limit := domain.MaxBlockBytes()
-	budget := limit
+	empty, err := sealedSize([]domain.Transaction{})
+	if err != nil {
+		return nil, err
+	}
+	room := limit - empty
+	budget := room
 	for {
 		txs := s.pool.Select(budget)
 		size, err := sealedSize(txs)
@@ -388,7 +396,7 @@ func (s *Service) fit() ([]domain.Transaction, error) {
 		if size <= limit || len(txs) == 0 {
 			return txs, nil
 		}
-		budget -= max(size-limit, 1)
+		budget = room - (len(txs) - 1)
 	}
 }
 

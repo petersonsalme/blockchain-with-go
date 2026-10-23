@@ -62,6 +62,33 @@ var _ = Describe("Service mempool", func() {
 			Expect(ids(svc.Pending())).To(Equal([]string{rich.ID, cheap.ID}))
 		})
 
+		It("ranks a transaction by fee = sum of inputs - sum of outputs", func() {
+			multi := domain.Transaction{
+				Inputs: []domain.TxIn{
+					{PrevTxID: f.ops[0].TxID, OutIndex: f.ops[0].Index},
+					{PrevTxID: f.ops[1].TxID, OutIndex: f.ops[1].Index},
+				},
+				Outputs: []domain.TxOut{
+					{Amount: 6, Address: recipient().Address()},
+					{Amount: 6, Address: recipient().Address()},
+				},
+				Timestamp: time.Now(),
+			}
+			multi.ID = multi.CalculateHash()
+			Expect(domain.SignInput(&multi, 0, f.owner)).To(Succeed())
+			Expect(domain.SignInput(&multi, 1, f.owner)).To(Succeed())
+			single := spendOp(2, 4) // fee 6
+			// multi has fee 8 over a larger size: it ranks below single, but a fee
+			// of 14 (outputs counted once) or a wrapped one would rank it first.
+			sm, ss := mempool.Size(multi), mempool.Size(single)
+			Expect(8 * ss).To(BeNumerically("<", 6*sm))
+			Expect(14 * ss).To(BeNumerically(">", 6*sm))
+
+			Expect(svc.Submit(multi)).To(Succeed())
+			Expect(svc.Submit(single)).To(Succeed())
+			Expect(ids(svc.Pending())).To(Equal([]string{single.ID, multi.ID}))
+		})
+
 		It("builds a default pool without the option", func() {
 			bare, bf := funded(memory.New(), pow.NewProofOfWork(1))
 			Expect(bare.Submit(bf.tx()[0])).To(Succeed())
@@ -332,29 +359,121 @@ var _ = Describe("Service mempool", func() {
 			})
 		}
 
-		It("fits exactly the transactions whose widest sealed block is the limit", func() {
-			for i, out := range []uint64{9, 8, 7, 6, 5} {
-				Expect(svc.Submit(spendOp(i, out))).To(Succeed())
-			}
-			pending := svc.Pending()
-			// Mirrors the widest block the service reserves room for.
-			widest := func(txs []domain.Transaction) int {
+		DescribeTable("fits exactly the transactions whose widest sealed block is the limit",
+			func(count, slack int) {
+				for i, out := range []uint64{9, 8, 7, 6, 5} {
+					Expect(svc.Submit(spendOp(i, out))).To(Succeed())
+				}
+				pending := svc.Pending()
+				// Mirrors the widest block the service reserves room for.
+				widest := func(txs []domain.Transaction) int {
+					zeros := strings.Repeat("0", 64)
+					b := domain.Block{
+						Index: math.MaxInt, Timestamp: time.Date(2000, 1, 1, 0, 0, 0, 123456789, time.FixedZone("", 3600)),
+						Transactions: txs, MerkleRoot: zeros, Hash: zeros, PrevHash: zeros,
+						Nonce: math.MaxInt, Difficulty: math.MaxInt, Validator: zeros, Signature: strings.Repeat("0", 128),
+					}
+					n, err := b.Size()
+					Expect(err).NotTo(HaveOccurred())
+					return n
+				}
+				GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(widest(pending[:count])+slack))
+
+				blk, err := svc.MinePending(context.Background())
+				Expect(err).NotTo(HaveOccurred())
+				if slack < 0 {
+					// A smaller transaction further down may still take the room left.
+					Expect(ids(blk.Transactions)).To(ContainElement(pending[0].ID))
+					Expect(ids(blk.Transactions)).NotTo(ContainElement(pending[1].ID))
+				} else {
+					Expect(ids(blk.Transactions)).To(Equal(ids(pending[:count])))
+				}
+				Expect(svc.Pending()).To(HaveLen(5 - len(blk.Transactions)))
+			},
+			Entry("two transactions", 2, 0),
+			Entry("one byte short of two transactions", 2, -1),
+		)
+
+		It("keeps the best transaction when a cheaper one is exactly as large as an empty block", func() {
+			best := spendOp(0, 4)
+			// Neither Submit nor Mine checks the ID against the content, so pad it
+			// until the transaction is as large as an empty sealed block: then both
+			// fit a budget equal to the limit.
+			empty, err := func() (int, error) {
 				zeros := strings.Repeat("0", 64)
 				b := domain.Block{
 					Index: math.MaxInt, Timestamp: time.Date(2000, 1, 1, 0, 0, 0, 123456789, time.FixedZone("", 3600)),
-					Transactions: txs, MerkleRoot: zeros, Hash: zeros, PrevHash: zeros,
+					Transactions: []domain.Transaction{}, MerkleRoot: zeros, Hash: zeros, PrevHash: zeros,
 					Nonce: math.MaxInt, Difficulty: math.MaxInt, Validator: zeros, Signature: strings.Repeat("0", 128),
 				}
-				n, err := b.Size()
-				Expect(err).NotTo(HaveOccurred())
-				return n
+				return b.Size()
+			}()
+			Expect(err).NotTo(HaveOccurred())
+			stamp := time.Date(2000, 1, 1, 0, 0, 0, 123456789, time.UTC)
+			build := func(pad int) domain.Transaction {
+				tx := domain.Transaction{
+					Inputs:    []domain.TxIn{{PrevTxID: f.ops[1].TxID, OutIndex: f.ops[1].Index}},
+					Outputs:   []domain.TxOut{{Amount: 9, Address: recipient().Address()}},
+					Timestamp: stamp, // fixed: time.Now() trims trailing zeros, so its size varies
+				}
+				tx.ID = tx.CalculateHash()
+				Expect(domain.SignInput(&tx, 0, f.owner)).To(Succeed())
+				tx.ID += strings.Repeat("x", pad)
+				return tx
 			}
-			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(widest(pending[:2])))
+			cheap := build(0)
+			cheap = build(empty - mempool.Size(cheap))
+			Expect(mempool.Size(cheap)).To(Equal(empty))
+
+			Expect(svc.Submit(best)).To(Succeed())
+			Expect(svc.Submit(cheap)).To(Succeed())
+			Expect(ids(svc.Pending())).To(Equal([]string{best.ID, cheap.ID}))
+			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(empty+mempool.Size(best)))
 
 			blk, err := svc.MinePending(context.Background())
 			Expect(err).NotTo(HaveOccurred())
-			Expect(ids(blk.Transactions)).To(Equal(ids(pending[:2])))
-			Expect(svc.Pending()).To(HaveLen(3))
+			Expect(ids(blk.Transactions)).To(Equal([]string{best.ID}))
+			Expect(ids(svc.Pending())).To(Equal([]string{cheap.ID}))
+		})
+
+		It("refills the room the separators leave after an oversized first pick", func() {
+			empty, err := func() (int, error) {
+				zeros := strings.Repeat("0", 64)
+				b := domain.Block{
+					Index: math.MaxInt, Timestamp: time.Date(2000, 1, 1, 0, 0, 0, 123456789, time.FixedZone("", 3600)),
+					Transactions: []domain.Transaction{}, MerkleRoot: zeros, Hash: zeros, PrevHash: zeros,
+					Nonce: math.MaxInt, Difficulty: math.MaxInt, Validator: zeros, Signature: strings.Repeat("0", 128),
+				}
+				return b.Size()
+			}()
+			Expect(err).NotTo(HaveOccurred())
+			stamp := time.Date(2000, 1, 1, 0, 0, 0, 123456789, time.UTC)
+			build := func(op int, out uint64, pad int) domain.Transaction {
+				tx := domain.Transaction{
+					Inputs:    []domain.TxIn{{PrevTxID: f.ops[op].TxID, OutIndex: f.ops[op].Index}},
+					Outputs:   []domain.TxOut{{Amount: out, Address: recipient().Address()}},
+					Timestamp: stamp,
+				}
+				tx.ID = tx.CalculateHash()
+				Expect(domain.SignInput(&tx, 0, f.owner)).To(Succeed())
+				tx.ID += strings.Repeat("x", pad)
+				return tx
+			}
+			// Sizes s, s+1 and s: best and mid fill the room exactly, so their
+			// block is one byte too large (the separator); the next pass must give
+			// the pool room-1, which takes best and last but skips mid.
+			best, mid, last := build(0, 4, 0), build(1, 8, 1), build(2, 9, 0)
+			Expect(mempool.Size(mid)).To(Equal(mempool.Size(best) + 1))
+			Expect(mempool.Size(last)).To(Equal(mempool.Size(best)))
+			for _, tx := range []domain.Transaction{best, mid, last} {
+				Expect(svc.Submit(tx)).To(Succeed())
+			}
+			Expect(ids(svc.Pending())).To(Equal([]string{best.ID, mid.ID, last.ID}))
+			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(empty+2*mempool.Size(best)+1))
+
+			blk, err := svc.MinePending(context.Background())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ids(blk.Transactions)).To(Equal([]string{best.ID, last.ID}))
 		})
 
 		It("fails instead of looping when even an empty block is too large", func() {
