@@ -21,7 +21,7 @@ func main() {
 // newRootCmd builds the bwg command tree; flag defaults read the environment.
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{Use: "bwg", Short: "Blockchain node, wallet and miner", SilenceUsage: true}
-	root.AddCommand(newWalletCmd())
+	root.AddCommand(newWalletCmd(), newMinerCmd())
 	return root
 }
 
