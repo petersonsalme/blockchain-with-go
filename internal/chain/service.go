@@ -5,12 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
+	"github.com/petersonsalme/blockchain-with-go/internal/mempool"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/memory"
 )
@@ -57,6 +59,12 @@ func WithGenesisAllocations(outs []domain.TxOut) Option {
 	return func(s *Service) { s.allocations = outs }
 }
 
+// WithMempool replaces the default pool (mempool.New(mempool.DefaultMaxTxs)).
+// The pool belongs exclusively to the Service.
+func WithMempool(p *mempool.Pool) Option {
+	return func(s *Service) { s.pool = p }
+}
+
 // Service mines blocks onto the chain held by a storage.BlockRepository.
 type Service struct {
 	repo        storage.BlockRepository
@@ -64,6 +72,7 @@ type Service struct {
 	generate    Generator
 	utxos       storage.UTXOSet
 	allocations []domain.TxOut
+	pool        *mempool.Pool
 	diverged    bool
 	// writeSem serializes Mine; a buffered channel lets waiters honour ctx.
 	writeSem chan struct{}
@@ -84,6 +93,9 @@ func NewService(repo storage.BlockRepository, c consensus.Consensus, opts ...Opt
 	}
 	if s.utxos == nil {
 		s.utxos = memory.NewUTXOSet()
+	}
+	if s.pool == nil {
+		s.pool = mempool.New(mempool.DefaultMaxTxs)
 	}
 
 	if _, err := repo.Last(); err != nil {
@@ -272,29 +284,162 @@ func (s *Service) Balance(addr string) (uint64, []UTXO) {
 	return balance, utxos
 }
 
-// Mine seals txs into a new block and appends it to the chain.
-// Every transaction must spend existing, unspent outputs it owns and cover its
-// outputs, otherwise the matching domain error is returned and nothing
-// changes. Calls are serialized; waiting for the turn is bounded by ctx. A
-// rejected block leaves the repository and the UTXO set untouched, and Blocks
-// never waits for Mine, nor do the block queries.
-func (s *Service) Mine(ctx context.Context, txs []domain.Transaction) (*domain.Block, error) {
+// lock takes the write turn, bounded by ctx. The returned func releases it.
+func (s *Service) lock(ctx context.Context) (func(), error) {
 	select {
 	case s.writeSem <- struct{}{}:
-		defer func() { <-s.writeSem }()
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+	release := func() { <-s.writeSem }
 
 	if s.diverged {
+		release()
 		return nil, ErrStateDiverged
 	}
 
 	// select picks at random when both cases are ready; do not mine for a dead ctx.
 	if err := ctx.Err(); err != nil {
+		release()
 		return nil, err
 	}
+	return release, nil
+}
 
+// Mine seals txs into a new block and appends it to the chain.
+// Every transaction must spend existing, unspent outputs it owns and cover its
+// outputs, otherwise the matching domain error is returned and nothing
+// changes. Calls are serialized; waiting for the turn is bounded by ctx. A
+// rejected block leaves the repository, the UTXO set and the pool untouched,
+// and Blocks never waits for Mine, nor do the block queries. An accepted block
+// removes from the pool the transactions it holds and those it conflicts with.
+func (s *Service) Mine(ctx context.Context, txs []domain.Transaction) (*domain.Block, error) {
+	release, err := s.lock(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	return s.mineLocked(ctx, txs)
+}
+
+// Submit admits tx into the pool after the checks Mine applies to a block of
+// that one transaction, against the confirmed UTXO set. An input created by
+// another pool transaction is rejected with domain.ErrInputMissingOrSpent. It
+// never waits for Mine: a block mined meanwhile can leave tx stale, and
+// MinePending discards it.
+func (s *Service) Submit(tx domain.Transaction) error {
+	txs := []domain.Transaction{tx}
+	delta, err := domain.BlockDelta(s.utxos, &domain.Block{Transactions: txs}, false)
+	if err != nil {
+		return err
+	}
+	if err := s.verifyInputs(txs); err != nil {
+		return err
+	}
+
+	// BlockDelta guarantees in >= out and no overflow for a transaction with inputs.
+	var in, out uint64
+	for _, o := range delta.Spent {
+		in += o.Amount
+	}
+	for _, o := range tx.Outputs {
+		out += o.Amount
+	}
+	return s.pool.Add(tx, in-out)
+}
+
+// Pending returns the pool in selection order. It never waits for Mine.
+func (s *Service) Pending() []domain.Transaction {
+	return s.pool.Select(math.MaxInt)
+}
+
+// MinePending mines a block with the pool transactions of highest fee per byte
+// that fit domain.MaxBlockBytes, in selection order, and an empty block when
+// the pool is empty. Transactions that went stale since Submit are dropped
+// from the pool instead of failing the block. Locking and failure semantics
+// are those of Mine.
+func (s *Service) MinePending(ctx context.Context) (*domain.Block, error) {
+	release, err := s.lock(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	txs, err := s.fit()
+	if err != nil {
+		return nil, err
+	}
+	return s.mineLocked(ctx, s.dropStale(txs))
+}
+
+// fit picks the pool transactions whose sealed block fits domain.MaxBlockBytes.
+// The room left by an empty block is the budget handed to the pool, but each
+// transaction after the first also costs a separator byte, so when the block
+// is too large the budget drops to that room less the separators of the
+// selection just made. It falls on every pass, so the loop ends.
+func (s *Service) fit() ([]domain.Transaction, error) {
+	limit := domain.MaxBlockBytes()
+	empty, err := sealedSize([]domain.Transaction{})
+	if err != nil {
+		return nil, err
+	}
+	room := limit - empty
+	budget := room
+	for {
+		txs := s.pool.Select(budget)
+		size, err := sealedSize(txs)
+		if err != nil {
+			return nil, err
+		}
+		// An empty block that is already too large is left to the generator to reject.
+		if size <= limit || len(txs) == 0 {
+			return txs, nil
+		}
+		budget = room - (len(txs) - 1)
+	}
+}
+
+// dropStale removes from the pool, and from txs, the transactions Mine would no
+// longer accept: a Submit that validated before an earlier block can add them
+// after it. The caller holds writeSem, so the UTXO set cannot change underneath.
+func (s *Service) dropStale(txs []domain.Transaction) []domain.Transaction {
+	valid := make([]domain.Transaction, 0, len(txs))
+	var stale []string
+	for i := range txs {
+		one := txs[i : i+1]
+		if _, err := domain.BlockDelta(s.utxos, &domain.Block{Transactions: one}, false); err != nil || s.verifyInputs(one) != nil {
+			stale = append(stale, txs[i].ID)
+			continue
+		}
+		valid = append(valid, txs[i])
+	}
+	s.pool.Remove(stale...)
+	return valid
+}
+
+// sealedSize is the serialized size txs can reach in a sealed block: every
+// header field of the largest width consensus can give it, so the real block
+// is never bigger. The block generator only reserves a hash.
+func sealedSize(txs []domain.Transaction) (int, error) {
+	hash := strings.Repeat("0", 64)
+	b := domain.Block{
+		Index:        math.MaxInt,
+		Timestamp:    time.Date(2000, 1, 1, 0, 0, 0, 123456789, time.FixedZone("", 3600)),
+		Transactions: txs,
+		MerkleRoot:   hash,
+		Hash:         hash,
+		PrevHash:     hash,
+		Nonce:        math.MaxInt,
+		Difficulty:   math.MaxInt,
+		Validator:    hash,
+		Signature:    strings.Repeat("0", 128),
+	}
+	return b.Size()
+}
+
+// mineLocked seals txs and appends the block. The caller holds writeSem.
+func (s *Service) mineLocked(ctx context.Context, txs []domain.Transaction) (*domain.Block, error) {
 	history, err := s.repo.All()
 	if err != nil {
 		return nil, err
@@ -304,7 +449,7 @@ func (s *Service) Mine(ctx context.Context, txs []domain.Transaction) (*domain.B
 	}
 	prev := history[len(history)-1]
 
-	delta, err := domain.BlockDelta(s.utxos, &domain.Block{Index: prev.Index + 1, Transactions: txs}, false)
+	delta, err := domain.BlockDelta(s.utxos, &domain.Block{Transactions: txs}, false)
 	if err != nil {
 		return nil, err
 	}
@@ -336,5 +481,6 @@ func (s *Service) Mine(ctx context.Context, txs []domain.Transaction) (*domain.B
 		return nil, fmt.Errorf("%w: %w", ErrStateDiverged, err)
 	}
 
+	s.pool.Prune(block, s.utxos)
 	return block, nil
 }
