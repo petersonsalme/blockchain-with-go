@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -25,6 +26,13 @@ func (brokenChain) Submit(domain.Transaction) error { return errors.New("write f
 func (brokenChain) Pending() []domain.Transaction   { return nil }
 func (brokenChain) MinePending(context.Context) (*domain.Block, error) {
 	return nil, errors.New("unused")
+}
+
+// txBody is the POST /tx request for tx.
+func txBody(tx domain.Transaction) string {
+	b, err := json.Marshal(tx)
+	Expect(err).NotTo(HaveOccurred())
+	return string(b)
 }
 
 var _ = Describe("Mempool routes", func() {
@@ -184,6 +192,158 @@ var _ = Describe("Mempool routes", func() {
 		rec = do(http.MethodPost, "/mempool")
 		Expect(rec.Code).To(Equal(http.StatusMethodNotAllowed))
 		Expect(rec.Header().Get("Allow")).To(Equal("GET, HEAD"))
+	})
+
+	Describe("POST /tx", func() {
+		postTx := func(body string) *httptest.ResponseRecorder {
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/tx", strings.NewReader(body)))
+			return rec
+		}
+
+		// errorCode decodes the code of an error response.
+		errorCode := func(rec *httptest.ResponseRecorder) string {
+			var body errorResponse
+			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
+			return body.Code
+		}
+
+		It("admits a valid transaction with 202 and mines nothing", func() {
+			tx := funds.tx(newWallet().Address(), 42)
+
+			rec := postTx(txBody(tx))
+
+			Expect(rec.Code).To(Equal(http.StatusAccepted))
+			var body submitResponse
+			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
+			Expect(body.ID).To(Equal(tx.ID))
+
+			var pool mempoolResponse
+			Expect(json.Unmarshal(do(http.MethodGet, "/mempool").Body.Bytes(), &pool)).To(Succeed())
+			Expect(txIDs(pool.Transactions)).To(Equal([]string{tx.ID}))
+
+			var blocks pageResponse
+			Expect(json.Unmarshal(do(http.MethodGet, "/blocks").Body.Bytes(), &blocks)).To(Succeed())
+			Expect(blocks.Blocks).To(HaveLen(1))
+		})
+
+		It("fills in an empty ID with the transaction hash", func() {
+			tx := funds.tx(newWallet().Address(), 42)
+			tx.ID = ""
+			want := tx.CalculateHash()
+
+			rec := postTx(txBody(tx))
+
+			Expect(rec.Code).To(Equal(http.StatusAccepted))
+			var body submitResponse
+			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
+			Expect(body.ID).To(Equal(want))
+		})
+
+		It("answers 409 duplicate_tx when the same transaction is sent twice", func() {
+			body := txBody(funds.tx(newWallet().Address(), 42))
+			Expect(postTx(body).Code).To(Equal(http.StatusAccepted))
+
+			rec := postTx(body)
+
+			Expect(rec.Code).To(Equal(http.StatusConflict))
+			Expect(errorCode(rec)).To(Equal("duplicate_tx"))
+		})
+
+		It("answers 409 mempool_conflict when a second transaction spends the same output", func() {
+			Expect(postTx(txBody(funds.spend(0, newWallet().Address(), 42))).Code).To(Equal(http.StatusAccepted))
+
+			rec := postTx(txBody(funds.spend(0, newWallet().Address(), 41)))
+
+			Expect(rec.Code).To(Equal(http.StatusConflict))
+			Expect(errorCode(rec)).To(Equal("mempool_conflict"))
+		})
+
+		It("answers 409 mempool_full when a full pool cannot evict for the fee rate", func() {
+			build(chain.WithMempool(mempool.New(1)))
+			to := newWallet().Address()
+			Expect(postTx(txBody(funds.tx(to, 42))).Code).To(Equal(http.StatusAccepted))
+
+			rec := postTx(txBody(funds.tx(to, 99)))
+
+			Expect(rec.Code).To(Equal(http.StatusConflict))
+			Expect(errorCode(rec)).To(Equal("mempool_full"))
+		})
+
+		It("answers 422 insufficient_inputs when outputs exceed inputs", func() {
+			rec := postTx(txBody(funds.tx(newWallet().Address(), bankAmount+1)))
+
+			Expect(rec.Code).To(Equal(http.StatusUnprocessableEntity))
+			Expect(errorCode(rec)).To(Equal(domain.CodeInsufficientInputs))
+		})
+
+		It("answers 409 input_missing_or_spent when the output does not exist", func() {
+			rec := postTx(txBody(funds.spend(250, newWallet().Address(), 42)))
+
+			Expect(rec.Code).To(Equal(http.StatusConflict))
+			Expect(errorCode(rec)).To(Equal(domain.CodeInputMissingOrSpent))
+		})
+
+		It("answers 400 missing_timestamp when the timestamp is zero", func() {
+			tx := funds.tx(newWallet().Address(), 42)
+			tx.Timestamp = time.Time{}
+			tx.ID = ""
+
+			rec := postTx(txBody(tx))
+
+			Expect(rec.Code).To(Equal(http.StatusBadRequest))
+			Expect(errorCode(rec)).To(Equal(domain.CodeMissingTimestamp))
+		})
+
+		It("answers 400 when the ID does not match the transaction", func() {
+			tx := funds.tx(newWallet().Address(), 42)
+			tx.ID = strings.Repeat("0", 64)
+
+			rec := postTx(txBody(tx))
+
+			Expect(rec.Code).To(Equal(http.StatusBadRequest))
+			Expect(rec.Body.String()).To(ContainSubstring("invalid transaction"))
+		})
+
+		It("answers 400 invalid request body when the body is not JSON", func() {
+			rec := postTx("not json")
+
+			Expect(rec.Code).To(Equal(http.StatusBadRequest))
+			Expect(rec.Body.String()).To(ContainSubstring("invalid request body"))
+		})
+
+		It("answers 413 request_too_large when the body exceeds the limit", func() {
+			rec := postTx(strings.Repeat(" ", int(maxRequestBodyBytes())+1))
+
+			Expect(rec.Code).To(Equal(http.StatusRequestEntityTooLarge))
+			Expect(errorCode(rec)).To(Equal("request_too_large"))
+		})
+
+		It("mines submitted transactions in fee-rate order", func() {
+			to := newWallet().Address()
+			txs := []domain.Transaction{funds.tx(to, 90), funds.tx(to, 50), funds.tx(to, 10)}
+			for _, tx := range txs {
+				Expect(postTx(txBody(tx)).Code).To(Equal(http.StatusAccepted))
+			}
+
+			rec := do(http.MethodPost, "/mine")
+
+			Expect(rec.Code).To(Equal(http.StatusCreated))
+			var block domain.Block
+			Expect(json.Unmarshal(rec.Body.Bytes(), &block)).To(Succeed())
+			Expect(txIDs(block.Transactions)).To(Equal([]string{txs[2].ID, txs[1].ID, txs[0].ID}))
+
+			var pool mempoolResponse
+			Expect(json.Unmarshal(do(http.MethodGet, "/mempool").Body.Bytes(), &pool)).To(Succeed())
+			Expect(pool.Transactions).To(BeEmpty())
+		})
+
+		It("answers 405 with Allow: POST when the method is wrong", func() {
+			rec := do(http.MethodGet, "/tx")
+
+			Expect(rec.Code).To(Equal(http.StatusMethodNotAllowed))
+			Expect(rec.Header().Get("Allow")).To(Equal("POST"))
+		})
 	})
 })
 

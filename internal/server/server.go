@@ -122,6 +122,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.handleGetBlockchain)
 	mux.HandleFunc("POST /{$}", s.handleWriteBlock)
+	mux.HandleFunc("POST /tx", s.handleSubmitTx)
 	mux.HandleFunc("POST /mine", s.handleMine)
 	mux.HandleFunc("GET /mempool", s.handleGetMempool)
 	mux.HandleFunc("GET /blocks", s.handleGetBlocks)
@@ -133,6 +134,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /metrics", s.handleMetrics)
 	mux.HandleFunc("POST /legacy/bpm", s.handleLegacyBPM)
 	mux.Handle("/{$}", methodNotAllowed("GET, HEAD, POST"))
+	mux.Handle("/tx", methodNotAllowed("POST"))
 	mux.Handle("/mine", methodNotAllowed("POST"))
 	mux.Handle("/mempool", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/blocks", methodNotAllowed("GET, HEAD"))
@@ -423,20 +425,7 @@ func (s *Server) handleWriteBlock(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = r.Body.Close() }() // closing a server request body cannot fail usefully
 
 	var m Message
-
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes())
-	decoder := json.NewDecoder(r.Body)
-	if err := decoder.Decode(&m); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			respondWithJSON(w, http.StatusRequestEntityTooLarge, errorResponse{
-				Error:   "request body exceeds the maximum size",
-				Code:    requestTooLargeCode,
-				Details: map[string]any{"max": tooLarge.Limit},
-			})
-			return
-		}
-		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid request body"})
+	if !decodeJSONBody(w, r, &m) {
 		return
 	}
 
@@ -446,21 +435,64 @@ func (s *Server) handleWriteBlock(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for i := range m.Transactions {
-		if m.Transactions[i].ID == "" {
-			m.Transactions[i].ID = m.Transactions[i].CalculateHash()
-		}
-		if err := m.Transactions[i].Validate(); err != nil {
-			respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: fmt.Sprintf("invalid transaction: %s", err.Error())})
-			return
-		}
-		// Timestamp is signed, so the node must not fill it in.
-		if m.Transactions[i].Timestamp.IsZero() {
-			respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "transaction timestamp is required", Code: domain.CodeMissingTimestamp})
+		if !checkTx(w, &m.Transactions[i]) {
 			return
 		}
 	}
 
 	s.mineAndRespond(w, r, func(ctx context.Context) (*domain.Block, error) { return s.chain.Mine(ctx, m.Transactions) })
+}
+
+// handleSubmitTx admits one signed transaction into the pool; it never mines.
+func (s *Server) handleSubmitTx(w http.ResponseWriter, r *http.Request) {
+	defer func() { _ = r.Body.Close() }() // closing a server request body cannot fail usefully
+
+	var tx domain.Transaction
+	if !decodeJSONBody(w, r, &tx) || !checkTx(w, &tx) {
+		return
+	}
+	if err := s.chain.Submit(tx); err != nil {
+		respondWithSubmitError(w, err)
+		return
+	}
+	respondWithJSON(w, http.StatusAccepted, submitResponse{ID: tx.ID})
+}
+
+// decodeJSONBody decodes the request body into v, bounded by maxRequestBodyBytes.
+// On failure it answers 413 or 400 and reports false.
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, v any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes())
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			respondWithJSON(w, http.StatusRequestEntityTooLarge, errorResponse{
+				Error:   "request body exceeds the maximum size",
+				Code:    requestTooLargeCode,
+				Details: map[string]any{"max": tooLarge.Limit},
+			})
+			return false
+		}
+		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid request body"})
+		return false
+	}
+	return true
+}
+
+// checkTx fills in an empty ID and rejects a wrong ID or a missing timestamp with 400.
+func checkTx(w http.ResponseWriter, tx *domain.Transaction) bool {
+	if tx.ID == "" {
+		tx.ID = tx.CalculateHash()
+	}
+	if err := tx.Validate(); err != nil {
+		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: fmt.Sprintf("invalid transaction: %s", err.Error())})
+		return false
+	}
+	// Timestamp is signed, so the node must not fill it in.
+	if tx.Timestamp.IsZero() {
+		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "transaction timestamp is required", Code: domain.CodeMissingTimestamp})
+		return false
+	}
+	return true
 }
 
 // handleMine mines a block from the pool; the request body is ignored.
