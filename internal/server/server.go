@@ -114,25 +114,40 @@ func maxRequestBodyBytes() int64 {
 	return 2 * int64(domain.MaxBlockBytes())
 }
 
+// route is one method pattern that Handler registers.
+type route struct {
+	pattern string
+	handler http.HandlerFunc
+}
+
+// routes lists the method patterns of Handler; contract_test.go checks them against openapi.yaml.
+func (s *Server) routes() []route {
+	return []route{
+		{"GET /{$}", s.handleGetBlockchain},
+		{"POST /{$}", s.handleWriteBlock},
+		{"POST /tx", s.handleSubmitTx},
+		{"POST /mine", s.handleMine},
+		{"GET /mempool", s.handleGetMempool},
+		{"GET /blocks", s.handleGetBlocks},
+		{"GET /block/{ref}", s.handleGetBlock},
+		{"GET /tx/{id}", s.handleGetTx},
+		{"GET /tx/{id}/proof", s.handleGetTxProof},
+		{"GET /balance/{addr}", s.handleGetBalance},
+		{"GET /health", s.handleHealth},
+		{"GET /metrics", s.handleMetrics},
+		{"POST /legacy/bpm", s.handleLegacyBPM},
+	}
+}
+
 // Handler returns the routes of s.
 //
 // Each path also registers a method-less fallback: it is less specific than the method
 // patterns, so it only catches the other methods and answers 405 with an Allow header.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{$}", s.handleGetBlockchain)
-	mux.HandleFunc("POST /{$}", s.handleWriteBlock)
-	mux.HandleFunc("POST /tx", s.handleSubmitTx)
-	mux.HandleFunc("POST /mine", s.handleMine)
-	mux.HandleFunc("GET /mempool", s.handleGetMempool)
-	mux.HandleFunc("GET /blocks", s.handleGetBlocks)
-	mux.HandleFunc("GET /block/{ref}", s.handleGetBlock)
-	mux.HandleFunc("GET /tx/{id}", s.handleGetTx)
-	mux.HandleFunc("GET /tx/{id}/proof", s.handleGetTxProof)
-	mux.HandleFunc("GET /balance/{addr}", s.handleGetBalance)
-	mux.HandleFunc("GET /health", s.handleHealth)
-	mux.HandleFunc("GET /metrics", s.handleMetrics)
-	mux.HandleFunc("POST /legacy/bpm", s.handleLegacyBPM)
+	for _, rt := range s.routes() {
+		mux.HandleFunc(rt.pattern, rt.handler)
+	}
 	mux.Handle("/{$}", methodNotAllowed("GET, HEAD, POST"))
 	mux.Handle("/tx", methodNotAllowed("POST"))
 	mux.Handle("/mine", methodNotAllowed("POST"))
