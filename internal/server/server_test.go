@@ -148,6 +148,20 @@ func (s *spyMineChain) Mine(ctx context.Context, txs []domain.Transaction) (*dom
 	return &domain.Block{Index: 1, Hash: "0000000000000000000000000000000000000000000000000000000000000001"}, nil
 }
 
+// recordingChain records the transactions each Mine call receives.
+type recordingChain struct {
+	brokenChain
+	mu  sync.Mutex
+	txs [][]domain.Transaction
+}
+
+func (r *recordingChain) Mine(ctx context.Context, txs []domain.Transaction) (*domain.Block, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.txs = append(r.txs, txs)
+	return &domain.Block{Index: 1, Hash: "00000000000000000000000000000000000000000000000000000000000000aa"}, nil
+}
+
 var _ = Describe("Server", func() {
 	var (
 		router http.Handler
@@ -186,6 +200,24 @@ var _ = Describe("Server", func() {
 	})
 
 	Describe("POST / (handleWriteBlock)", func() {
+		It("routes POST / through the injected Chain", func() {
+			spy := &recordingChain{}
+			srv, err := NewServer(spy, Config{})
+			Expect(err).NotTo(HaveOccurred())
+
+			sent := funds.tx(newWallet().Address(), 42)
+			rec := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(payloadOf(sent))))
+
+			Expect(rec.Code).To(Equal(http.StatusCreated))
+			Expect(rec.Body.String()).To(ContainSubstring("00000000000000000000000000000000000000000000000000000000000000aa"))
+			spy.mu.Lock()
+			defer spy.mu.Unlock()
+			Expect(spy.txs).To(HaveLen(1))
+			Expect(spy.txs[0]).To(HaveLen(1))
+			Expect(spy.txs[0][0].ID).To(Equal(sent.ID))
+		})
+
 		Context("when receiving a valid block payload", func() {
 			It("returns 201 Created, the new block with populated transaction IDs, and appends to the chain", func() {
 				initialLen := chainLen()
