@@ -56,6 +56,7 @@ var transactionErrors = []struct {
 	{domain.ErrInputOwnerMismatch, http.StatusBadRequest, domain.CodeInputOwnerMismatch},
 	{domain.ErrInvalidOutput, http.StatusBadRequest, domain.CodeInvalidOutput},
 	{domain.ErrMissingInputs, http.StatusBadRequest, domain.CodeMissingInputs},
+	{domain.ErrCoinbaseTooLarge, http.StatusBadRequest, domain.CodeCoinbaseTooLarge},
 	{domain.ErrInputMissingOrSpent, http.StatusConflict, domain.CodeInputMissingOrSpent},
 	{domain.ErrDoubleSpend, http.StatusConflict, domain.CodeDoubleSpend},
 	{domain.ErrInsufficientInputs, http.StatusUnprocessableEntity, domain.CodeInsufficientInputs},

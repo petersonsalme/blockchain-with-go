@@ -168,30 +168,30 @@ var _ = Describe("Service UTXO rules", func() {
 					bad := newRepo()
 					Expect(bad.Append(&domain.Block{Index: 0})).To(Succeed())
 					Expect(bad.Append(&domain.Block{Index: 1, Transactions: []domain.Transaction{
-						{Outputs: []domain.TxOut{{Amount: 1, Address: other.Address()}}},
+						{Outputs: []domain.TxOut{{Amount: domain.InitialSubsidy + 1, Address: other.Address()}}},
 					}})).To(Succeed())
 					_, err := NewService(bad, eng)
-					Expect(err).To(MatchError(domain.ErrMissingInputs))
+					Expect(err).To(MatchError(domain.ErrCoinbaseTooLarge))
 				})
 
 				It("treats a first block with Index 5 as a regular block, not the genesis", func() {
 					bad := newRepo()
 					Expect(bad.Append(&domain.Block{Index: 5, Transactions: []domain.Transaction{
-						{Outputs: []domain.TxOut{{Amount: 1, Address: other.Address()}}},
+						{Outputs: []domain.TxOut{{Amount: domain.InitialSubsidy + 1, Address: other.Address()}}},
 					}})).To(Succeed())
 					_, err := NewService(bad, eng)
-					Expect(err).To(MatchError(domain.ErrMissingInputs))
+					Expect(err).To(MatchError(domain.ErrCoinbaseTooLarge))
 				})
 
 				It("treats an Index 0 block at position 1 as a regular block, not the genesis", func() {
 					stub := &stubRepo{blocks: []*domain.Block{
 						{Index: 0},
 						{Index: 0, Transactions: []domain.Transaction{
-							{Outputs: []domain.TxOut{{Amount: 1, Address: other.Address()}}},
+							{Outputs: []domain.TxOut{{Amount: domain.InitialSubsidy + 1, Address: other.Address()}}},
 						}},
 					}}
 					_, err := NewService(stub, eng)
-					Expect(err).To(MatchError(domain.ErrMissingInputs))
+					Expect(err).To(MatchError(domain.ErrCoinbaseTooLarge))
 				})
 
 				It("rebuilds the indexes of a repository written without them", func() {

@@ -22,6 +22,7 @@ const (
 	CodeInputOwnerMismatch  = "input_owner_mismatch"
 	CodeInvalidOutput       = "invalid_output"
 	CodeMissingInputs       = "missing_inputs"
+	CodeCoinbaseTooLarge    = "coinbase_too_large"
 )
 
 // ValidationError is a structured, machine-readable block rule violation.
