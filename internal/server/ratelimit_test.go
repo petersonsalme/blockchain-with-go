@@ -316,11 +316,49 @@ var _ = Describe("Rate Limiting", func() {
 			wrapped.ServeHTTP(rec1, req1)
 			Expect(rec1.Code).To(Equal(http.StatusOK))
 
+			// The bucket is keyed by the bare host, not by an empty or port-suffixed key
+			limiter.mu.Lock()
+			Expect(limiter.buckets).To(HaveKey("10.20.30.40"))
+			Expect(limiter.buckets).To(HaveLen(1))
+			limiter.mu.Unlock()
+
 			req2 := httptest.NewRequest("GET", "/", nil)
 			req2.RemoteAddr = "10.20.30.40"
 			rec2 := httptest.NewRecorder()
 			wrapped.ServeHTTP(rec2, req2)
 			Expect(rec2.Code).To(Equal(http.StatusTooManyRequests))
+
+			// A different port-less address has its own bucket
+			req3 := httptest.NewRequest("GET", "/", nil)
+			req3.RemoteAddr = "10.20.30.41"
+			rec3 := httptest.NewRecorder()
+			wrapped.ServeHTTP(rec3, req3)
+			Expect(rec3.Code).To(Equal(http.StatusOK))
+		})
+
+		It("does not refill or penalize a bucket when the clock goes back", func() {
+			const n = 60 // refill rate: 1 token/sec
+			limiter := newRateLimiter(n, nowFunc)
+			wrapped := limiter.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+			send := func(addr string) int {
+				req := httptest.NewRequest("GET", "/", nil)
+				req.RemoteAddr = addr
+				rec := httptest.NewRecorder()
+				wrapped.ServeHTTP(rec, req)
+				return rec.Code
+			}
+
+			t0 := currentTime
+			Expect(send("10.9.9.9:1")).To(Equal(http.StatusOK)) // 59 tokens left at t0
+
+			// The clock goes 10s back: no refill and no token loss from the negative elapsed time
+			currentTime = t0.Add(-10 * time.Second)
+			for i := 0; i < n-1; i++ {
+				Expect(send("10.9.9.9:1")).To(Equal(http.StatusOK))
+			}
+			Expect(send("10.9.9.9:1")).To(Equal(http.StatusTooManyRequests))
 		})
 
 		It("handles 50 concurrent requests from same IP with N=10 and frozen clock", func() {
