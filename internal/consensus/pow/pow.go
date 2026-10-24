@@ -6,8 +6,10 @@ import (
 	"math"
 	"math/bits"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus"
@@ -38,6 +40,10 @@ const (
 // hashBits is the size of a SHA-256 hash, the highest difficulty that can be solved.
 const hashBits = 256
 
+// WorkersEnvVar overrides the default number of mining workers, runtime.NumCPU(),
+// with an integer >= 1.
+const WorkersEnvVar = "MINING_WORKERS"
+
 // DifficultyEnvVar overrides DefaultDifficulty when it holds a non-negative integer.
 const DifficultyEnvVar = "POW_DIFFICULTY"
 
@@ -53,6 +59,9 @@ type ProofOfWork struct {
 	RetargetInterval int
 	// TargetBlockTime is the intended time between blocks.
 	TargetBlockTime time.Duration
+	// Workers is the number of goroutines Seal searches nonces with; 0 means
+	// runtime.NumCPU().
+	Workers int
 }
 
 func New(difficulty int) *ProofOfWork {
@@ -65,7 +74,7 @@ func NewProofOfWork(difficulty int) *ProofOfWork {
 
 // NewFromEnv builds a ProofOfWork from POW_DIFFICULTY, POW_RETARGET_INTERVAL and TARGET_BLOCK_TIME.
 func NewFromEnv() *ProofOfWork {
-	return New(DifficultyFromEnv()).WithRetarget(RetargetIntervalFromEnv(), TargetBlockTimeFromEnv())
+	return New(DifficultyFromEnv()).WithRetarget(RetargetIntervalFromEnv(), TargetBlockTimeFromEnv()).WithWorkers(WorkersFromEnv())
 }
 
 // NewProofOfWorkFromEnv builds a ProofOfWork from POW_DIFFICULTY, POW_RETARGET_INTERVAL and TARGET_BLOCK_TIME.
@@ -106,6 +115,31 @@ func TargetBlockTimeFromEnv() time.Duration {
 	}
 
 	return target
+}
+
+// WorkersFromEnv returns the mining worker count configured in the environment:
+// MINING_WORKERS when it is an integer >= 1, runtime.NumCPU() otherwise.
+func WorkersFromEnv() int {
+	workers, err := strconv.Atoi(os.Getenv(WorkersEnvVar))
+	if err != nil || workers < 1 {
+		return runtime.NumCPU()
+	}
+
+	return workers
+}
+
+// WithWorkers sets the number of mining workers and returns p.
+func (p *ProofOfWork) WithWorkers(n int) *ProofOfWork {
+	p.Workers = n
+	return p
+}
+
+func (p *ProofOfWork) workers() int {
+	if p.Workers < 1 {
+		return runtime.NumCPU()
+	}
+
+	return p.Workers
 }
 
 // WithRetarget enables retargeting every interval blocks towards target per
@@ -158,7 +192,7 @@ func (p *ProofOfWork) ExpectedDifficulty(history []*domain.Block) int {
 
 // Seal mines b at the difficulty ExpectedDifficulty names for history.
 func (p *ProofOfWork) Seal(ctx context.Context, history []*domain.Block, b *domain.Block) error {
-	return MineWithContext(ctx, b, p.ExpectedDifficulty(history))
+	return MineParallel(ctx, b, p.ExpectedDifficulty(history), p.workers())
 }
 
 // Verify checks the block against its predecessor, the last block of history,
@@ -214,6 +248,56 @@ func MineWithContext(ctx context.Context, b *domain.Block, difficulty int) error
 			b.Hash = hash
 			return nil
 		}
+	}
+}
+
+// MineParallel searches for a nonce like MineWithContext, with workers
+// goroutines: worker i tries the nonces i, i+workers, i+2*workers, … on its own
+// copy of the block. The first valid nonce found cancels the others, and
+// MineParallel returns only after all of them stopped. Any valid nonce is
+// accepted, so the one found may differ between runs when workers > 1. On
+// success it stores nonce, difficulty and hash on b; on error b is unchanged.
+func MineParallel(ctx context.Context, b *domain.Block, difficulty, workers int) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	difficulty = max(difficulty, 0)
+	workers = max(workers, 1)
+
+	searchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	found := make(chan domain.Block, workers)
+
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		c := *b
+		c.Difficulty = difficulty
+
+		wg.Add(1)
+		go func(start int) {
+			defer wg.Done()
+
+			for c.Nonce = start; searchCtx.Err() == nil; c.Nonce += workers {
+				if hash := c.CalculateHash(); solvesDifficulty(hash, difficulty) {
+					c.Hash = hash
+					found <- c
+					cancel()
+					return
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	select {
+	case winner := <-found:
+		b.Nonce, b.Difficulty, b.Hash = winner.Nonce, winner.Difficulty, winner.Hash
+		return nil
+	default:
+		return ctx.Err()
 	}
 }
 

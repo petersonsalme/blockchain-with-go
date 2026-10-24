@@ -9,6 +9,7 @@ require (
 	github.com/onsi/ginkgo/v2 v2.1.4
 	github.com/onsi/gomega v1.20.0
 	go.etcd.io/bbolt v1.4.3
+	go.uber.org/goleak v1.3.0
 	golang.org/x/crypto v0.58.0
 )
 
