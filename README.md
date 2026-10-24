@@ -95,6 +95,22 @@ func main() {
 $ CONSENSUS=poa POA_VALIDATORS=<hex> POA_KEYSTORE=validator.key POA_KEYSTORE_PASSWORD=choose-a-password go run ./cmd/bwg node
 ```
 
+### HD wallet (BIP-39 + SLIP-0010)
+
+The `wallet` package supports hierarchical deterministic (HD) wallets using BIP-39 English mnemonics (12 or 24 words) and SLIP-0010 ed25519 key derivation. A seed is generated with an optional passphrase and keys are derived along hardened-only paths such as `m/44'/1'/0'/0'/0'` (see [ADR-0014](docs/adr/0014-hd-wallet-slip10.md)). The derived key is a standard `*wallet.Wallet` that can be saved with `Save`, persisting the derived key rather than the mnemonic.
+
+```go
+m, err := wallet.NewMnemonic(24)
+if err != nil {
+	log.Fatal(err)
+}
+w, err := wallet.FromMnemonic(m, "optional passphrase", "m/44'/1'/0'/0'/0'")
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(w.Address())
+```
+
 ## Architectural Trade-offs
 1. **In-Memory Storage vs. Persistence**: The node supports both in-memory and persistent disk storage. When `DATA_DIR` is set, blocks and hash indexes are persisted to `$DATA_DIR/chain.db` via the bbolt adapter (`internal/storage/bolt`). When `DATA_DIR` is empty, state lives in memory (`internal/storage/memory`) and is lost on restart. The UTXO set remains derived in memory and is rebuilt from the chain at startup (ADR-0001, ADR-0004).
 2. **Centralization vs. P2P Network**: Nodes talk to each other over the same HTTP server, with no second port and no new dependency ([ADR-0013](docs/adr/0013-p2p-over-http.md)). A node says hello to its peers (`POST /p2p/hello`: protocol version, genesis hash, height, tip), refuses incompatible ones, exchanges peer addresses (`GET /p2p/peers`) and keeps a persisted list, starting from `SEED_PEERS`. The price is polling: a "connection" is a peer entry that a hello created and a later round refreshes every `PEER_INTERVAL`, so a peer's height is at most one round old. Blocks and transactions do not travel between nodes yet (gossip and sync are separate roadmap items), there is no authentication between peers and a node dials the addresses its peers advertise (see [SECURITY.md](SECURITY.md)). Two independently started nodes only pair when their genesis blocks are identical.
@@ -121,6 +137,7 @@ Design decisions live in [`docs/adr/`](docs/adr/0009-merkle-tree.md):
 | [0009](docs/adr/0009-merkle-tree.md) | Transaction Merkle tree in the block header (RFC 6962 odd-node rule) |
 | [0010](docs/adr/0010-prometheus-metrics.md) | Prometheus metrics written by hand, no client library |
 | [0012](docs/adr/0012-difficulty-bits.md) | Proof-of-work difficulty counts leading zero bits; defaults realigned with `MINING_TIMEOUT` |
+| [0014](docs/adr/0014-hd-wallet-slip10.md) | HD wallet: BIP-39 mnemonics with SLIP-0010 ed25519 derivation (hardened only) |
 | [0015](docs/adr/0015-coinbase-and-halving.md) | Coinbase reward capped at `Subsidy(height) + fees`, with halving every 210,000 blocks |
 | [0016](docs/adr/0016-bwg-cli-composition-root.md) | One `bwg` binary is the composition root; `bwg node` replaces `cmd/node` |
 
