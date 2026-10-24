@@ -208,6 +208,17 @@ $ go clean -testcache
 $ go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --timeout-coefficient 20 ./internal/<pacote>
 ```
 
+### Rebuilding the indexes
+
+The bbolt file keeps the blocks plus derived indexes (UTXO set, undo data, transaction heights, transactions by address; ADR-0011). A `chain.db` written before ADR-0011 is reindexed by the node itself at startup, so nothing needs to be done. For manual repair (for example after editing the file or restoring a partial backup), stop the node and run:
+
+```shell
+$ DATA_DIR=./data go run ./cmd/node -reindex
+reindexed: tip height 42
+```
+
+`-reindex` opens `$DATA_DIR/chain.db`, drops and rebuilds the indexes from the blocks in one transaction, prints the tip height (`reindexed: empty chain` when there are no blocks) and exits with code 0 without opening an HTTP port. Running it twice leaves the file in the same state as running it once. It exits with a non-zero code and an error on stderr when `DATA_DIR` is empty (the in-memory repository has nothing to rebuild), when `DATA_DIR` does not exist, or when another process holds `chain.db` (the lock wait is 1 second). `DATA_DIR` is also read from `.env` when present.
+
 ### Logs and shutdown
 
 The node writes one structured JSON log line (`log/slog`) to stderr for every HTTP request, including `429` answers from the rate limiter:
