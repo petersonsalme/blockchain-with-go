@@ -513,7 +513,7 @@ BPM payloads cannot be signed, so the endpoint answers `410 Gone` (with `Depreca
 | `422 Unprocessable Entity` | Block timestamp earlier than its parent or more than 2h in the future | `{"error": "...", "code": "timestamp_before_parent" \| "timestamp_too_far_in_future", "details": {...}}` |
 | `409 Conflict` | Another writer appended a block between reading the chain tip and appending (block no longer extends the tip) | `{"error": "...", "code": "chain_conflict"}` |
 | `413 Request Entity Too Large` | `POST /` body larger than 2× `MAX_BLOCK_BYTES` | `{"error": "...", "code": "request_too_large", "details": {"max": 2000}}` |
-| `429 Too Many Requests` | Request rate limit exceeded for client IP | `{"error": "rate limit exceeded", "code": "rate_limited"}` |
+| `429 Too Many Requests` | Request rate limit exceeded for client IP; the `Retry-After` header gives the whole seconds until the next token | `{"error": "rate limit exceeded", "code": "rate_limited"}` |
 | `504 Gateway Timeout` | Mining exceeded deadline set by `MINING_TIMEOUT` | `{"error": "mining timeout exceeded"}` |
 | `500 Internal Server Error` | Unexpected internal server error | `{"error": "..."}` |
 

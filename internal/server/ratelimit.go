@@ -12,6 +12,10 @@ import (
 // RateLimitEnvVar overrides the default rate limit when set.
 const RateLimitEnvVar = "RATE_LIMIT"
 
+// sweepInterval bounds how often allow scans the buckets for eviction: every
+// bucket refills from empty to full in one minute, whatever the rate (ADR-0013).
+const sweepInterval = time.Minute
+
 // ParseRateLimit reads a RATE_LIMIT value: positive integer requests per minute.
 // Empty, invalid and non-positive values yield 0 (disabled).
 func ParseRateLimit(raw string) int {
@@ -32,6 +36,7 @@ type rateLimiter struct {
 	rateLimit int
 	now       func() time.Time
 	buckets   map[string]*ipBucket
+	lastSweep time.Time
 }
 
 func newRateLimiter(rateLimit int, now func() time.Time) *rateLimiter {
@@ -58,10 +63,13 @@ func (l *rateLimiter) allow(remoteAddr string) (bool, int) {
 	refillRate := float64(l.rateLimit) / 60.0
 	maxTokens := float64(l.rateLimit)
 
-	for k, b := range l.buckets {
-		if k != host && b.tokens+now.Sub(b.lastCheck).Seconds()*refillRate >= maxTokens {
-			delete(l.buckets, k)
+	if now.Sub(l.lastSweep) >= sweepInterval || now.Before(l.lastSweep) {
+		for k, b := range l.buckets {
+			if k != host && b.tokens+now.Sub(b.lastCheck).Seconds()*refillRate >= maxTokens {
+				delete(l.buckets, k)
+			}
 		}
+		l.lastSweep = now
 	}
 
 	b, ok := l.buckets[host]
