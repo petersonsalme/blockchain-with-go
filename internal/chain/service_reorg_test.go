@@ -635,6 +635,9 @@ var _ = Describe("Service.ReplaceChain", func() {
 				candidates[i] = grow(eng, base, txss...)
 			}
 
+			// A bounded turn turns a lost release into a failure instead of a hang.
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
 			var wg sync.WaitGroup
 			for _, cand := range candidates {
 				cand := cand
@@ -642,7 +645,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 				go func() {
 					defer GinkgoRecover()
 					defer wg.Done()
-					_, err := svc.ReplaceChain(context.Background(), cand)
+					_, err := svc.ReplaceChain(ctx, cand)
 					if err != nil {
 						Expect(errors.Is(err, ErrInsufficientWork) || errors.Is(err, domain.ErrInputMissingOrSpent)).To(BeTrue(), "%v", err)
 					}
@@ -654,7 +657,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 				go func() {
 					defer GinkgoRecover()
 					defer wg.Done()
-					_, err := svc.Mine(context.Background(), []domain.Transaction{spend(f.owner, f.ops[6+k], 9)})
+					_, err := svc.Mine(ctx, []domain.Transaction{spend(f.owner, f.ops[6+k], 9)})
 					if err != nil {
 						Expect(errors.Is(err, domain.ErrInputMissingOrSpent)).To(BeTrue(), "%v", err)
 					}
