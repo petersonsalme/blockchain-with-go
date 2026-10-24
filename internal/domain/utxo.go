@@ -128,6 +128,24 @@ func (s UTXOSet) Revert(d UTXODelta) {
 	}
 }
 
+// DiffUTXO returns the delta that takes from to to: Spent holds the outputs of
+// from that to lacks or holds differently, Created the outputs of to that from
+// lacks or holds differently. Neither set is altered.
+func DiffUTXO(from, to UTXOSet) UTXODelta {
+	delta := UTXODelta{Spent: map[OutPoint]TxOut{}, Created: map[OutPoint]TxOut{}}
+	for op, out := range from {
+		if got, ok := to[op]; !ok || got != out {
+			delta.Spent[op] = out
+		}
+	}
+	for op, out := range to {
+		if got, ok := from[op]; !ok || got != out {
+			delta.Created[op] = out
+		}
+	}
+	return delta
+}
+
 // BuildUTXOSet replays blocks in order; only the first block, and only when
 // its Index is 0, is the genesis, so a later Index 0 block cannot re-create
 // allocations that were already spent.
