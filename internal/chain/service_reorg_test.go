@@ -264,12 +264,16 @@ var _ = Describe("Service.ReplaceChain", func() {
 					// Same hash string, different content: the local block must be kept.
 					forgedBase := *forged[1]
 					forgedBase.Transactions = nil
+					// Later than the branch's first block: judged against this
+					// parent, the branch would fail the timestamp rule.
+					forgedBase.Timestamp = fx.candidate[2].Timestamp.Add(time.Hour)
 					forged[1] = &forgedBase
 
 					_, err := fx.svc.ReplaceChain(context.Background(), forged)
 					Expect(err).NotTo(HaveOccurred())
 					blocks, _ := fx.svc.Blocks()
 					Expect(blocks[1].Transactions).To(Equal(fx.base[1].Transactions))
+					Expect(blocks[1].Timestamp).To(Equal(fx.base[1].Timestamp))
 				})
 			})
 
