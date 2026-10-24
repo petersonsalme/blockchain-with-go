@@ -236,17 +236,26 @@ func TestParseGenesisAllocations(t *testing.T) {
 		t.Fatalf("outs = %v, want %v", outs, want)
 	}
 
+	for _, in := range []string{a + " : 10", a + " :10", a + ": 10", a + "\t:\t10"} {
+		outs, err := parseGenesisAllocations(in)
+		if err != nil || !reflect.DeepEqual(outs, []domain.TxOut{{Amount: 10, Address: a}}) {
+			t.Fatalf("parse(%q) = %v, %v", in, outs, err)
+		}
+	}
+
 	invalid := map[string]string{
-		"bad address":  "nothex:5",
-		"zero":         a + ":0",
-		"non numeric":  a + ":abc",
-		"negative":     a + ":-1",
-		"overflow":     a + ":18446744073709551616",
-		"no colon":     a,
-		"empty value":  a + ":",
-		"empty item":   a + ":5,",
-		"second bad":   a + ":5,bad:5",
-		"empty amount": ":5",
+		"bad address":   "nothex:5",
+		"zero":          a + ":0",
+		"non numeric":   a + ":abc",
+		"negative":      a + ":-1",
+		"overflow":      a + ":18446744073709551616",
+		"no colon":      a,
+		"empty value":   a + ":",
+		"blank value":   a + ":  ",
+		"blank address": "  :5",
+		"empty item":    a + ":5,",
+		"second bad":    a + ":5,bad:5",
+		"empty amount":  ":5",
 	}
 	for name, in := range invalid {
 		t.Run(name, func(t *testing.T) {
