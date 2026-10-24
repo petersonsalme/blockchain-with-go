@@ -9,7 +9,7 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 )
 
-// ErrNilBlock is returned by Append when given a nil block.
+// ErrNilBlock is returned by Append and ReplaceFrom when given a nil block.
 var ErrNilBlock = errors.New("memory: nil block")
 
 // Repository keeps blocks in a slice, indexed by hash, guarded by a RWMutex.
@@ -101,4 +101,37 @@ func (r *Repository) Range(from, limit int) ([]*domain.Block, error) {
 	out := make([]*domain.Block, n)
 	copy(out, r.blocks[from:from+n])
 	return out, nil
+}
+
+// ReplaceFrom drops every block with Index >= height and appends blocks, under one lock.
+func (r *Repository) ReplaceFrom(height int, blocks []*domain.Block) error {
+	for _, b := range blocks {
+		if b == nil {
+			return ErrNilBlock
+		}
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if height < 1 || height > len(r.blocks) || len(blocks) == 0 {
+		return storage.ErrConflict
+	}
+	prev := r.blocks[height-1]
+	for i, b := range blocks {
+		if b.Index != height+i || b.PrevHash != prev.Hash {
+			return storage.ErrConflict
+		}
+		prev = b
+	}
+
+	for _, removed := range r.blocks[height:] {
+		delete(r.byHash, removed.Hash)
+	}
+	// The cap limit forces append to copy, so snapshots handed out earlier stay intact.
+	r.blocks = append(r.blocks[:height:height], blocks...)
+	for _, b := range blocks {
+		r.byHash[b.Hash] = b
+	}
+	return nil
 }

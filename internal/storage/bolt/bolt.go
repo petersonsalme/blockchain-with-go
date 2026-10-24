@@ -18,7 +18,7 @@ var (
 	hashesBucket = []byte("hashes")
 )
 
-// ErrNilBlock is returned by Append when given a nil block.
+// ErrNilBlock is returned by Append and ReplaceFrom when given a nil block.
 var ErrNilBlock = errors.New("bolt: nil block")
 
 // Repository stores blocks in a bbolt database file.
@@ -235,4 +235,82 @@ func (r *Repository) Range(from, limit int) ([]*domain.Block, error) {
 		return nil, err
 	}
 	return blocks, nil
+}
+
+// ReplaceFrom drops every block with Index >= height and appends blocks in a
+// single transaction, updating the hash index with it.
+func (r *Repository) ReplaceFrom(height int, blocks []*domain.Block) error {
+	for _, b := range blocks {
+		if b == nil {
+			return ErrNilBlock
+		}
+	}
+	if height < 1 || len(blocks) == 0 {
+		return storage.ErrConflict
+	}
+
+	return r.db.Update(func(tx *bbolt.Tx) error {
+		bBucket := tx.Bucket(blocksBucket)
+		hBucket := tx.Bucket(hashesBucket)
+
+		k, _ := bBucket.Cursor().Last()
+		if k == nil || uint64(height) > binary.BigEndian.Uint64(k)+1 {
+			return storage.ErrConflict
+		}
+
+		var prev domain.Block
+		if err := json.Unmarshal(bBucket.Get(heightKey(height-1)), &prev); err != nil {
+			return err
+		}
+		prevHash := prev.Hash
+		for i, b := range blocks {
+			if b.Index != height+i || b.PrevHash != prevHash {
+				return storage.ErrConflict
+			}
+			prevHash = b.Hash
+		}
+
+		// Collect first: bbolt cursors must not see deletes made while iterating.
+		var stale [][]byte
+		c := bBucket.Cursor()
+		for k, v := c.Seek(heightKey(height)); k != nil; k, v = c.Next() {
+			var removed domain.Block
+			if err := json.Unmarshal(v, &removed); err != nil {
+				return err
+			}
+			stale = append(stale, append([]byte(nil), k...))
+			// Deleting a hash that was never indexed (an empty one) is a no-op.
+			if err := hBucket.Delete([]byte(removed.Hash)); err != nil {
+				return err
+			}
+		}
+		for _, key := range stale {
+			if err := bBucket.Delete(key); err != nil {
+				return err
+			}
+		}
+
+		for _, b := range blocks {
+			data, err := json.Marshal(b)
+			if err != nil {
+				return err
+			}
+			key := heightKey(b.Index)
+			if err := bBucket.Put(key, data); err != nil {
+				return err
+			}
+			if len(b.Hash) > 0 {
+				if err := hBucket.Put([]byte(b.Hash), key); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+}
+
+func heightKey(h int) []byte {
+	key := make([]byte, 8)
+	binary.BigEndian.PutUint64(key, uint64(h))
+	return key
 }
