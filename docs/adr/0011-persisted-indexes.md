@@ -30,3 +30,15 @@ Option B (chosen by the board). It is the only option where block and indexes ca
 3. CLI (normal): `go run ./cmd/node -reindex` + README.
 Follow-up outside ENG-28: `GET /address/{addr}/txs`; an address → unspent index for `Balance`.
 
+
+## What we learned
+Startup of `chain.NewService` over a bolt file with 10,000 blocks (one transaction each, spending the previous block's output), same machine, 5 runs each, median:
+
+| State of the file | Before (`master`, replays `All()`) | After (this story) |
+|---|---|---|
+| Indexes current (written by `Commit`) | ~57 ms | ~33 µs |
+| Written by `Append` only (old `chain.db`) | ~57 ms | ~146 ms, once (`Reindex`), then the row above |
+
+- A current index makes startup independent of the chain length: it reads the index state and nothing else (no `All()`, no `Reindex()`).
+- The one-time reindex of an old file costs about 2.5x the old replay, because it also writes the UTXO set, undo data and indexes to disk atomically; it is paid on the first start only.
+- `Balance` has no address → unspent index (out of scope): it reads the transactions of the address from `addrtx` and keeps their outputs that the persisted UTXO set still holds, so its cost grows with the history of the address, not with the chain.

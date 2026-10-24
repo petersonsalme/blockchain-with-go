@@ -25,11 +25,10 @@ import (
 
 var _ = Describe("Service mempool", func() {
 	var (
-		repo  *memory.Repository
-		utxos *memory.UTXOSet
-		pool  *mempool.Pool
-		svc   *Service
-		f     *funding
+		repo *memory.Repository
+		pool *mempool.Pool
+		svc  *Service
+		f    *funding
 	)
 
 	ids := func(txs []domain.Transaction) []string {
@@ -48,9 +47,8 @@ var _ = Describe("Service mempool", func() {
 
 	BeforeEach(func() {
 		repo = memory.New()
-		utxos = memory.NewUTXOSet()
 		pool = mempool.New(0)
-		svc, f = funded(repo, pow.NewProofOfWork(1), WithUTXOSet(utxos), WithMempool(pool))
+		svc, f = funded(repo, pow.NewProofOfWork(1), WithMempool(pool))
 	})
 
 	Describe("Submit", func() {
@@ -157,7 +155,7 @@ var _ = Describe("Service mempool", func() {
 			Expect(ids(blk.Transactions)).To(Equal(order))
 			Expect(svc.Pending()).To(BeEmpty())
 			for _, tx := range blk.Transactions {
-				_, found := utxos.Lookup(domain.OutPoint{TxID: tx.CalculateHash(), Index: 0})
+				_, found := repo.Lookup(domain.OutPoint{TxID: tx.CalculateHash(), Index: 0})
 				Expect(found).To(BeTrue())
 			}
 		})
@@ -173,9 +171,9 @@ var _ = Describe("Service mempool", func() {
 		})
 
 		It("refuses to write after the state diverged", func() {
-			failing := &failingUTXOSet{UTXOSet: memory.NewUTXOSet()}
-			dsvc, df := funded(memory.New(), pow.NewProofOfWork(1), WithUTXOSet(failing))
-			failing.applyErr = errors.New("boom")
+			failing := &failingWrites{IndexedRepository: memory.New()}
+			dsvc, df := funded(failing, pow.NewProofOfWork(1))
+			failing.commitErr = errors.New("boom")
 			_, err := dsvc.Mine(context.Background(), df.tx())
 			Expect(err).To(MatchError(ErrStateDiverged))
 			Expect(dsvc.Submit(spendOp(0, 9))).NotTo(Succeed())
@@ -201,7 +199,7 @@ var _ = Describe("Service mempool", func() {
 		})
 
 		It("surfaces a repository failure without touching the pool", func() {
-			rr := &allFailingRepo{BlockRepository: memory.New()}
+			rr := &allFailingRepo{IndexedRepository: memory.New()}
 			rsvc, rf := funded(rr, pow.NewProofOfWork(1), WithMempool(pool))
 			Expect(rsvc.Submit(rf.tx()[0])).To(Succeed())
 			rr.armed.Store(true)
@@ -244,7 +242,7 @@ var _ = Describe("Service mempool", func() {
 			Expect(svc.Pending()).To(HaveLen(4))
 			for _, tx := range svc.Pending() {
 				for _, in := range tx.Inputs {
-					_, ok := utxos.Lookup(domain.OutPoint{TxID: in.PrevTxID, Index: in.OutIndex})
+					_, ok := repo.Lookup(domain.OutPoint{TxID: in.PrevTxID, Index: in.OutIndex})
 					Expect(ok).To(BeTrue())
 				}
 			}

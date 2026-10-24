@@ -414,7 +414,9 @@ var _ = Describe("Server", func() {
 			withGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 				rival, err := chain.GenerateBlockWithContext(ctx, c, history, txs)
 				Expect(err).NotTo(HaveOccurred())
-				Expect(repo.Append(rival)).To(Succeed())
+				delta, err := domain.BlockDelta(repo, rival, false)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(repo.Commit(rival, delta)).To(Succeed())
 				return chain.GenerateBlockWithContext(ctx, c, history, txs)
 			})
 			initialLen := chainLen()

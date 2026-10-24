@@ -7,6 +7,9 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 )
 
+// ErrUTXOConflict is returned by Commit and Reorg when the delta does not match the current UTXO set.
+var ErrUTXOConflict = errors.New("storage: delta does not match the UTXO set")
+
 // ErrIndexStale is returned by Commit and Reorg when the persisted indexes do
 // not describe the current tip (the chain was written with Append or
 // ReplaceFrom, or the database predates the indexes). Reindex repairs it.
