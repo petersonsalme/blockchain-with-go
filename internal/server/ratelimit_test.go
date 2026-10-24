@@ -443,9 +443,8 @@ var _ = Describe("Rate Limiting", func() {
 			Expect(limiter.buckets).To(HaveKey("1.2.3.4"))
 			limiter.mu.Unlock()
 
-			// Advance clock by 30s (not enough to fully refill, bucket has 9 tokens + 5 = 14 > 10? wait, 10 tokens max:
-			// Burst 10, consumed 1 => 9 tokens left. 10 req/min = 1 token per 6s.
-			// After 1 second: 9 + 1/6 tokens < 10 tokens. IP A is NOT yet full!
+			// Burst 10, one consumed: 9 tokens left; 10 req/min refills 1 token every 6s.
+			// After 1 second: 9 + 1/6 < 10 tokens, so IP A is not full yet.
 			currentTime = currentTime.Add(1 * time.Second)
 
 			// Request from IP B
