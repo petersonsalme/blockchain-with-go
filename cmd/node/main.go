@@ -6,7 +6,9 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -33,7 +35,7 @@ import (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	err := bootstrap(ctx, logger)
+	err := execute(ctx, logger, os.Args[1:], os.Stdout)
 	stop() // os.Exit skips deferred calls
 	fatalIf(err, logger, os.Exit)
 }
@@ -44,6 +46,50 @@ func fatalIf(err error, logger *slog.Logger, exit func(code int)) {
 		logger.Error("node stopped", "error", err)
 		exit(1)
 	}
+}
+
+// execute runs the node, or, with -reindex, rebuilds the indexes of DATA_DIR and returns.
+func execute(ctx context.Context, logger *slog.Logger, args []string, stdout io.Writer) error {
+	flags := flag.NewFlagSet("node", flag.ContinueOnError)
+	reindex := flags.Bool("reindex", false, "rebuild the indexes of DATA_DIR/chain.db and exit")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *reindex {
+		return reindexData(stdout)
+	}
+	return bootstrap(ctx, logger)
+}
+
+// reindexData loads .env when present, then rebuilds the indexes of DATA_DIR/chain.db
+// and prints the tip height. It never creates DATA_DIR and never opens a port.
+func reindexData(stdout io.Writer) error {
+	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	dataDir := os.Getenv(dataDirEnvVar)
+	if strings.TrimSpace(dataDir) == "" {
+		return fmt.Errorf("%s: -reindex needs a DATA_DIR; the in-memory repository has no indexes to rebuild", dataDirEnvVar)
+	}
+	repo, err := bolt.Open(filepath.Join(dataDir, "chain.db"))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = repo.Close() }()
+
+	if err := repo.Reindex(); err != nil {
+		return err
+	}
+	tip, err := repo.Last()
+	if errors.Is(err, storage.ErrEmpty) {
+		_, err = fmt.Fprintln(stdout, "reindexed: empty chain")
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(stdout, "reindexed: tip height %d\n", tip.Index)
+	return err
 }
 
 // bootstrap loads .env and runs the node until ctx is done.
