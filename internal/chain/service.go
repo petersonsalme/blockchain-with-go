@@ -229,7 +229,7 @@ func (s *Service) locate(id string) (*domain.Block, int, error) {
 		return nil, 0, err
 	}
 	for i := range b.Transactions {
-		if b.Transactions[i].ID == id {
+		if b.Transactions[i].CalculateHash() == id {
 			return b, i, nil
 		}
 	}
@@ -308,7 +308,7 @@ func (s *Service) addressTxs(addr string) ([]domain.Transaction, error) {
 			}
 			blocks[h] = b
 		}
-		i := slices.IndexFunc(b.Transactions, func(tx domain.Transaction) bool { return tx.ID == id })
+		i := slices.IndexFunc(b.Transactions, func(tx domain.Transaction) bool { return tx.CalculateHash() == id })
 		if i < 0 {
 			return nil, storage.ErrNotFound
 		}

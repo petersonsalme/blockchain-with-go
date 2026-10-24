@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"sync/atomic"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -181,6 +182,36 @@ var _ = Describe("Service persisted indexes", func() {
 					spy.empty = true
 					_, _, _, err := svc.Transaction(shared.ID)
 					Expect(err).To(MatchError(storage.ErrNotFound))
+				})
+			})
+
+			Describe("a mined transaction without an ID field", func() {
+				It("is found, proved, listed and counted by its hash", func() {
+					bare := domain.Transaction{
+						Inputs:    []domain.TxIn{{PrevTxID: f.ops[4].TxID, OutIndex: f.ops[4].Index}},
+						Outputs:   []domain.TxOut{{Amount: 6, Address: recipient().Address()}},
+						Timestamp: time.Now(),
+					}
+					Expect(domain.SignInput(&bare, 0, f.owner)).To(Succeed())
+					_, err := svc.Mine(context.Background(), []domain.Transaction{bare})
+					Expect(err).NotTo(HaveOccurred())
+					hash := bare.CalculateHash()
+
+					tx, _, height, err := svc.Transaction(hash)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(tx.CalculateHash()).To(Equal(hash))
+					Expect(height).To(Equal(3))
+
+					proof, err := svc.TxProof(hash)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(proof.BlockIndex).To(Equal(3))
+
+					listed, err := svc.TransactionsByAddress(recipient().Address())
+					Expect(err).NotTo(HaveOccurred())
+					Expect(listed[len(listed)-1].CalculateHash()).To(Equal(hash))
+
+					balance, _ := svc.Balance(recipient().Address())
+					Expect(balance).To(BeNumerically(">=", 6))
 				})
 			})
 
