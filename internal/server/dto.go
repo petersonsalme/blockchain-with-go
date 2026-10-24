@@ -35,6 +35,11 @@ type healthResponse struct {
 	Tip    string `json:"tip"`
 }
 
+// mempoolResponse is the body of GET /mempool: the pool in selection order.
+type mempoolResponse struct {
+	Transactions []domain.Transaction `json:"transactions"`
+}
+
 // txResponse is the body of GET /tx/{id}.
 type txResponse struct {
 	Transaction *domain.Transaction `json:"transaction"`

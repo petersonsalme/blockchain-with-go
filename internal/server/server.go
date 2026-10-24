@@ -41,6 +41,9 @@ type Chain interface {
 	TxProof(id string) (*chain.InclusionProof, error)
 	Balance(addr string) (uint64, []chain.UTXO)
 	Mine(ctx context.Context, txs []domain.Transaction) (*domain.Block, error)
+	Submit(tx domain.Transaction) error
+	Pending() []domain.Transaction
+	MinePending(ctx context.Context) (*domain.Block, error)
 }
 
 // Config holds the Server settings.
@@ -119,6 +122,8 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.handleGetBlockchain)
 	mux.HandleFunc("POST /{$}", s.handleWriteBlock)
+	mux.HandleFunc("POST /mine", s.handleMine)
+	mux.HandleFunc("GET /mempool", s.handleGetMempool)
 	mux.HandleFunc("GET /blocks", s.handleGetBlocks)
 	mux.HandleFunc("GET /block/{ref}", s.handleGetBlock)
 	mux.HandleFunc("GET /tx/{id}", s.handleGetTx)
@@ -128,6 +133,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /metrics", s.handleMetrics)
 	mux.HandleFunc("POST /legacy/bpm", s.handleLegacyBPM)
 	mux.Handle("/{$}", methodNotAllowed("GET, HEAD, POST"))
+	mux.Handle("/mine", methodNotAllowed("POST"))
+	mux.Handle("/mempool", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/blocks", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/block/{ref}", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/tx/{id}", methodNotAllowed("GET, HEAD"))
@@ -397,12 +404,12 @@ func (s *Server) handleGetBalance(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) mineAndRespond(w http.ResponseWriter, r *http.Request, txs []domain.Transaction) {
+func (s *Server) mineAndRespond(w http.ResponseWriter, r *http.Request, mine func(context.Context) (*domain.Block, error)) {
 	ctx, cancel := context.WithTimeout(r.Context(), s.miningTimeout)
 	defer cancel()
 
 	start := s.now()
-	newBlock, err := s.chain.Mine(ctx, txs)
+	newBlock, err := mine(ctx)
 	if err != nil {
 		respondWithMineError(w, err)
 		return
@@ -453,7 +460,22 @@ func (s *Server) handleWriteBlock(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.mineAndRespond(w, r, m.Transactions)
+	s.mineAndRespond(w, r, func(ctx context.Context) (*domain.Block, error) { return s.chain.Mine(ctx, m.Transactions) })
+}
+
+// handleMine mines a block from the pool; the request body is ignored.
+func (s *Server) handleMine(w http.ResponseWriter, r *http.Request) {
+	defer func() { _ = r.Body.Close() }() // closing a server request body cannot fail usefully
+	s.mineAndRespond(w, r, s.chain.MinePending)
+}
+
+// handleGetMempool lists the pool in selection order; it never waits for mining.
+func (s *Server) handleGetMempool(w http.ResponseWriter, r *http.Request) {
+	txs := s.chain.Pending()
+	if txs == nil {
+		txs = []domain.Transaction{}
+	}
+	respondWithJSON(w, http.StatusOK, mempoolResponse{Transactions: txs})
 }
 
 // handleLegacyBPM answers 410 Gone: BPM payloads cannot be signed, so the node can no longer accept them.
