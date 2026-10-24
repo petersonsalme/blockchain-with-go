@@ -110,8 +110,8 @@ func runWalletNew(cmd *cobra.Command, args []string) error {
 	if err := w.Save(path, password); err != nil {
 		return err
 	}
-	fmt.Fprintln(cmd.OutOrStdout(), w.Address())
-	return nil
+	_, err = fmt.Fprintln(cmd.OutOrStdout(), w.Address())
+	return err
 }
 
 func runWalletBalance(cmd *cobra.Command, args []string) error {
@@ -129,8 +129,8 @@ func runWalletBalance(cmd *cobra.Command, args []string) error {
 	if resp.JSON200 == nil {
 		return nodeError(resp.HTTPResponse, resp.Body)
 	}
-	fmt.Fprintln(cmd.OutOrStdout(), resp.JSON200.Balance)
-	return nil
+	_, err = fmt.Fprintln(cmd.OutOrStdout(), resp.JSON200.Balance)
+	return err
 }
 
 func runWalletSend(cmd *cobra.Command, args []string) error {
@@ -176,8 +176,8 @@ func runWalletSend(cmd *cobra.Command, args []string) error {
 	if sub.JSON202 == nil {
 		return nodeError(sub.HTTPResponse, sub.Body)
 	}
-	fmt.Fprintln(cmd.OutOrStdout(), sub.JSON202.Id)
-	return nil
+	_, err = fmt.Fprintln(cmd.OutOrStdout(), sub.JSON202.Id)
+	return err
 }
 
 func toClientTx(tx domain.Transaction) client.Transaction {

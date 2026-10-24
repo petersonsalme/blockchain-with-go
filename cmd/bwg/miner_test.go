@@ -104,8 +104,7 @@ func TestMinerStopsOnCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var node *fakeMinerNode
-	node = newFakeMinerNode(t, nil, "", func(n int) {
+	node := newFakeMinerNode(t, nil, "", func(n int) {
 		if n == 3 {
 			cancel()
 		}

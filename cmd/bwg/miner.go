@@ -43,7 +43,7 @@ func runMiner(cmd *cobra.Command, _ []string) error {
 			return err
 		}
 		if resp.StatusCode() == http.StatusConflict {
-			fmt.Fprintln(cmd.ErrOrStderr(), "chain changed while mining, retrying")
+			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "chain changed while mining, retrying")
 			continue
 		}
 		if resp.JSON201 == nil {
@@ -55,7 +55,9 @@ func runMiner(cmd *cobra.Command, _ []string) error {
 		if b.Transactions != nil {
 			txs = len(*b.Transactions)
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "block %d %s txs=%d\n", b.Index, b.Hash, txs)
+		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "block %d %s txs=%d\n", b.Index, b.Hash, txs); err != nil {
+			return err
+		}
 		if interval > 0 {
 			select {
 			case <-ctx.Done():
