@@ -103,4 +103,46 @@ var _ = Describe("Mnemonic", func() {
 		badChecksum := strings.Repeat("abandon ", 11) + "abandon"
 		Expect(errors.Is(ValidateMnemonic(badChecksum), ErrInvalidMnemonic)).To(BeTrue())
 	})
+
+	It("derives the official BIP-39 seeds", func() {
+		Expect(vectors.English).To(HaveLen(24))
+		for _, v := range vectors.English {
+			seed, err := MnemonicToSeed(v[1], "TREZOR")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(hex.EncodeToString(seed)).To(Equal(v[2]))
+		}
+	})
+
+	It("MnemonicToSeed rejects an invalid mnemonic", func() {
+		invalidMnemonic := strings.TrimSpace(strings.Repeat("abandon ", 12))
+		seed, err := MnemonicToSeed(invalidMnemonic, "TREZOR")
+		Expect(errors.Is(err, ErrInvalidMnemonic)).To(BeTrue())
+		Expect(seed).To(BeNil())
+	})
+
+	It("MnemonicToSeed ignores extra whitespace", func() {
+		v0Mnemonic := vectors.English[0][1]
+		spacedMnemonic := "\t" + strings.Join(strings.Fields(v0Mnemonic), "  ") + "\n"
+		seedFromSpaced, err := MnemonicToSeed(spacedMnemonic, "TREZOR")
+		Expect(err).NotTo(HaveOccurred())
+
+		seedExpected, err := MnemonicToSeed(v0Mnemonic, "TREZOR")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(seedFromSpaced).To(Equal(seedExpected))
+	})
+
+	It("MnemonicToSeed gives the same seed for NFC and NFD passphrases", func() {
+		v0Mnemonic := vectors.English[0][1]
+		seedNFC, err := MnemonicToSeed(v0Mnemonic, "caf\u00e9")
+		Expect(err).NotTo(HaveOccurred())
+
+		seedNFD, err := MnemonicToSeed(v0Mnemonic, "cafe\u0301")
+		Expect(err).NotTo(HaveOccurred())
+
+		seedPlain, err := MnemonicToSeed(v0Mnemonic, "cafe")
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(seedNFC).To(Equal(seedNFD))
+		Expect(seedNFC).NotTo(Equal(seedPlain))
+	})
 })

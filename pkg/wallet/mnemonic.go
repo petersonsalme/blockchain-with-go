@@ -1,13 +1,17 @@
 package wallet
 
 import (
+	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/sha512"
 	_ "embed"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 //go:embed bip39_english.txt
@@ -81,8 +85,17 @@ func ValidateMnemonic(mnemonic string) error {
 	return err
 }
 
+// MnemonicToSeed derives a BIP-39 binary seed from a mnemonic and passphrase using PBKDF2 and NFKD normalization.
+func MnemonicToSeed(mnemonic, passphrase string) ([]byte, error) {
+	m := strings.Join(strings.Fields(norm.NFKD.String(mnemonic)), " ")
+	if err := ValidateMnemonic(m); err != nil {
+		return nil, err
+	}
+	return pbkdf2.Key(sha512.New, m, []byte("mnemonic"+norm.NFKD.String(passphrase)), 2048, 64)
+}
+
 func mnemonicToEntropy(mnemonic string) ([]byte, error) {
-	ws := strings.Fields(mnemonic)
+	ws := strings.Fields(norm.NFKD.String(mnemonic))
 	switch len(ws) {
 	case 12, 15, 18, 21, 24:
 	default:
