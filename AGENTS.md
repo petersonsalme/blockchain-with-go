@@ -13,7 +13,8 @@ Educational blockchain implementation in Go with block validation, SHA-256 hashi
 ```
 blockchain-with-go/
 ├── cmd/
-│   └── node/          # Application entry point (main.go)
+│   ├── node/          # Application entry point (main.go)
+│   └── bwg/           # CLI (cobra): wallet new/balance/send, miner
 ├── client/            # Go client generated from openapi.yaml by oapi-codegen (do not edit by hand)
 ├── internal/
 │   ├── chain/         # chain.Service (Blocks/Mine), block generation, ErrInvalidBlock
@@ -59,6 +60,7 @@ Everything else (HTTP handlers and DTOs, logging, docs, README, CLI, build files
    - Run tests and type checking: `go test ./...`
    - Standard Go formatting: `gofmt -s -w .` or `goimports`
    - Build check: `go build -o /dev/null ./cmd/node`
+   - CLI build check: `go build -o /dev/null ./cmd/bwg`
    - Run the node locally: `go run ./cmd/node`
    - Regenerate the client after editing `openapi.yaml`: `go generate ./client/...` (CI fails on `git diff --exit-code client/`)
    - CI quality gates (`.github/workflows/go-ci.yml`), local equivalents:
