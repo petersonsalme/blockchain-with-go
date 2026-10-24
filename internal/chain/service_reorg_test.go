@@ -206,7 +206,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 					Expect(err).NotTo(HaveOccurred())
 
 					// A bounded turn turns a lost release into a failure instead of a hang.
-					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 					defer cancel()
 					b, err := fx.svc.Mine(ctx, []domain.Transaction{spend(fx.f.owner, fx.f.ops[4], 9)})
 					Expect(err).NotTo(HaveOccurred())
@@ -639,7 +639,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 			}
 
 			// A bounded turn turns a lost release into a failure instead of a hang.
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			var wg sync.WaitGroup
 			for _, cand := range candidates {
