@@ -391,6 +391,83 @@ $ curl -X POST -H "Content-Type: application/json" \
 }
 ```
 
+### POST /tx
+Submit **one** signed transaction to the mempool instead of mining it. The body is a single transaction in the same format as the transactions of `POST /` (not `{"Transactions": [...]}`), with the same rules: `Timestamp` is required, and `ID` is filled in only when empty. Each input must spend a confirmed output; spending an output of another transaction still in the pool is rejected.
+
+Mempool transactions are mined by `POST /mine`, ordered by fee rate (see below). Nothing is mined by `POST /tx` itself.
+
+```shell
+$ curl -X POST -H "Content-Type: application/json" \
+  -d '{"Inputs":[{
+        "PrevTxID":"<genesis transaction ID>","OutIndex":0,
+        "PublicKey":"<64 hex chars>","Signature":"<128 hex chars>"}],
+      "Outputs":[{"Amount":99,"Address":"<recipient address>"}],
+      "Timestamp":"2026-10-16T12:05:00Z"}' \
+  http://localhost:8080/tx
+```
+
+**Success Response (`202 Accepted`):**
+```json
+{"id": "3a7b8c..."}
+```
+
+A `409 Conflict` means the transaction was not admitted: `duplicate_tx` (already in the pool), `mempool_conflict` (it spends an output that another pool transaction already spends; first seen wins, there is no replace-by-fee) or `mempool_full` (the pool holds 5000 transactions and this one's fee rate does not beat the lowest-ranked entry, which would be evicted). Other errors are the same as for `POST /`.
+
+### GET /mempool
+List the pending transactions in selection order: fee rate per byte, descending, then `ID` ascending. The fee is the sum of the inputs minus the sum of the outputs; the size is the length of the transaction's JSON. This request never waits for mining.
+
+```shell
+$ curl http://localhost:8080/mempool
+```
+
+**Success Response (`200 OK`):**
+```json
+{"transactions": [{"ID": "...", "Inputs": [...], "Outputs": [...], "Timestamp": "..."}]}
+```
+
+### POST /mine
+Mine a new block from the mempool. The request has no body. The node takes the transactions with the highest fee rate per byte that fit in `MAX_BLOCK_BYTES`, in that order. An empty pool mines an empty block.
+
+Using the same genesis allocations (`GENESIS_ALLOCATIONS=<sender address>:100,<sender address>:100`), two transactions spend different outputs of the genesis transaction: A spends output 0 and pays 99 (fee 1), B spends output 1 and pays 95 (fee 5). Submit A and then B:
+
+```shell
+$ curl -X POST -H "Content-Type: application/json" -d @tx-a.json http://localhost:8080/tx
+{"id": "5e1d0a..."}
+$ curl -X POST -H "Content-Type: application/json" -d @tx-b.json http://localhost:8080/tx
+{"id": "9c4f2b..."}
+```
+
+`GET /mempool` lists B before A, because B's fee rate is higher:
+
+```shell
+$ curl http://localhost:8080/mempool
+{"transactions": [{"ID": "9c4f2b...", ...}, {"ID": "5e1d0a...", ...}]}
+```
+
+`POST /mine` then returns the block with B first and A second:
+
+```shell
+$ curl -X POST http://localhost:8080/mine
+```
+
+**Success Response (`201 Created`):**
+```json
+{
+  "Index": 1,
+  "Timestamp": "2026-10-16T12:10:00Z",
+  "Transactions": [
+    {"ID": "9c4f2b...", "Inputs": [...], "Outputs": [...], "Timestamp": "..."},
+    {"ID": "5e1d0a...", "Inputs": [...], "Outputs": [...], "Timestamp": "..."}
+  ],
+  "Hash": "00d4e5f6...",
+  "PrevHash": "00a1b2c3...",
+  "Nonce": 77,
+  "Difficulty": 2
+}
+```
+
+Transactions that are included leave the pool. A transaction that became invalid after `POST /tx` (for example, its inputs were spent by a block mined through `POST /`) is dropped and not mined. The same `MINING_TIMEOUT`, serialization and errors as `POST /` apply. The mempool lives only in memory: restarting the node empties it. `POST /` keeps mining exactly the transactions it receives and does not use the mempool.
+
 ### POST /legacy/bpm (Removed)
 BPM payloads cannot be signed, so the endpoint answers `410 Gone` (with `Deprecation: true`) and `{"error": "endpoint removed; send signed transactions to POST /", "code": "endpoint_gone"}` for any body.
 
@@ -403,10 +480,11 @@ BPM payloads cannot be signed, so the endpoint answers `410 Gone` (with `Depreca
 | `400 Bad Request` | Malformed query on `/blocks`, malformed `ref` on `/block/{ref}`, malformed `id` on `/tx/{id}` or `/tx/{id}/proof`, or invalid address on `/balance/{addr}` | `{"error": "...", "code": "invalid_query" \| "invalid_block_ref" \| "invalid_tx_id" \| "invalid_address"}` |
 | `404 Not Found` | `GET /block/{ref}` or `GET /tx/{id}` or `GET /tx/{id}/proof` outside the chain | `{"error": "...", "code": "block_not_found" \| "tx_not_found"}` |
 | `503 Service Unavailable` | `GET /health` cannot read the chain tip | `{"error": "...", "code": "unhealthy"}` |
-| `201 Created` | Block mined and appended to the blockchain via `POST /` | JSON object of the new block |
+| `201 Created` | Block mined and appended to the blockchain via `POST /` or `POST /mine` | JSON object of the new block |
+| `202 Accepted` | Transaction admitted to the mempool via `POST /tx` | `{"id": "..."}` |
 | `400 Bad Request` | Malformed JSON body or invalid transaction payload (e.g. empty list) | `{"error": "invalid request body"}` |
 | `400 Bad Request` | Transaction rejected before mining | `{"error": "...", "code": "missing_signature" \| "invalid_signature" \| "invalid_public_key" \| "input_owner_mismatch" \| "invalid_output" \| "missing_inputs" \| "missing_timestamp"}` |
-| `409 Conflict` | Input already spent or unknown, or the same output spent twice | `{"error": "...", "code": "input_missing_or_spent" \| "double_spend"}` |
+| `409 Conflict` | Input already spent or unknown, or the same output spent twice; on `POST /tx`, also a transaction already in the pool, one that conflicts with a pool transaction, or a full pool it cannot displace | `{"error": "...", "code": "input_missing_or_spent" \| "double_spend" \| "duplicate_tx" \| "mempool_conflict" \| "mempool_full"}` |
 | `422 Unprocessable Entity` | Outputs exceed inputs | `{"error": "...", "code": "insufficient_inputs"}` |
 | `410 Gone` | `POST /legacy/bpm` (removed) | `{"error": "...", "code": "endpoint_gone"}` |
 | `405 Method Not Allowed` | HTTP method not allowed on endpoint (e.g. `PUT`, `DELETE`) | empty body (router-level response) |

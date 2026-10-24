@@ -113,6 +113,14 @@ func contractCases() []contractCase {
 			return h, "/", funds.payload()
 		}
 	}
+	mineWith := func(block *domain.Block, err error) func() (http.Handler, string, string) {
+		return func() (http.Handler, string, string) {
+			h, _ := real(Config{}, chain.WithGenerator(func(context.Context, consensus.Consensus, []*domain.Block, []domain.Transaction) (*domain.Block, error) {
+				return block, err
+			}))
+			return h, "/mine", ""
+		}
+	}
 	post := func(body func(*bank) string, opts ...chain.Option) func() (http.Handler, string, string) {
 		return func() (http.Handler, string, string) {
 			h, funds := real(Config{}, opts...)
@@ -188,6 +196,46 @@ func contractCases() []contractCase {
 			return h, "/legacy/bpm", `{"BPM":70}`
 		}},
 		{method: "POST", route: "/legacy/bpm", status: 429, serve: limitedPost("/legacy/bpm"), warmup: 1},
+
+		{method: "POST", route: "/tx", status: 202, serve: func() (http.Handler, string, string) {
+			h, funds := real(Config{})
+			return h, "/tx", txBody(funds.tx(newWallet().Address(), 42))
+		}},
+		{method: "POST", route: "/tx", status: 400, specInvalid: true, serve: func() (http.Handler, string, string) {
+			h, _ := real(Config{})
+			return h, "/tx", "{}"
+		}},
+		{method: "POST", route: "/tx", status: 409, serve: func() (http.Handler, string, string) {
+			h, funds := real(Config{})
+			return h, "/tx", txBody(funds.tx(newWallet().Address(), 42))
+		}, warmup: 1},
+		{method: "POST", route: "/tx", status: 413, serve: func() (http.Handler, string, string) {
+			h, funds := real(Config{})
+			return h, "/tx", strings.TrimSuffix(txBody(funds.tx(newWallet().Address(), 42)), "}") + `,"Pad":"` + strings.Repeat("a", int(maxRequestBodyBytes())) + `"}`
+		}},
+		{method: "POST", route: "/tx", status: 422, serve: func() (http.Handler, string, string) {
+			h, funds := real(Config{})
+			return h, "/tx", txBody(funds.tx(newWallet().Address(), bankAmount+1))
+		}},
+		{method: "POST", route: "/tx", status: 429, serve: func() (http.Handler, string, string) {
+			now := time.Unix(fixedNow, 0)
+			h, funds := real(Config{RateLimit: 1, Now: func() time.Time { return now }})
+			return h, "/tx", txBody(funds.tx(newWallet().Address(), 42))
+		}, warmup: 1},
+		{method: "POST", route: "/tx", status: 500, serve: func() (http.Handler, string, string) {
+			return broken(), "/tx", txBody(newBank().tx(newWallet().Address(), 42))
+		}},
+
+		{method: "POST", route: "/mine", status: 201, serve: plain("/mine")},
+		{method: "POST", route: "/mine", status: 408, serve: mineWith(nil, context.Canceled)},
+		{method: "POST", route: "/mine", status: 409, serve: mineWith(nil, storage.ErrConflict)},
+		{method: "POST", route: "/mine", status: 422, serve: mineWith(nil, nil)},
+		{method: "POST", route: "/mine", status: 429, serve: limited("/mine"), warmup: 1},
+		{method: "POST", route: "/mine", status: 500, serve: mineWith(nil, errors.New("boom"))},
+		{method: "POST", route: "/mine", status: 504, serve: mineWith(nil, context.DeadlineExceeded)},
+
+		{method: "GET", route: "/mempool", status: 200, serve: plain("/mempool")},
+		{method: "GET", route: "/mempool", status: 429, serve: limited("/mempool"), warmup: 1},
 	}
 	return cases
 }
@@ -228,6 +276,7 @@ var _ = Describe("OpenAPI contract", func() {
 			routes := []string{
 				"GET /", "POST /", "GET /blocks", "GET /block/{ref}", "GET /tx/{id}",
 				"GET /balance/{addr}", "GET /health", "GET /metrics", "POST /legacy/bpm",
+				"POST /tx", "POST /mine", "GET /mempool",
 			}
 			var declared []string
 			for path, item := range doc.Paths.Map() {
@@ -386,11 +435,42 @@ var _ = Describe("OpenAPI contract", func() {
 			Expect(over.JSON422).NotTo(BeNil())
 			Expect(over.JSON422.Code).To(HaveValue(Equal(domain.CodeInsufficientInputs)))
 		})
+
+		It("submits with POST /tx, lists GET /mempool and mines with POST /mine", func() {
+			tx := funds.tx(newWallet().Address(), 42)
+			submitted, err := api.SubmitTxWithResponse(ctx, toClientTx(tx))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(submitted.JSON202).NotTo(BeNil(), string(submitted.Body))
+			Expect(submitted.JSON202.Id).To(Equal(tx.ID))
+
+			again, err := api.SubmitTxWithResponse(ctx, toClientTx(tx))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(again.JSON409).NotTo(BeNil(), string(again.Body))
+			Expect(again.JSON409.Code).To(HaveValue(Equal(duplicateTxCode)))
+
+			pool, err := api.GetMempoolWithResponse(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pool.JSON200).NotTo(BeNil())
+			Expect(pool.JSON200.Transactions).To(HaveLen(1))
+
+			mined, err := api.MinePendingWithResponse(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(mined.JSON201).NotTo(BeNil(), string(mined.Body))
+			Expect(mined.JSON201.Index).To(Equal(1))
+			Expect(mined.JSON201.Transactions).NotTo(BeNil())
+			Expect(*mined.JSON201.Transactions).To(HaveLen(1))
+			Expect((*mined.JSON201.Transactions)[0].ID).To(HaveValue(Equal(tx.ID)))
+
+			empty, err := api.GetMempoolWithResponse(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(empty.JSON200).NotTo(BeNil())
+			Expect(empty.JSON200.Transactions).To(BeEmpty())
+		})
 	})
 })
 
-// toMessage converts a domain transaction to the generated request body.
-func toMessage(tx domain.Transaction) client.WriteBlockJSONRequestBody {
+// toClientTx converts a domain transaction to the generated client type.
+func toClientTx(tx domain.Transaction) client.Transaction {
 	ins := make([]client.TxIn, len(tx.Inputs))
 	for i, in := range tx.Inputs {
 		ins[i] = client.TxIn{PrevTxID: in.PrevTxID, OutIndex: in.OutIndex, PublicKey: in.PublicKey, Signature: in.Signature}
@@ -399,7 +479,10 @@ func toMessage(tx domain.Transaction) client.WriteBlockJSONRequestBody {
 	for i, out := range tx.Outputs {
 		outs[i] = client.TxOut{Amount: out.Amount, Address: out.Address}
 	}
-	return client.WriteBlockJSONRequestBody{Transactions: []client.Transaction{{
-		ID: &tx.ID, Inputs: &ins, Outputs: outs, Timestamp: tx.Timestamp,
-	}}}
+	return client.Transaction{ID: &tx.ID, Inputs: &ins, Outputs: outs, Timestamp: tx.Timestamp}
+}
+
+// toMessage converts a domain transaction to the generated request body.
+func toMessage(tx domain.Transaction) client.WriteBlockJSONRequestBody {
+	return client.WriteBlockJSONRequestBody{Transactions: []client.Transaction{toClientTx(tx)}}
 }

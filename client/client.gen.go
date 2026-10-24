@@ -57,6 +57,11 @@ type HealthResponse struct {
 	Tip    string `json:"tip"`
 }
 
+// MempoolResponse defines model for mempoolResponse.
+type MempoolResponse struct {
+	Transactions []Transaction `json:"transactions"`
+}
+
 // Message defines model for message.
 type Message struct {
 	Transactions []Transaction `json:"Transactions"`
@@ -70,6 +75,11 @@ type PageResponse struct {
 
 	// Next Height of the next page; present only when a block exists there.
 	Next *int `json:"next,omitempty"`
+}
+
+// SubmitResponse defines model for submitResponse.
+type SubmitResponse struct {
+	Id string `json:"id"`
 }
 
 // Transaction defines model for transaction.
@@ -140,6 +150,9 @@ type WriteBlockJSONRequestBody = Message
 //
 // Deprecated: this type has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 type LegacyBpmJSONRequestBody LegacyBpmJSONBody
+
+// SubmitTxJSONRequestBody defines body for SubmitTx for application/json ContentType.
+type SubmitTxJSONRequestBody = Transaction
 
 // RequestEditorFn is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -276,12 +289,42 @@ type ClientInterface interface {
 	// Deprecated: this operation has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	LegacyBpm(ctx context.Context, body LegacyBpmJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetMempool List the mempool in selection order
+	//
+	// Corresponds with GET /mempool (the `GetMempool` operationId).
+	GetMempool(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetMetrics Expose Prometheus metrics
 	//
 	// Prometheus text exposition format 0.0.4 (ADR-0010): `http_requests_total{method,route,code}`, `blockchain_blocks` (omitted when the tip cannot be read) and `blockchain_mining_duration_seconds`.
 	//
 	// Corresponds with GET /metrics (the `GetMetrics` operationId).
 	GetMetrics(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// MinePending Mine a block from the mempool
+	//
+	// Takes the pool transactions of highest fee per byte that fit `MAX_BLOCK_BYTES`, in selection order (fee rate descending, then ID); an empty pool mines an empty block. Same timeout and errors as `POST /`.
+	//
+	// Corresponds with POST /mine (the `MinePending` operationId).
+	MinePending(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SubmitTxWithBody Admit one signed transaction into the mempool
+	//
+	// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). It never mines.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /tx (the `SubmitTx` operationId).
+	SubmitTxWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SubmitTx Admit one signed transaction into the mempool
+	//
+	// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). It never mines.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /tx (the `SubmitTx` operationId).
+	SubmitTx(ctx context.Context, body SubmitTxJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetTx Get one transaction and the block that contains it
 	//
@@ -438,6 +481,21 @@ func (c *Client) LegacyBpm(ctx context.Context, body LegacyBpmJSONRequestBody, r
 	return c.Client.Do(req)
 }
 
+// GetMempool List the mempool in selection order
+//
+// Corresponds with GET /mempool (the `GetMempool` operationId).
+func (c *Client) GetMempool(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetMempoolRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // GetMetrics Expose Prometheus metrics
 //
 // Prometheus text exposition format 0.0.4 (ADR-0010): `http_requests_total{method,route,code}`, `blockchain_blocks` (omitted when the tip cannot be read) and `blockchain_mining_duration_seconds`.
@@ -445,6 +503,61 @@ func (c *Client) LegacyBpm(ctx context.Context, body LegacyBpmJSONRequestBody, r
 // Corresponds with GET /metrics (the `GetMetrics` operationId).
 func (c *Client) GetMetrics(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetMetricsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// MinePending Mine a block from the mempool
+//
+// Takes the pool transactions of highest fee per byte that fit `MAX_BLOCK_BYTES`, in selection order (fee rate descending, then ID); an empty pool mines an empty block. Same timeout and errors as `POST /`.
+//
+// Corresponds with POST /mine (the `MinePending` operationId).
+func (c *Client) MinePending(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewMinePendingRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SubmitTxWithBody Admit one signed transaction into the mempool
+//
+// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). It never mines.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /tx (the `SubmitTx` operationId).
+func (c *Client) SubmitTxWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSubmitTxRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SubmitTx Admit one signed transaction into the mempool
+//
+// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). It never mines.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /tx (the `SubmitTx` operationId).
+func (c *Client) SubmitTx(ctx context.Context, body SubmitTxJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSubmitTxRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -738,6 +851,33 @@ func NewLegacyBpmRequestWithBody(server string, contentType string, body io.Read
 	return req, nil
 }
 
+// NewGetMempoolRequest constructs an http.Request for the GetMempool method
+func NewGetMempoolRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/mempool")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetMetricsRequest constructs an http.Request for the GetMetrics method
 func NewGetMetricsRequest(server string) (*http.Request, error) {
 	var err error
@@ -761,6 +901,73 @@ func NewGetMetricsRequest(server string) (*http.Request, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewMinePendingRequest constructs an http.Request for the MinePending method
+func NewMinePendingRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/mine")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewSubmitTxRequest calls the generic SubmitTx builder with application/json body
+func NewSubmitTxRequest(server string, body SubmitTxJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSubmitTxRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewSubmitTxRequestWithBody constructs an http.Request for the SubmitTx method, with any body, and a specified content type
+func NewSubmitTxRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/tx")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -914,6 +1121,13 @@ type ClientWithResponsesInterface interface {
 	// Deprecated: this operation has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	LegacyBpmWithResponse(ctx context.Context, body LegacyBpmJSONRequestBody, reqEditors ...RequestEditorFn) (*LegacyBpmResponse, error)
 
+	// GetMempoolWithResponse List the mempool in selection order
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /mempool (the `GetMempool` operationId).
+	GetMempoolWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetMempoolResponse, error)
+
 	// GetMetricsWithResponse Expose Prometheus metrics
 	//
 	// Prometheus text exposition format 0.0.4 (ADR-0010): `http_requests_total{method,route,code}`, `blockchain_blocks` (omitted when the tip cannot be read) and `blockchain_mining_duration_seconds`.
@@ -922,6 +1136,33 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /metrics (the `GetMetrics` operationId).
 	GetMetricsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetMetricsResponse, error)
+
+	// MinePendingWithResponse Mine a block from the mempool
+	//
+	// Takes the pool transactions of highest fee per byte that fit `MAX_BLOCK_BYTES`, in selection order (fee rate descending, then ID); an empty pool mines an empty block. Same timeout and errors as `POST /`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /mine (the `MinePending` operationId).
+	MinePendingWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*MinePendingResponse, error)
+
+	// SubmitTxWithBodyWithResponse Admit one signed transaction into the mempool
+	//
+	// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). It never mines.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /tx (the `SubmitTx` operationId).
+	SubmitTxWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SubmitTxResponse, error)
+
+	// SubmitTxWithResponse Admit one signed transaction into the mempool
+	//
+	// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). It never mines.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /tx (the `SubmitTx` operationId).
+	SubmitTxWithResponse(ctx context.Context, body SubmitTxJSONRequestBody, reqEditors ...RequestEditorFn) (*SubmitTxResponse, error)
 
 	// GetTxWithResponse Get one transaction and the block that contains it
 	//
@@ -1428,6 +1669,61 @@ func (r LegacyBpmResponse) ContentType() string {
 	return ""
 }
 
+// GetMempoolResponse429Headers the declared response headers of an HTTP 429 response for GetMempool
+type GetMempoolResponse429Headers struct {
+	RetryAfter int
+}
+
+type GetMempoolResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *MempoolResponse
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *RateLimited
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *GetMempoolResponse429Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetMempoolResponse) GetJSON200() *MempoolResponse {
+	return r.JSON200
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r GetMempoolResponse) GetJSON429() *RateLimited {
+	return r.JSON429
+}
+
+// GetBody returns the raw response body bytes
+func (r GetMempoolResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetMempoolResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetMempoolResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetMempoolResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // GetMetricsResponse429Headers the declared response headers of an HTTP 429 response for GetMetrics
 type GetMetricsResponse429Headers struct {
 	RetryAfter int
@@ -1470,6 +1766,186 @@ func (r GetMetricsResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetMetricsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// MinePendingResponse429Headers the declared response headers of an HTTP 429 response for MinePending
+type MinePendingResponse429Headers struct {
+	RetryAfter int
+}
+
+type MinePendingResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *Block
+	// JSON408 the response for an HTTP 408 `application/json` response
+	JSON408 *ErrorResponse
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ErrorResponse
+	// JSON422 the response for an HTTP 422 `application/json` response
+	JSON422 *ErrorResponse
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *RateLimited
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalError
+	// JSON504 the response for an HTTP 504 `application/json` response
+	JSON504 *ErrorResponse
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *MinePendingResponse429Headers
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r MinePendingResponse) GetJSON201() *Block {
+	return r.JSON201
+}
+
+// GetJSON408 returns the response for an HTTP 408 `application/json` response
+func (r MinePendingResponse) GetJSON408() *ErrorResponse {
+	return r.JSON408
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r MinePendingResponse) GetJSON409() *ErrorResponse {
+	return r.JSON409
+}
+
+// GetJSON422 returns the response for an HTTP 422 `application/json` response
+func (r MinePendingResponse) GetJSON422() *ErrorResponse {
+	return r.JSON422
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r MinePendingResponse) GetJSON429() *RateLimited {
+	return r.JSON429
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r MinePendingResponse) GetJSON500() *InternalError {
+	return r.JSON500
+}
+
+// GetJSON504 returns the response for an HTTP 504 `application/json` response
+func (r MinePendingResponse) GetJSON504() *ErrorResponse {
+	return r.JSON504
+}
+
+// GetBody returns the raw response body bytes
+func (r MinePendingResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r MinePendingResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r MinePendingResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r MinePendingResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// SubmitTxResponse429Headers the declared response headers of an HTTP 429 response for SubmitTx
+type SubmitTxResponse429Headers struct {
+	RetryAfter int
+}
+
+type SubmitTxResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *SubmitResponse
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ErrorResponse
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ErrorResponse
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *ErrorResponse
+	// JSON422 the response for an HTTP 422 `application/json` response
+	JSON422 *ErrorResponse
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *RateLimited
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalError
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *SubmitTxResponse429Headers
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r SubmitTxResponse) GetJSON202() *SubmitResponse {
+	return r.JSON202
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r SubmitTxResponse) GetJSON400() *ErrorResponse {
+	return r.JSON400
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r SubmitTxResponse) GetJSON409() *ErrorResponse {
+	return r.JSON409
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r SubmitTxResponse) GetJSON413() *ErrorResponse {
+	return r.JSON413
+}
+
+// GetJSON422 returns the response for an HTTP 422 `application/json` response
+func (r SubmitTxResponse) GetJSON422() *ErrorResponse {
+	return r.JSON422
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r SubmitTxResponse) GetJSON429() *RateLimited {
+	return r.JSON429
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r SubmitTxResponse) GetJSON500() *InternalError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r SubmitTxResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r SubmitTxResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SubmitTxResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r SubmitTxResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -1676,6 +2152,19 @@ func (c *ClientWithResponses) LegacyBpmWithResponse(ctx context.Context, body Le
 	return ParseLegacyBpmResponse(rsp)
 }
 
+// GetMempoolWithResponse List the mempool in selection order
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /mempool (the `GetMempool` operationId).
+func (c *ClientWithResponses) GetMempoolWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetMempoolResponse, error) {
+	rsp, err := c.GetMempool(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetMempoolResponse(rsp)
+}
+
 // GetMetricsWithResponse Expose Prometheus metrics
 //
 // Prometheus text exposition format 0.0.4 (ADR-0010): `http_requests_total{method,route,code}`, `blockchain_blocks` (omitted when the tip cannot be read) and `blockchain_mining_duration_seconds`.
@@ -1689,6 +2178,51 @@ func (c *ClientWithResponses) GetMetricsWithResponse(ctx context.Context, reqEdi
 		return nil, err
 	}
 	return ParseGetMetricsResponse(rsp)
+}
+
+// MinePendingWithResponse Mine a block from the mempool
+//
+// Takes the pool transactions of highest fee per byte that fit `MAX_BLOCK_BYTES`, in selection order (fee rate descending, then ID); an empty pool mines an empty block. Same timeout and errors as `POST /`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /mine (the `MinePending` operationId).
+func (c *ClientWithResponses) MinePendingWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*MinePendingResponse, error) {
+	rsp, err := c.MinePending(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseMinePendingResponse(rsp)
+}
+
+// SubmitTxWithBodyWithResponse Admit one signed transaction into the mempool
+//
+// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). It never mines.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /tx (the `SubmitTx` operationId).
+func (c *ClientWithResponses) SubmitTxWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SubmitTxResponse, error) {
+	rsp, err := c.SubmitTxWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSubmitTxResponse(rsp)
+}
+
+// SubmitTxWithResponse Admit one signed transaction into the mempool
+//
+// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). It never mines.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /tx (the `SubmitTx` operationId).
+func (c *ClientWithResponses) SubmitTxWithResponse(ctx context.Context, body SubmitTxJSONRequestBody, reqEditors ...RequestEditorFn) (*SubmitTxResponse, error) {
+	rsp, err := c.SubmitTx(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSubmitTxResponse(rsp)
 }
 
 // GetTxWithResponse Get one transaction and the block that contains it
@@ -2141,6 +2675,52 @@ func ParseLegacyBpmResponse(rsp *http.Response) (*LegacyBpmResponse, error) {
 	return response, nil
 }
 
+// ParseGetMempoolResponse parses an HTTP response from a GetMempoolWithResponse call
+func ParseGetMempoolResponse(rsp *http.Response) (*GetMempoolResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetMempoolResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest MempoolResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest RateLimited
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers GetMempoolResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
 // ParseGetMetricsResponse parses an HTTP response from a GetMetricsWithResponse call
 func ParseGetMetricsResponse(rsp *http.Response) (*GetMetricsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -2167,6 +2747,168 @@ func ParseGetMetricsResponse(rsp *http.Response) (*GetMetricsResponse, error) {
 	switch {
 	case rsp.StatusCode == 429:
 		var headers GetMetricsResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseMinePendingResponse parses an HTTP response from a MinePendingWithResponse call
+func ParseMinePendingResponse(rsp *http.Response) (*MinePendingResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &MinePendingResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest Block
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 408:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON408 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest RateLimited
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 504:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON504 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers MinePendingResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseSubmitTxResponse parses an HTTP response from a SubmitTxWithResponse call
+func ParseSubmitTxResponse(rsp *http.Response) (*SubmitTxResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SubmitTxResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest SubmitResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest RateLimited
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers SubmitTxResponse429Headers
 		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
 			var value int
 			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {

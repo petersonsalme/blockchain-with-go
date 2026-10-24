@@ -7,6 +7,7 @@ import (
 
 	"github.com/petersonsalme/blockchain-with-go/internal/chain"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
+	"github.com/petersonsalme/blockchain-with-go/internal/mempool"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 )
 
@@ -84,4 +85,31 @@ func respondWithMineError(w http.ResponseWriter, err error) {
 	default:
 		respondWithJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
 	}
+}
+
+// duplicateTxCode is the error code for a transaction already in the pool.
+const duplicateTxCode = "duplicate_tx"
+
+// mempoolConflictCode is the error code for a transaction that spends an outpoint a pool transaction spends.
+const mempoolConflictCode = "mempool_conflict"
+
+// mempoolFullCode is the error code for a full pool and a fee rate too low to evict.
+const mempoolFullCode = "mempool_full"
+
+// respondWithSubmitError maps an error from Submit to its HTTP response. Pool
+// rejections answer 409; any other error maps as in respondWithMineError.
+func respondWithSubmitError(w http.ResponseWriter, err error) {
+	var code string
+	switch {
+	case errors.Is(err, mempool.ErrDuplicate):
+		code = duplicateTxCode
+	case errors.Is(err, mempool.ErrConflict):
+		code = mempoolConflictCode
+	case errors.Is(err, mempool.ErrFull):
+		code = mempoolFullCode
+	default:
+		respondWithMineError(w, err)
+		return
+	}
+	respondWithJSON(w, http.StatusConflict, errorResponse{Error: err.Error(), Code: code})
 }
