@@ -29,6 +29,25 @@ func (rejectingConsensus) Verify(history []*domain.Block, b *domain.Block) error
 	return errors.New("rejected")
 }
 
+// countingConsensus delegates to inner and records every call it receives.
+type countingConsensus struct {
+	inner    *pow.ProofOfWork
+	seals    atomic.Int64
+	verifies atomic.Int64
+	verified atomic.Pointer[domain.Block]
+}
+
+func (s *countingConsensus) Seal(ctx context.Context, history []*domain.Block, b *domain.Block) error {
+	s.seals.Add(1)
+	return s.inner.Seal(ctx, history, b)
+}
+
+func (s *countingConsensus) Verify(history []*domain.Block, b *domain.Block) error {
+	s.verifies.Add(1)
+	s.verified.Store(b)
+	return s.inner.Verify(history, b)
+}
+
 // errOnlyCtx reports Canceled through Err but never closes Done.
 type errOnlyCtx struct{ context.Context }
 
@@ -387,6 +406,16 @@ var _ = Describe("Service", func() {
 			Expect(all[1]).To(BeIdenticalTo(blk))
 			Expect(all[1].PrevHash).To(Equal(all[0].Hash))
 			Expect(eng.Verify([]*domain.Block{all[0]}, blk)).To(Succeed())
+		})
+
+		It("uses the injected Consensus for Seal and Verify", func() {
+			spy := &countingConsensus{inner: eng}
+			svc, f := funded(repo, spy)
+			blk, err := svc.Mine(context.Background(), f.tx())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(spy.seals.Load()).To(Equal(int64(1)))
+			Expect(spy.verifies.Load()).To(Equal(int64(1)))
+			Expect(spy.verified.Load()).To(BeIdenticalTo(blk))
 		})
 
 		It("returns ErrInvalidBlock when Verify rejects, leaving the chain unchanged", func() {
