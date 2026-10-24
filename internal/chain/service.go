@@ -33,6 +33,27 @@ var ErrStateDiverged = errors.New("chain: state diverged")
 // ErrTxNotFound is returned by TxProof when no block holds the transaction.
 var ErrTxNotFound = errors.New("chain: transaction not found")
 
+// ErrInsufficientWork is returned by ReplaceChain when the candidate does not
+// carry strictly more accumulated work than the local chain after the fork.
+var ErrInsufficientWork = errors.New("chain: candidate has no more work than the local chain")
+
+// ErrGenesisMismatch is returned by ReplaceChain when the candidate does not
+// start at the local genesis block.
+var ErrGenesisMismatch = errors.New("chain: candidate genesis differs from the local genesis")
+
+// Reorg describes a chain switch made by ReplaceChain.
+type Reorg struct {
+	// ForkHeight is the Index of the first block that changed.
+	ForkHeight int
+	// Disconnected are the local blocks removed, oldest first.
+	Disconnected []*domain.Block
+	// Connected are the candidate blocks added, oldest first.
+	Connected []*domain.Block
+	// Orphaned are the transactions of Disconnected whose hash is not in
+	// Connected, in chain order. They are not revalidated.
+	Orphaned []domain.Transaction
+}
+
 // Generator builds the candidate successor of the last block of history,
 // ordered oldest to newest, holding txs. The returned
 // block must contain exactly txs, in the same order.
@@ -142,9 +163,9 @@ func (s *Service) genesis() *domain.Block {
 }
 
 // verifyInputs checks the signature of every input against the output it
-// spends. It must run after a successful BlockDelta over txs, so every
-// input resolves either in the set or in an earlier transaction of txs.
-func (s *Service) verifyInputs(txs []domain.Transaction) error {
+// spends. It must run after a successful BlockDelta over txs and view, so every
+// input resolves either in view or in an earlier transaction of txs.
+func verifyInputs(view domain.UTXOView, txs []domain.Transaction) error {
 	created := map[domain.OutPoint]domain.TxOut{}
 	for i := range txs {
 		tx := &txs[i]
@@ -152,7 +173,7 @@ func (s *Service) verifyInputs(txs []domain.Transaction) error {
 			op := domain.OutPoint{TxID: in.PrevTxID, Index: in.OutIndex}
 			spent, ok := created[op]
 			if !ok {
-				spent, _ = s.utxos.Lookup(op)
+				spent, _ = view.Lookup(op)
 			}
 			if err := domain.VerifyInputSignature(tx, j, spent); err != nil {
 				return err
@@ -334,7 +355,7 @@ func (s *Service) Submit(tx domain.Transaction) error {
 	if err != nil {
 		return err
 	}
-	if err := s.verifyInputs(txs); err != nil {
+	if err := verifyInputs(s.utxos, txs); err != nil {
 		return err
 	}
 
@@ -408,7 +429,7 @@ func (s *Service) dropStale(txs []domain.Transaction) []domain.Transaction {
 	var stale []string
 	for i := range txs {
 		one := txs[i : i+1]
-		if _, err := domain.BlockDelta(s.utxos, &domain.Block{Transactions: one}, false); err != nil || s.verifyInputs(one) != nil {
+		if _, err := domain.BlockDelta(s.utxos, &domain.Block{Transactions: one}, false); err != nil || verifyInputs(s.utxos, one) != nil {
 			stale = append(stale, txs[i].ID)
 			continue
 		}
@@ -453,7 +474,7 @@ func (s *Service) mineLocked(ctx context.Context, txs []domain.Transaction) (*do
 	if err != nil {
 		return nil, err
 	}
-	if err := s.verifyInputs(txs); err != nil {
+	if err := verifyInputs(s.utxos, txs); err != nil {
 		return nil, err
 	}
 
@@ -483,4 +504,142 @@ func (s *Service) mineLocked(ctx context.Context, txs []domain.Transaction) (*do
 
 	s.pool.Prune(block, s.utxos)
 	return block, nil
+}
+
+// ReplaceChain switches the local chain to candidate, a full chain starting at
+// the local genesis, when it carries strictly more accumulated work after the
+// fork point (the first height where the two differ); equal work keeps the
+// local chain. Every candidate block from the fork on is verified by the
+// consensus, the block rules, the UTXO rules and its input signatures, against
+// the UTXO state of the candidate branch itself, before anything is written.
+// The first failure returns its error and leaves the repository and the UTXO
+// set untouched. The swap is one ReplaceFrom, then one Apply of the net UTXO
+// difference; a failure of that Apply stops the service like Mine does. Calls
+// are serialized with Mine; waiting for the turn is bounded by ctx.
+// Transactions of the dropped blocks are returned in Reorg.Orphaned; the pool is not revalidated.
+func (s *Service) ReplaceChain(ctx context.Context, candidate []*domain.Block) (*Reorg, error) {
+	release, err := s.lock(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	local, err := s.repo.All()
+	if err != nil {
+		return nil, err
+	}
+	if len(local) == 0 {
+		return nil, storage.ErrEmpty
+	}
+	fork, err := forkPoint(local, candidate)
+	if err != nil {
+		return nil, err
+	}
+	// A candidate that ends where the chains still agree has no work of its own.
+	if fork == len(candidate) {
+		return nil, ErrInsufficientWork
+	}
+
+	// forkState is the UTXO set at the fork, the base the candidate is checked
+	// against; oldState is the local chain's, replayed from it.
+	forkState, err := domain.BuildUTXOSet(local[:fork])
+	if err != nil {
+		return nil, err
+	}
+	oldState := domain.UTXOSet{}
+	for op, out := range forkState {
+		oldState[op] = out
+	}
+	for _, b := range local[fork:] {
+		delta, err := domain.BlockDelta(oldState, b, false)
+		if err != nil {
+			return nil, err
+		}
+		oldState.Apply(delta)
+	}
+
+	// The shared prefix is the local one, whatever else the candidate carries there.
+	history := make([]*domain.Block, fork, len(candidate))
+	copy(history, local[:fork])
+	now := time.Now()
+	for _, b := range candidate[fork:] {
+		if b == nil {
+			return nil, ErrInvalidBlock
+		}
+		if err := s.consensus.Verify(history, b); err != nil {
+			return nil, err
+		}
+		if err := domain.ValidateBlockRules(b, history[len(history)-1], now); err != nil {
+			return nil, err
+		}
+		delta, err := domain.BlockDelta(forkState, b, false)
+		if err != nil {
+			return nil, err
+		}
+		if err := verifyInputs(forkState, b.Transactions); err != nil {
+			return nil, err
+		}
+		forkState.Apply(delta)
+		history = append(history, b)
+	}
+
+	if domain.ChainWork(candidate[fork:]).Cmp(domain.ChainWork(local[fork:])) <= 0 {
+		return nil, ErrInsufficientWork
+	}
+
+	connected := slices.Clone(candidate[fork:])
+	if err := s.repo.ReplaceFrom(fork, connected); err != nil {
+		return nil, err
+	}
+	if err := s.utxos.Apply(domain.DiffUTXO(oldState, forkState)); err != nil {
+		s.diverged = true
+		return nil, fmt.Errorf("%w: %w", ErrStateDiverged, err)
+	}
+
+	disconnected := slices.Clone(local[fork:])
+	return &Reorg{
+		ForkHeight:   fork,
+		Disconnected: disconnected,
+		Connected:    connected,
+		Orphaned:     orphaned(disconnected, connected),
+	}, nil
+}
+
+// forkPoint returns the first height where candidate and local differ, which is
+// at least 1: the candidate must start at the local genesis. Callers hold a
+// non-empty local.
+func forkPoint(local, candidate []*domain.Block) (int, error) {
+	if len(candidate) == 0 || candidate[0] == nil {
+		return 0, ErrInvalidBlock
+	}
+	genesis := candidate[0]
+	// The genesis is never sealed, so its Hash may be empty: compare what it commits to.
+	if genesis.Hash != local[0].Hash || genesis.CalculateHash() != local[0].CalculateHash() {
+		return 0, ErrGenesisMismatch
+	}
+	fork := 1
+	for fork < len(local) && fork < len(candidate) && candidate[fork] != nil && candidate[fork].Hash == local[fork].Hash {
+		fork++
+	}
+	return fork, nil
+}
+
+// orphaned lists, in chain order, the transactions of disconnected that no
+// connected block holds. Transactions are matched by hash, not by their ID field.
+func orphaned(disconnected, connected []*domain.Block) []domain.Transaction {
+	kept := map[string]bool{}
+	for _, b := range connected {
+		for i := range b.Transactions {
+			kept[b.Transactions[i].CalculateHash()] = true
+		}
+	}
+	var out []domain.Transaction
+	for _, b := range disconnected {
+		for i := range b.Transactions {
+			if !kept[b.Transactions[i].CalculateHash()] {
+				out = append(out, b.Transactions[i])
+			}
+		}
+	}
+	return out
 }

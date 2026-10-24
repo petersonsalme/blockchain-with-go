@@ -26,7 +26,15 @@ A simple blockchain implementation in Go, created as an exercise to demonstrate 
 - **HTTP API**: A RESTful API to view the blockchain, append new blocks with transactions, and report structured errors with appropriate HTTP status codes.
 
 ## Consensus Mechanism
-This implementation utilizes a simplified **Longest Chain Rule** (represented by the `replaceChain` function). When confronted with multiple valid chains, the node will accept the longest chain as the source of truth. However, since this iteration does not implement peer-to-peer networking or block broadcasting, chain forks do not occur naturally. Block validation checks cryptographic linkage, index sequentiality, Proof of Work against the block's recorded difficulty, and transaction data integrity.
+Block validation checks cryptographic linkage, index sequentiality, Proof of Work against the block's recorded difficulty, and transaction data integrity.
+
+### Reorg and fork choice
+`chain.Service.ReplaceChain(ctx, candidate)` takes a full candidate chain (genesis first) and switches to it when it carries **strictly more accumulated work** after the fork point, the first height where it differs from the local chain. A block weighs `2^Difficulty` (difficulty counts leading zero bits), so a PoA block weighs 1 and PoA falls back to the longest chain. Equal work keeps the local chain (first seen wins), and the genesis must be the local one.
+
+- Every candidate block from the fork on is checked before anything is written: consensus, block rules, UTXO rules and input signatures, against the UTXO state of the candidate branch itself. The first failure is returned and the chain and the UTXO set stay as they were.
+- The swap is one atomic `ReplaceFrom` on the repository, then one `Apply` of the net UTXO difference. If that `Apply` fails the service stops accepting writes (`ErrStateDiverged`), like `Mine`.
+- The returned `Reorg` lists the fork height, the disconnected and connected blocks and `Orphaned`, the transactions of the dropped blocks that the new blocks do not hold, in chain order. They are not put back in the mempool or revalidated yet.
+- It shares the write turn with `Mine`. There is no peer transport yet, so forks come only from a caller handing in a candidate.
 
 ## Transaction Model (UTXO)
 Value lives in unspent transaction outputs (UTXOs). A transaction spends existing outputs and creates new ones:

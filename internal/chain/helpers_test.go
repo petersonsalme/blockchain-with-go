@@ -1,6 +1,8 @@
 package chain_test
 
 import (
+	"context"
+	"slices"
 	"time"
 
 	. "github.com/onsi/gomega"
@@ -73,4 +75,30 @@ func recipient() *wallet.Wallet {
 	w, err := wallet.FromSeed(seed)
 	Expect(err).NotTo(HaveOccurred())
 	return w
+}
+
+// grow seals one block per txs entry on top of chain, without validating the
+// transactions, and returns chain followed by the new blocks. chain is not altered.
+func grow(c consensus.Consensus, chain []*domain.Block, txss ...[]domain.Transaction) []*domain.Block {
+	out := slices.Clone(chain)
+	for _, txs := range txss {
+		b, err := GenerateBlockWithContext(context.Background(), c, out, txs)
+		Expect(err).NotTo(HaveOccurred())
+		out = append(out, b)
+	}
+	return out
+}
+
+// outpointOf is the output index of tx.
+func outpointOf(tx domain.Transaction, i uint32) domain.OutPoint {
+	return domain.OutPoint{TxID: tx.CalculateHash(), Index: i}
+}
+
+// hashes lists the block hashes of chain, to compare chains without sharing pointers.
+func hashes(chain []*domain.Block) []string {
+	out := make([]string, len(chain))
+	for i, b := range chain {
+		out[i] = b.Hash
+	}
+	return out
 }
