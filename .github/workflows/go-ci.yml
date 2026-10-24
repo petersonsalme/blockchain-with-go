@@ -29,6 +29,9 @@ jobs:
     - name: Check coverage floor
       run: scripts/check-coverage.sh coverage.out 90.0
 
+    - name: Run PoW benchmarks once (smoke)
+      run: go test -run='^$' -bench=. -benchtime=1x ./internal/consensus/pow/
+
     - name: Check generated client is up to date
       run: go generate ./client/... && git diff --exit-code client/
 
