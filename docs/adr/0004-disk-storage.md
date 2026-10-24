@@ -1,6 +1,6 @@
 # ADR-0004: Disk storage — bbolt adapter, UTXO set stays derived in memory
 
-Status: Accepted (board, 2026-10-19, ENG-27)
+Status: Superseded in part by ADR-0011 (accepted by the board, 2026-10-19, ENG-27)
 
 ## Context
 - All state is in memory and lost on restart (README trade-off 1). Port `storage.BlockRepository` (ENG-64, extended by ENG-86) has one adapter, `memory`.

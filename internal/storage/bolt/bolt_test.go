@@ -33,6 +33,16 @@ var _ = Describe("Bolt Repository", func() {
 		return repo
 	})
 
+	storagetest.IndexedRepositoryContract(func() storage.IndexedRepository {
+		path := filepath.Join(GinkgoT().TempDir(), "indexed.db")
+		repo, err := bolt.Open(path)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() {
+			_ = repo.Close()
+		})
+		return repo
+	})
+
 	It("persists blocks and hash index across Close and Open", func() {
 		dbPath := filepath.Join(GinkgoT().TempDir(), "persist.db")
 		repo, err := bolt.Open(dbPath)

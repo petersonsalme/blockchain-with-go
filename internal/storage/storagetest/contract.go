@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
+	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
 )
 
 type rejection int
@@ -518,4 +520,484 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 		})
 	})
 
+}
+
+// indexedWorld builds chains of real transactions together with the delta of each block.
+type indexedWorld struct {
+	set    domain.UTXOSet
+	blocks []*domain.Block
+	deltas []domain.UTXODelta
+}
+
+func newIndexedWorld() *indexedWorld { return &indexedWorld{set: domain.UTXOSet{}} }
+
+// forkAt returns a world holding the first height blocks of w.
+func (w *indexedWorld) forkAt(height int) *indexedWorld {
+	f := newIndexedWorld()
+	for i := 0; i < height; i++ {
+		f.blocks = append(f.blocks, w.blocks[i])
+		f.deltas = append(f.deltas, w.deltas[i])
+		f.set.Apply(w.deltas[i])
+	}
+	return f
+}
+
+// mine appends a block with txs, tagging its hash.
+func (w *indexedWorld) mine(tag string, txs ...domain.Transaction) {
+	b := &domain.Block{Index: len(w.blocks), Hash: fmt.Sprintf("%s%d", tag, len(w.blocks)), Transactions: txs}
+	if len(w.blocks) > 0 {
+		b.PrevHash = w.blocks[len(w.blocks)-1].Hash
+	}
+	d, err := domain.BlockDelta(w.set, b, b.Index == 0)
+	Expect(err).NotTo(HaveOccurred())
+	w.set.Apply(d)
+	w.blocks = append(w.blocks, b)
+	w.deltas = append(w.deltas, d)
+}
+
+func indexedTx(salt int64, ins []domain.OutPoint, outs ...domain.TxOut) domain.Transaction {
+	tx := domain.Transaction{Timestamp: time.Unix(1_700_000_000+salt, 0).UTC(), Outputs: outs}
+	for _, op := range ins {
+		tx.Inputs = append(tx.Inputs, domain.TxIn{PrevTxID: op.TxID, OutIndex: op.Index})
+	}
+	tx.ID = tx.CalculateHash()
+	return tx
+}
+
+func spend(tx domain.Transaction, i uint32) domain.OutPoint {
+	return domain.OutPoint{TxID: tx.CalculateHash(), Index: i}
+}
+
+// indexedFixture holds two branches that share blocks 0 and 1.
+type indexedFixture struct {
+	addrA, addrB, addrC string
+	main, alt           *indexedWorld
+	txids               []string
+	outpoints           []domain.OutPoint
+}
+
+func newIndexedFixture() *indexedFixture {
+	mk := func() string {
+		w, err := wallet.New()
+		Expect(err).NotTo(HaveOccurred())
+		return w.Address()
+	}
+	f := &indexedFixture{addrA: mk(), addrB: mk(), addrC: mk()}
+	A, B, C := f.addrA, f.addrB, f.addrC
+
+	f.main = newIndexedWorld()
+	g := indexedTx(0, nil, domain.TxOut{Amount: 100, Address: A}, domain.TxOut{Amount: 50, Address: B})
+	f.main.mine("m", g)
+	t1 := indexedTx(1, []domain.OutPoint{spend(g, 0)}, domain.TxOut{Amount: 60, Address: B}, domain.TxOut{Amount: 40, Address: A})
+	f.main.mine("m", t1)
+	// t2 pays C, t3 spends an output t2 created in the same block.
+	t2 := indexedTx(2, []domain.OutPoint{spend(t1, 0)}, domain.TxOut{Amount: 30, Address: C}, domain.TxOut{Amount: 30, Address: C})
+	t3 := indexedTx(3, []domain.OutPoint{spend(t2, 0)}, domain.TxOut{Amount: 30, Address: A})
+	f.main.mine("m", t2, t3)
+	t4 := indexedTx(4, []domain.OutPoint{spend(t3, 0), spend(g, 1)}, domain.TxOut{Amount: 80, Address: B})
+	f.main.mine("m", t4)
+
+	f.alt = f.main.forkAt(2)
+	a2 := indexedTx(12, []domain.OutPoint{spend(t1, 1)}, domain.TxOut{Amount: 40, Address: C})
+	f.alt.mine("a", a2)
+	a3 := indexedTx(13, []domain.OutPoint{spend(a2, 0)}, domain.TxOut{Amount: 25, Address: A}, domain.TxOut{Amount: 15, Address: B})
+	f.alt.mine("a", a3)
+	a4 := indexedTx(14, []domain.OutPoint{spend(a3, 1), spend(t1, 0)}, domain.TxOut{Amount: 70, Address: C})
+	f.alt.mine("a", a4)
+
+	for _, tx := range []domain.Transaction{g, t1, t2, t3, t4, a2, a3, a4} {
+		f.txids = append(f.txids, tx.CalculateHash())
+		for i := range tx.Outputs {
+			f.outpoints = append(f.outpoints, spend(tx, uint32(i)))
+		}
+	}
+	return f
+}
+
+// indexedState is everything observable through the IndexedRepository port.
+type indexedState struct {
+	hashes  []string
+	utxos   map[domain.OutPoint]domain.TxOut
+	heights map[string]int
+	byAddr  map[string][]string
+	current bool
+}
+
+func (f *indexedFixture) observe(repo storage.IndexedRepository) indexedState {
+	st := indexedState{utxos: map[domain.OutPoint]domain.TxOut{}, heights: map[string]int{}, byAddr: map[string][]string{}}
+	all, err := repo.All()
+	Expect(err).NotTo(HaveOccurred())
+	for _, b := range all {
+		st.hashes = append(st.hashes, b.Hash)
+	}
+	for _, op := range f.outpoints {
+		if o, ok := repo.Lookup(op); ok {
+			st.utxos[op] = o
+		}
+	}
+	for _, id := range f.txids {
+		h, err := repo.TxHeight(id)
+		if err != nil {
+			Expect(err).To(MatchError(storage.ErrNotFound))
+			h = -1
+		}
+		st.heights[id] = h
+	}
+	for _, a := range []string{f.addrA, f.addrB, f.addrC} {
+		ids, err := repo.TxsByAddress(a)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ids).NotTo(BeNil())
+		st.byAddr[a] = ids
+	}
+	st.current, err = repo.IndexCurrent()
+	Expect(err).NotTo(HaveOccurred())
+	return st
+}
+
+func commitAll(repo storage.IndexedRepository, blocks []*domain.Block, deltas []domain.UTXODelta) {
+	for i, b := range blocks {
+		Expect(repo.Commit(b, deltas[i])).To(Succeed())
+	}
+}
+
+// IndexedRepositoryContract registers Ginkgo specs that every
+// storage.IndexedRepository implementation must satisfy.
+func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
+	var (
+		repo storage.IndexedRepository
+		fx   *indexedFixture
+	)
+
+	BeforeEach(func() {
+		repo = newRepo()
+		fx = newIndexedFixture()
+	})
+
+	// fresh returns a repository holding only Commits of w.
+	fresh := func(w *indexedWorld) storage.IndexedRepository {
+		r := newRepo()
+		commitAll(r, w.blocks, w.deltas)
+		return r
+	}
+
+	Describe("an empty repository", func() {
+		It("is current and finds nothing", func() {
+			st := fx.observe(repo)
+			Expect(st.current).To(BeTrue())
+			Expect(st.utxos).To(BeEmpty())
+			for _, h := range st.heights {
+				Expect(h).To(Equal(-1))
+			}
+			for _, ids := range st.byAddr {
+				Expect(ids).To(BeEmpty())
+			}
+		})
+	})
+
+	Describe("Commit", func() {
+		It("stores the blocks, the UTXO set and the indexes", func() {
+			commitAll(repo, fx.main.blocks, fx.main.deltas)
+
+			st := fx.observe(repo)
+			Expect(st.current).To(BeTrue())
+			Expect(st.hashes).To(Equal([]string{"m0", "m1", "m2", "m3"}))
+			Expect(st.utxos).To(Equal(map[domain.OutPoint]domain.TxOut(fx.main.set)))
+			for i, b := range fx.main.blocks {
+				for _, tx := range b.Transactions {
+					Expect(st.heights[tx.CalculateHash()]).To(Equal(i))
+				}
+			}
+			ids := func(i, j int) string { return fx.main.blocks[i].Transactions[j].CalculateHash() }
+			// A: receives g, spends it in t1 (change), receives t3, which t4 spends.
+			Expect(st.byAddr[fx.addrA]).To(Equal([]string{ids(0, 0), ids(1, 0), ids(2, 1), ids(3, 0)}))
+			// B: receives g, t1, and t4; spends g:1 in t4. t2 spends t1:0 (B's), so t2 counts too.
+			Expect(st.byAddr[fx.addrB]).To(Equal([]string{ids(0, 0), ids(1, 0), ids(2, 0), ids(3, 0)}))
+			// C: receives t2 (two outputs, one entry); t3 spends one of them.
+			Expect(st.byAddr[fx.addrC]).To(Equal([]string{ids(2, 0), ids(2, 1)}))
+		})
+
+		It("serves the block lookups of the committed chain", func() {
+			commitAll(repo, fx.main.blocks, fx.main.deltas)
+			last, err := repo.Last()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(last.Hash).To(Equal("m3"))
+			byHash, err := repo.ByHash("m1")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(byHash.Index).To(Equal(1))
+			byHeight, err := repo.ByHeight(2)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(byHeight.Hash).To(Equal("m2"))
+		})
+
+		DescribeTable("rejects and leaves blocks, UTXOs and indexes as they were",
+			func(mk func(fx *indexedFixture) (*domain.Block, domain.UTXODelta), want error) {
+				commitAll(repo, fx.main.blocks[:3], fx.main.deltas[:3])
+				before := fx.observe(repo)
+
+				b, d := mk(fx)
+				err := repo.Commit(b, d)
+				if want == nil {
+					Expect(err).To(HaveOccurred())
+					Expect(err).NotTo(MatchError(storage.ErrConflict))
+					Expect(err).NotTo(MatchError(storage.ErrUTXOConflict))
+				} else {
+					Expect(err).To(MatchError(want))
+				}
+				Expect(fx.observe(repo)).To(Equal(before))
+				if b != nil {
+					_, err := repo.ByHash(b.Hash)
+					Expect(err).To(MatchError(storage.ErrNotFound))
+				}
+			},
+			Entry("wrong PrevHash", func(fx *indexedFixture) (*domain.Block, domain.UTXODelta) {
+				b := *fx.main.blocks[3]
+				b.PrevHash = "other"
+				return &b, fx.main.deltas[3]
+			}, storage.ErrConflict),
+			Entry("skipped Index", func(fx *indexedFixture) (*domain.Block, domain.UTXODelta) {
+				b := *fx.main.blocks[3]
+				b.Index = 4
+				return &b, fx.main.deltas[3]
+			}, storage.ErrConflict),
+			Entry("a delta that spends an absent output", func(fx *indexedFixture) (*domain.Block, domain.UTXODelta) {
+				d := domain.UTXODelta{
+					Spent:   map[domain.OutPoint]domain.TxOut{{TxID: "nope", Index: 0}: {Amount: 1, Address: fx.addrA}},
+					Created: map[domain.OutPoint]domain.TxOut{},
+				}
+				return fx.main.blocks[3], d
+			}, storage.ErrUTXOConflict),
+			Entry("a delta that spends an output with a different value", func(fx *indexedFixture) (*domain.Block, domain.UTXODelta) {
+				d := domain.UTXODelta{Spent: map[domain.OutPoint]domain.TxOut{}, Created: map[domain.OutPoint]domain.TxOut{}}
+				for op, o := range fx.main.deltas[3].Spent {
+					o.Amount++
+					d.Spent[op] = o
+				}
+				return fx.main.blocks[3], d
+			}, storage.ErrUTXOConflict),
+			Entry("a delta that creates an existing output", func(fx *indexedFixture) (*domain.Block, domain.UTXODelta) {
+				d := domain.UTXODelta{Spent: map[domain.OutPoint]domain.TxOut{}, Created: map[domain.OutPoint]domain.TxOut{}}
+				for op, o := range fx.main.deltas[2].Created {
+					d.Created[op] = o
+				}
+				return fx.main.blocks[3], d
+			}, storage.ErrUTXOConflict),
+			Entry("a nil block", func(fx *indexedFixture) (*domain.Block, domain.UTXODelta) {
+				return nil, fx.main.deltas[3]
+			}, nil),
+		)
+
+		It("refuses to commit on top of stale indexes", func() {
+			commitAll(repo, fx.main.blocks[:2], fx.main.deltas[:2])
+			Expect(repo.Append(fx.main.blocks[2])).To(Succeed())
+
+			Expect(repo.Commit(fx.main.blocks[3], fx.main.deltas[3])).To(MatchError(storage.ErrIndexStale))
+			last, err := repo.Last()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(last.Hash).To(Equal("m2"))
+		})
+	})
+
+	Describe("Append and ReplaceFrom", func() {
+		It("leave the indexes stale after an Append", func() {
+			commitAll(repo, fx.main.blocks[:2], fx.main.deltas[:2])
+			Expect(repo.Append(fx.main.blocks[2])).To(Succeed())
+			st := fx.observe(repo)
+			Expect(st.current).To(BeFalse())
+			Expect(st.heights[fx.main.blocks[2].Transactions[0].CalculateHash()]).To(Equal(-1))
+		})
+
+		It("leave the indexes stale after a swap that keeps the chain length", func() {
+			commitAll(repo, fx.main.blocks, fx.main.deltas)
+			Expect(repo.ReplaceFrom(2, fx.alt.blocks[2:4])).To(Succeed())
+			current, err := repo.IndexCurrent()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(current).To(BeFalse())
+		})
+	})
+
+	Describe("Reorg", func() {
+		It("matches a chain built only with Commit", func() {
+			commitAll(repo, fx.main.blocks, fx.main.deltas)
+			Expect(repo.Reorg(2, fx.alt.blocks[2:], fx.alt.deltas[2:])).To(Succeed())
+
+			Expect(fx.observe(repo)).To(Equal(fx.observe(fresh(fx.alt))))
+			st := fx.observe(repo)
+			Expect(st.current).To(BeTrue())
+			Expect(st.hashes).To(Equal([]string{"m0", "m1", "a2", "a3", "a4"}))
+			// t4 only existed in the removed branch.
+			t4 := fx.main.blocks[3].Transactions[0].CalculateHash()
+			_, err := repo.TxHeight(t4)
+			Expect(err).To(MatchError(storage.ErrNotFound))
+			_, err = repo.ByHash("m3")
+			Expect(err).To(MatchError(storage.ErrNotFound))
+		})
+
+		It("shortens the chain when the new branch is shorter", func() {
+			commitAll(repo, fx.main.blocks, fx.main.deltas)
+			Expect(repo.Reorg(2, fx.alt.blocks[2:3], fx.alt.deltas[2:3])).To(Succeed())
+			Expect(fx.observe(repo)).To(Equal(fx.observe(fresh(fx.alt.forkAt(3)))))
+		})
+
+		It("extends the chain when height equals its length", func() {
+			commitAll(repo, fx.main.blocks[:2], fx.main.deltas[:2])
+			Expect(repo.Reorg(2, fx.main.blocks[2:], fx.main.deltas[2:])).To(Succeed())
+			Expect(fx.observe(repo)).To(Equal(fx.observe(fresh(fx.main))))
+		})
+
+		It("accepts the same blocks again", func() {
+			commitAll(repo, fx.main.blocks, fx.main.deltas)
+			before := fx.observe(repo)
+			Expect(repo.Reorg(1, fx.main.blocks[1:], fx.main.deltas[1:])).To(Succeed())
+			Expect(fx.observe(repo)).To(Equal(before))
+		})
+
+		It("keeps accepting Commit afterwards", func() {
+			commitAll(repo, fx.main.blocks, fx.main.deltas)
+			Expect(repo.Reorg(2, fx.alt.blocks[2:3], fx.alt.deltas[2:3])).To(Succeed())
+			Expect(repo.Commit(fx.alt.blocks[3], fx.alt.deltas[3])).To(Succeed())
+			Expect(fx.observe(repo)).To(Equal(fx.observe(fresh(fx.alt.forkAt(4)))))
+		})
+
+		DescribeTable("rejects and leaves blocks, UTXOs and indexes as they were",
+			func(height int, mk func(fx *indexedFixture) ([]*domain.Block, []domain.UTXODelta), want error) {
+				commitAll(repo, fx.main.blocks, fx.main.deltas)
+				before := fx.observe(repo)
+
+				blocks, deltas := mk(fx)
+				err := repo.Reorg(height, blocks, deltas)
+				if want == nil {
+					Expect(err).To(HaveOccurred())
+					Expect(err).NotTo(MatchError(storage.ErrConflict))
+					Expect(err).NotTo(MatchError(storage.ErrUTXOConflict))
+				} else {
+					Expect(err).To(MatchError(want))
+				}
+				Expect(fx.observe(repo)).To(Equal(before))
+				for _, b := range blocks {
+					if b != nil {
+						_, err := repo.ByHash(b.Hash)
+						Expect(err).To(MatchError(storage.ErrNotFound))
+					}
+				}
+			},
+			Entry("height 0", 0, func(fx *indexedFixture) ([]*domain.Block, []domain.UTXODelta) {
+				return fx.alt.blocks[2:], fx.alt.deltas[2:]
+			}, storage.ErrConflict),
+			Entry("negative height", -1, func(fx *indexedFixture) ([]*domain.Block, []domain.UTXODelta) {
+				return fx.alt.blocks[2:], fx.alt.deltas[2:]
+			}, storage.ErrConflict),
+			Entry("height past len", 5, func(fx *indexedFixture) ([]*domain.Block, []domain.UTXODelta) {
+				return fx.alt.blocks[2:], fx.alt.deltas[2:]
+			}, storage.ErrConflict),
+			Entry("no blocks", 2, func(fx *indexedFixture) ([]*domain.Block, []domain.UTXODelta) {
+				return nil, nil
+			}, storage.ErrConflict),
+			Entry("fewer deltas than blocks", 2, func(fx *indexedFixture) ([]*domain.Block, []domain.UTXODelta) {
+				return fx.alt.blocks[2:], fx.alt.deltas[2:3]
+			}, storage.ErrConflict),
+			Entry("more deltas than blocks", 2, func(fx *indexedFixture) ([]*domain.Block, []domain.UTXODelta) {
+				return fx.alt.blocks[2:3], fx.alt.deltas[2:]
+			}, storage.ErrConflict),
+			Entry("first PrevHash is not chain[height-1]", 2, func(fx *indexedFixture) ([]*domain.Block, []domain.UTXODelta) {
+				b := *fx.alt.blocks[2]
+				b.PrevHash = "other"
+				return []*domain.Block{&b}, fx.alt.deltas[2:3]
+			}, storage.ErrConflict),
+			Entry("broken link in the middle", 2, func(fx *indexedFixture) ([]*domain.Block, []domain.UTXODelta) {
+				b := *fx.alt.blocks[3]
+				b.PrevHash = "other"
+				return []*domain.Block{fx.alt.blocks[2], &b}, fx.alt.deltas[2:]
+			}, storage.ErrConflict),
+			Entry("a nil block", 2, func(fx *indexedFixture) ([]*domain.Block, []domain.UTXODelta) {
+				return []*domain.Block{fx.alt.blocks[2], nil}, fx.alt.deltas[2:]
+			}, nil),
+			Entry("a nil block with mismatching deltas", 2, func(fx *indexedFixture) ([]*domain.Block, []domain.UTXODelta) {
+				return []*domain.Block{nil}, nil
+			}, nil),
+			Entry("a delta that does not match, after valid reverts and commits", 2, func(fx *indexedFixture) ([]*domain.Block, []domain.UTXODelta) {
+				bad := domain.UTXODelta{
+					Spent:   map[domain.OutPoint]domain.TxOut{{TxID: "nope"}: {Amount: 1, Address: fx.addrA}},
+					Created: map[domain.OutPoint]domain.TxOut{},
+				}
+				return fx.alt.blocks[2:], []domain.UTXODelta{fx.alt.deltas[2], fx.alt.deltas[3], bad}
+			}, storage.ErrUTXOConflict),
+			Entry("a delta that creates an output the set keeps", 2, func(fx *indexedFixture) ([]*domain.Block, []domain.UTXODelta) {
+				keep := domain.UTXODelta{Spent: map[domain.OutPoint]domain.TxOut{}, Created: map[domain.OutPoint]domain.TxOut{}}
+				for op, o := range fx.main.deltas[1].Created {
+					keep.Created[op] = o
+				}
+				return fx.alt.blocks[2:3], []domain.UTXODelta{keep}
+			}, storage.ErrUTXOConflict),
+		)
+
+		It("returns ErrConflict on an empty repository", func() {
+			Expect(repo.Reorg(1, fx.alt.blocks[1:], fx.alt.deltas[1:])).To(MatchError(storage.ErrConflict))
+			Expect(fx.observe(repo).hashes).To(BeEmpty())
+		})
+
+		It("refuses to reorg stale indexes", func() {
+			commitAll(repo, fx.main.blocks[:2], fx.main.deltas[:2])
+			Expect(repo.Append(fx.main.blocks[2])).To(Succeed())
+			Expect(repo.Reorg(2, fx.alt.blocks[2:], fx.alt.deltas[2:])).To(MatchError(storage.ErrIndexStale))
+			last, err := repo.Last()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(last.Hash).To(Equal("m2"))
+		})
+	})
+
+	Describe("Reindex", func() {
+		It("is a no-op on an empty repository", func() {
+			Expect(repo.Reindex()).To(Succeed())
+			Expect(fx.observe(repo).current).To(BeTrue())
+		})
+
+		It("leaves a chain built with Commit and Reorg as it was", func() {
+			commitAll(repo, fx.main.blocks, fx.main.deltas)
+			Expect(repo.Reorg(2, fx.alt.blocks[2:], fx.alt.deltas[2:])).To(Succeed())
+			before := fx.observe(repo)
+
+			Expect(repo.Reindex()).To(Succeed())
+			Expect(fx.observe(repo)).To(Equal(before))
+		})
+
+		It("rebuilds the indexes of a chain written with Append", func() {
+			for _, b := range fx.main.blocks {
+				Expect(repo.Append(b)).To(Succeed())
+			}
+			Expect(fx.observe(repo).current).To(BeFalse())
+
+			Expect(repo.Reindex()).To(Succeed())
+			Expect(fx.observe(repo)).To(Equal(fx.observe(fresh(fx.main))))
+			// The rebuilt undo data lets a Reorg run.
+			Expect(repo.Reorg(2, fx.alt.blocks[2:], fx.alt.deltas[2:])).To(Succeed())
+			Expect(fx.observe(repo)).To(Equal(fx.observe(fresh(fx.alt))))
+		})
+
+		It("rebuilds the indexes after ReplaceFrom", func() {
+			commitAll(repo, fx.main.blocks, fx.main.deltas)
+			Expect(repo.ReplaceFrom(2, fx.alt.blocks[2:])).To(Succeed())
+			Expect(fx.observe(repo).current).To(BeFalse())
+
+			Expect(repo.Reindex()).To(Succeed())
+			Expect(fx.observe(repo)).To(Equal(fx.observe(fresh(fx.alt))))
+		})
+
+		It("fails on a chain that does not replay and changes nothing", func() {
+			commitAll(repo, fx.main.blocks[:2], fx.main.deltas[:2])
+			// These transactions spend outputs that this chain never created.
+			Expect(repo.Append(&domain.Block{Index: 2, PrevHash: "m1", Hash: "bad2", Transactions: fx.main.blocks[3].Transactions})).To(Succeed())
+			before := fx.observe(repo)
+
+			Expect(repo.Reindex()).To(HaveOccurred())
+			Expect(fx.observe(repo)).To(Equal(before))
+		})
+	})
+}
+
+// IndexedChains returns two chains of real transactions that share their first
+// two blocks, each with the UTXO delta of every block, for adapter tests that
+// need to drive Commit and Reorg directly.
+func IndexedChains() (main, alt []*domain.Block, mainDeltas, altDeltas []domain.UTXODelta) {
+	fx := newIndexedFixture()
+	return fx.main.blocks, fx.alt.blocks, fx.main.deltas, fx.alt.deltas
 }

@@ -18,6 +18,9 @@ var (
 	hashesBucket = []byte("hashes")
 )
 
+// indexBuckets are the buckets Commit, Reorg and Reindex maintain; Reindex rebuilds all of them.
+var indexBuckets = [][]byte{utxosBucket, undoBucket, txsBucket, addrtxBucket, metaBucket}
+
 // ErrNilBlock is returned by Append and ReplaceFrom when given a nil block.
 var ErrNilBlock = errors.New("bolt: nil block")
 
@@ -37,11 +40,12 @@ func Open(path string) (*Repository, error) {
 	}
 
 	err = db.Update(func(tx *bbolt.Tx) error {
-		if _, err := tx.CreateBucketIfNotExists(blocksBucket); err != nil {
-			return err
+		for _, name := range append([][]byte{blocksBucket, hashesBucket}, indexBuckets...) {
+			if _, err := tx.CreateBucketIfNotExists(name); err != nil {
+				return err
+			}
 		}
-		_, err := tx.CreateBucketIfNotExists(hashesBucket)
-		return err
+		return nil
 	})
 	if err != nil {
 		_ = db.Close()
@@ -86,37 +90,43 @@ func (r *Repository) Append(b *domain.Block) error {
 	}
 
 	return r.db.Update(func(tx *bbolt.Tx) error {
-		bBucket := tx.Bucket(blocksBucket)
-		c := bBucket.Cursor()
-		k, v := c.Last()
-		if k != nil {
-			var last domain.Block
-			if err := json.Unmarshal(v, &last); err != nil {
-				return err
-			}
-			if b.Index != last.Index+1 || b.PrevHash != last.Hash {
-				return storage.ErrConflict
-			}
-		}
-
-		data, err := json.Marshal(b)
-		if err != nil {
+		if err := checkTip(tx.Bucket(blocksBucket), b); err != nil {
 			return err
 		}
-
-		key := make([]byte, 8)
-		binary.BigEndian.PutUint64(key, uint64(b.Index))
-
-		if err := bBucket.Put(key, data); err != nil {
-			return err
-		}
-
-		if len(b.Hash) > 0 {
-			hBucket := tx.Bucket(hashesBucket)
-			return hBucket.Put([]byte(b.Hash), key)
-		}
-		return nil
+		return putBlock(tx, b)
 	})
+}
+
+// checkTip returns storage.ErrConflict unless b extends the last stored block (any b extends an empty chain).
+func checkTip(bBucket *bbolt.Bucket, b *domain.Block) error {
+	k, v := bBucket.Cursor().Last()
+	if k == nil {
+		return nil
+	}
+	var last domain.Block
+	if err := json.Unmarshal(v, &last); err != nil {
+		return err
+	}
+	if b.Index != last.Index+1 || b.PrevHash != last.Hash {
+		return storage.ErrConflict
+	}
+	return nil
+}
+
+// putBlock stores b by height and, when it has a hash, in the hash index.
+func putBlock(tx *bbolt.Tx, b *domain.Block) error {
+	data, err := json.Marshal(b)
+	if err != nil {
+		return err
+	}
+	key := heightKey(b.Index)
+	if err := tx.Bucket(blocksBucket).Put(key, data); err != nil {
+		return err
+	}
+	if len(b.Hash) > 0 {
+		return tx.Bucket(hashesBucket).Put([]byte(b.Hash), key)
+	}
+	return nil
 }
 
 // All returns a snapshot of all blocks in index order, oldest first.
@@ -253,21 +263,8 @@ func (r *Repository) ReplaceFrom(height int, blocks []*domain.Block) error {
 		bBucket := tx.Bucket(blocksBucket)
 		hBucket := tx.Bucket(hashesBucket)
 
-		k, _ := bBucket.Cursor().Last()
-		if k == nil || uint64(height) > binary.BigEndian.Uint64(k)+1 {
-			return storage.ErrConflict
-		}
-
-		var prev domain.Block
-		if err := json.Unmarshal(bBucket.Get(heightKey(height-1)), &prev); err != nil {
+		if err := checkSplice(bBucket, height, blocks); err != nil {
 			return err
-		}
-		prevHash := prev.Hash
-		for i, b := range blocks {
-			if b.Index != height+i || b.PrevHash != prevHash {
-				return storage.ErrConflict
-			}
-			prevHash = b.Hash
 		}
 
 		// Collect first: bbolt cursors must not see deletes made while iterating.
@@ -291,22 +288,34 @@ func (r *Repository) ReplaceFrom(height int, blocks []*domain.Block) error {
 		}
 
 		for _, b := range blocks {
-			data, err := json.Marshal(b)
-			if err != nil {
+			if err := putBlock(tx, b); err != nil {
 				return err
-			}
-			key := heightKey(b.Index)
-			if err := bBucket.Put(key, data); err != nil {
-				return err
-			}
-			if len(b.Hash) > 0 {
-				if err := hBucket.Put([]byte(b.Hash), key); err != nil {
-					return err
-				}
 			}
 		}
-		return nil
+		// The indexes still describe the removed tail; mark them stale even when the chain length is unchanged.
+		return tx.Bucket(metaBucket).Delete(indexedTipKey)
 	})
+}
+
+// checkSplice applies the ReplaceFrom preconditions to the stored chain.
+func checkSplice(bBucket *bbolt.Bucket, height int, blocks []*domain.Block) error {
+	k, _ := bBucket.Cursor().Last()
+	if k == nil || uint64(height) > binary.BigEndian.Uint64(k)+1 {
+		return storage.ErrConflict
+	}
+
+	var prev domain.Block
+	if err := json.Unmarshal(bBucket.Get(heightKey(height-1)), &prev); err != nil {
+		return err
+	}
+	prevHash := prev.Hash
+	for i, b := range blocks {
+		if b.Index != height+i || b.PrevHash != prevHash {
+			return storage.ErrConflict
+		}
+		prevHash = b.Hash
+	}
+	return nil
 }
 
 func heightKey(h int) []byte {
