@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus"
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus/pow"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
+	"github.com/petersonsalme/blockchain-with-go/internal/mempool"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/memory"
 )
@@ -184,3 +186,23 @@ var _ = Describe("Mempool routes", func() {
 		Expect(rec.Header().Get("Allow")).To(Equal("GET, HEAD"))
 	})
 })
+
+var _ = DescribeTable("respondWithSubmitError",
+	func(err error, status int, code string) {
+		rec := httptest.NewRecorder()
+		respondWithSubmitError(rec, err)
+
+		Expect(rec.Code).To(Equal(status))
+		var body errorResponse
+		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
+		Expect(body.Code).To(Equal(code))
+		Expect(body.Error).To(Equal(err.Error()))
+	},
+	Entry("a duplicate pool transaction", mempool.ErrDuplicate, http.StatusConflict, "duplicate_tx"),
+	Entry("a pool outpoint conflict", mempool.ErrConflict, http.StatusConflict, "mempool_conflict"),
+	Entry("a full pool", mempool.ErrFull, http.StatusConflict, "mempool_full"),
+	Entry("a wrapped full pool", fmt.Errorf("submit: %w", mempool.ErrFull), http.StatusConflict, "mempool_full"),
+	Entry("insufficient inputs", domain.ErrInsufficientInputs, http.StatusUnprocessableEntity, domain.CodeInsufficientInputs),
+	Entry("input missing or spent", domain.ErrInputMissingOrSpent, http.StatusConflict, domain.CodeInputMissingOrSpent),
+	Entry("an unknown error", errors.New("boom"), http.StatusInternalServerError, ""),
+)
