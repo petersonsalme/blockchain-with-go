@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"testing"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -441,36 +442,121 @@ var _ = Describe("Rate Limiting", func() {
 		})
 
 		It("evicts a bucket at the exact boundary when refilled tokens reach max tokens", func() {
+			const n = 120 // refill rate: 2 tokens/sec
+			limiter := newRateLimiter(n, nowFunc)
+			wrapped := limiter.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+			send := func(addr string) int {
+				req := httptest.NewRequest("GET", "/", nil)
+				req.RemoteAddr = addr
+				rec := httptest.NewRecorder()
+				wrapped.ServeHTTP(rec, req)
+				return rec.Code
+			}
+
+			t0 := currentTime
+			// X drains its bucket at t0; the first request also sweeps
+			for range n {
+				send("11.22.33.44:1234")
+			}
+			// W drains its bucket one second later
+			currentTime = t0.Add(1 * time.Second)
+			for range n {
+				send("22.33.44.55:1234")
+			}
+
+			// At t0+sweepInterval: X refilled 0 + 60*2 = 120 (maxTokens), W only 0 + 59*2 = 118
+			currentTime = t0.Add(sweepInterval)
+			send("55.66.77.88:1234")
+
+			limiter.mu.Lock()
+			Expect(limiter.buckets).NotTo(HaveKey("11.22.33.44"))
+			Expect(limiter.buckets).To(HaveKey("22.33.44.55"))
+			Expect(limiter.buckets).To(HaveKey("55.66.77.88"))
+			limiter.mu.Unlock()
+		})
+
+		It("does not sweep again before sweepInterval and sweeps exactly at it", func() {
 			const n = 60 // refill rate: 1 token/sec
 			limiter := newRateLimiter(n, nowFunc)
 			wrapped := limiter.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 			}))
+			send := func(addr string) int {
+				req := httptest.NewRequest("GET", "/", nil)
+				req.RemoteAddr = addr
+				rec := httptest.NewRecorder()
+				wrapped.ServeHTTP(rec, req)
+				return rec.Code
+			}
 
-			// Request 1 from IP X: consumes 1 token, remaining 59 tokens
-			reqX := httptest.NewRequest("GET", "/", nil)
-			reqX.RemoteAddr = "11.22.33.44:1234"
-			recX := httptest.NewRecorder()
-			wrapped.ServeHTTP(recX, reqX)
+			t0 := currentTime
+			send("1.1.1.1:1")
+			// A is full (59 + 1 = 60), but the sweep at t0 was the last one: A survives
+			currentTime = t0.Add(1 * time.Second)
+			send("2.2.2.2:1")
 
 			limiter.mu.Lock()
-			Expect(limiter.buckets).To(HaveKey("11.22.33.44"))
+			Expect(limiter.buckets).To(HaveKey("1.1.1.1"))
 			limiter.mu.Unlock()
 
-			// Advance by exactly 1 second: 59 + 1.0 * 1.0 = 60.0 (maxTokens)
-			currentTime = currentTime.Add(1 * time.Second)
-
-			// Request from IP Y triggers sweep
-			reqY := httptest.NewRequest("GET", "/", nil)
-			reqY.RemoteAddr = "55.66.77.88:1234"
-			recY := httptest.NewRecorder()
-			wrapped.ServeHTTP(recY, reqY)
+			currentTime = t0.Add(59 * time.Second)
+			send("3.3.3.3:1")
 
 			limiter.mu.Lock()
-			// IP X refilled to exactly 60.0 >= 60.0, so it must be evicted
-			Expect(limiter.buckets).NotTo(HaveKey("11.22.33.44"))
-			Expect(limiter.buckets).To(HaveKey("55.66.77.88"))
+			Expect(limiter.buckets).To(HaveKey("1.1.1.1"))
+			limiter.mu.Unlock()
+
+			// Exactly sweepInterval after the last sweep: A is evicted
+			currentTime = t0.Add(sweepInterval)
+			send("4.4.4.4:1")
+
+			limiter.mu.Lock()
+			Expect(limiter.buckets).NotTo(HaveKey("1.1.1.1"))
+			Expect(limiter.buckets).To(HaveKey("4.4.4.4"))
+			limiter.mu.Unlock()
+		})
+
+		It("re-anchors the sweep when the clock goes back", func() {
+			const n = 60 // refill rate: 1 token/sec
+			limiter := newRateLimiter(n, nowFunc)
+			wrapped := limiter.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+			send := func(addr string) int {
+				req := httptest.NewRequest("GET", "/", nil)
+				req.RemoteAddr = addr
+				rec := httptest.NewRecorder()
+				wrapped.ServeHTTP(rec, req)
+				return rec.Code
+			}
+
+			t0 := currentTime
+			send("1.1.1.1:1")
+			// The clock jumps 10 minutes back: the sweep runs again and lastSweep follows the clock
+			back := t0.Add(-10 * time.Minute)
+			currentTime = back
+			send("2.2.2.2:1")
+			currentTime = back.Add(sweepInterval)
+			send("3.3.3.3:1")
+
+			limiter.mu.Lock()
+			// 2.2.2.2 is full again after 60s; 1.1.1.1 is far from full (its lastCheck is in the future)
+			Expect(limiter.buckets).NotTo(HaveKey("2.2.2.2"))
+			Expect(limiter.buckets).To(HaveKey("1.1.1.1"))
 			limiter.mu.Unlock()
 		})
 	})
 })
+
+func BenchmarkRateLimiterAllow10kIPs(b *testing.B) {
+	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	l := newRateLimiter(60, func() time.Time { return now })
+	for i := range 10000 {
+		l.allow("10.0." + strconv.Itoa(i/256) + "." + strconv.Itoa(i%256) + ":1")
+	}
+	for b.Loop() {
+		l.allow("192.0.2.1:1")
+	}
+}
