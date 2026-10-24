@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/petersonsalme/blockchain-with-go/client"
+	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
 )
 
@@ -23,7 +25,7 @@ const (
 
 func newWalletCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "wallet", Short: "Manage a wallet and talk to a node"}
-	cmd.AddCommand(newWalletNewCmd(), newWalletBalanceCmd())
+	cmd.AddCommand(newWalletNewCmd(), newWalletBalanceCmd(), newWalletSendCmd())
 	return cmd
 }
 
@@ -45,6 +47,23 @@ func newWalletBalanceCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE:  runWalletBalance,
 	}
+	addNodeFlag(cmd)
+	return cmd
+}
+
+func newWalletSendCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "send",
+		Short: "Send a transfer to an address",
+		Args:  cobra.NoArgs,
+		RunE:  runWalletSend,
+	}
+	cmd.Flags().String("to", "", "recipient address")
+	_ = cmd.MarkFlagRequired("to")
+	cmd.Flags().Uint64("amount", 0, "amount to send")
+	_ = cmd.MarkFlagRequired("amount")
+	cmd.Flags().Uint64("fee", 0, "transaction fee")
+	cmd.Flags().String("keystore", envOr(walletKeystoreEnvVar, defaultKeystore), "path to keystore file")
 	addNodeFlag(cmd)
 	return cmd
 }
@@ -112,4 +131,77 @@ func runWalletBalance(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), resp.JSON200.Balance)
 	return nil
+}
+
+func runWalletSend(cmd *cobra.Command, args []string) error {
+	path, err := cmd.Flags().GetString("keystore")
+	if err != nil {
+		return err
+	}
+	w, err := wallet.Load(path, os.Getenv(walletPasswordEnvVar))
+	if err != nil {
+		return fmt.Errorf("keystore %q: %w", path, err)
+	}
+	c, err := newNodeClient(cmd)
+	if err != nil {
+		return err
+	}
+	resp, err := c.GetBalanceWithResponse(cmd.Context(), w.Address())
+	if err != nil {
+		return err
+	}
+	if resp.JSON200 == nil {
+		return nodeError(resp.HTTPResponse, resp.Body)
+	}
+	to, err := cmd.Flags().GetString("to")
+	if err != nil {
+		return err
+	}
+	amount, err := cmd.Flags().GetUint64("amount")
+	if err != nil {
+		return err
+	}
+	fee, err := cmd.Flags().GetUint64("fee")
+	if err != nil {
+		return err
+	}
+	tx, err := buildTransfer(w, resp.JSON200.Utxos, to, amount, fee, time.Now())
+	if err != nil {
+		return err
+	}
+	sub, err := c.SubmitTxWithResponse(cmd.Context(), toClientTx(tx))
+	if err != nil {
+		return err
+	}
+	if sub.JSON202 == nil {
+		return nodeError(sub.HTTPResponse, sub.Body)
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), sub.JSON202.Id)
+	return nil
+}
+
+func toClientTx(tx domain.Transaction) client.Transaction {
+	id := tx.ID
+	ins := make([]client.TxIn, len(tx.Inputs))
+	for i, in := range tx.Inputs {
+		ins[i] = client.TxIn{
+			OutIndex:  in.OutIndex,
+			PrevTxID:  in.PrevTxID,
+			PublicKey: in.PublicKey,
+			Signature: in.Signature,
+		}
+	}
+	outs := make([]client.TxOut, len(tx.Outputs))
+	for i, out := range tx.Outputs {
+		outs[i] = client.TxOut{
+			Address: out.Address,
+			Amount:  out.Amount,
+		}
+	}
+	return client.Transaction{
+		ID:        &id,
+		Inputs:    &ins,
+		Outputs:   outs,
+		Timestamp: tx.Timestamp,
+	}
 }
