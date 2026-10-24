@@ -17,13 +17,14 @@ type Repository struct {
 	mu     sync.RWMutex
 	blocks []*domain.Block
 	byHash map[string]*domain.Block
+	idx    index
 }
 
 var _ storage.BlockRepository = (*Repository)(nil)
 
 // New returns an empty Repository.
 func New() *Repository {
-	return &Repository{byHash: map[string]*domain.Block{}}
+	return &Repository{byHash: map[string]*domain.Block{}, idx: newIndex()}
 }
 
 func (r *Repository) Last() (*domain.Block, error) {
@@ -114,6 +115,18 @@ func (r *Repository) ReplaceFrom(height int, blocks []*domain.Block) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if err := r.checkSplice(height, blocks); err != nil {
+		return err
+	}
+
+	r.splice(height, blocks)
+	// The indexes still describe the removed tail; mark them stale even when the chain length is unchanged.
+	r.idx.hasTip = false
+	return nil
+}
+
+// checkSplice applies the ReplaceFrom preconditions; the caller holds the lock.
+func (r *Repository) checkSplice(height int, blocks []*domain.Block) error {
 	if height < 1 || height > len(r.blocks) || len(blocks) == 0 {
 		return storage.ErrConflict
 	}
@@ -124,7 +137,11 @@ func (r *Repository) ReplaceFrom(height int, blocks []*domain.Block) error {
 		}
 		prev = b
 	}
+	return nil
+}
 
+// splice drops every block with Index >= height and appends blocks; the caller holds the lock and has called checkSplice.
+func (r *Repository) splice(height int, blocks []*domain.Block) {
 	for _, removed := range r.blocks[height:] {
 		delete(r.byHash, removed.Hash)
 	}
@@ -133,5 +150,4 @@ func (r *Repository) ReplaceFrom(height int, blocks []*domain.Block) error {
 	for _, b := range blocks {
 		r.byHash[b.Hash] = b
 	}
-	return nil
 }
