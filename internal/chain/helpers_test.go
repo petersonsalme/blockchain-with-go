@@ -24,7 +24,7 @@ type funding struct {
 }
 
 // funded builds a Service whose genesis allocates fundedOutputs outputs of 10 to a fresh owner.
-func funded(repo storage.BlockRepository, c consensus.Consensus, opts ...Option) (*Service, *funding) {
+func funded(repo storage.IndexedRepository, c consensus.Consensus, opts ...Option) (*Service, *funding) {
 	owner, err := wallet.New()
 	Expect(err).NotTo(HaveOccurred())
 
@@ -101,4 +101,44 @@ func hashes(chain []*domain.Block) []string {
 		out[i] = b.Hash
 	}
 	return out
+}
+
+// utxoSnapshot is the UTXO set persisted by repo: the repository only answers
+// Lookup, so it asks for every output any stored block ever created.
+func utxoSnapshot(repo storage.IndexedRepository) domain.UTXOSet {
+	blocks, err := repo.All()
+	Expect(err).NotTo(HaveOccurred())
+	set := domain.UTXOSet{}
+	for _, b := range blocks {
+		for i := range b.Transactions {
+			txid := b.Transactions[i].CalculateHash()
+			for j := range b.Transactions[i].Outputs {
+				op := domain.OutPoint{TxID: txid, Index: uint32(j)}
+				if out, ok := repo.Lookup(op); ok {
+					set[op] = out
+				}
+			}
+		}
+	}
+	return set
+}
+
+// failingWrites fails Commit and Reorg on demand.
+type failingWrites struct {
+	storage.IndexedRepository
+	commitErr, reorgErr error
+}
+
+func (f *failingWrites) Commit(b *domain.Block, d domain.UTXODelta) error {
+	if f.commitErr != nil {
+		return f.commitErr
+	}
+	return f.IndexedRepository.Commit(b, d)
+}
+
+func (f *failingWrites) Reorg(h int, bs []*domain.Block, ds []domain.UTXODelta) error {
+	if f.reorgErr != nil {
+		return f.reorgErr
+	}
+	return f.IndexedRepository.Reorg(h, bs, ds)
 }

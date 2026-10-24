@@ -134,7 +134,7 @@ const genesisAllocationsEnvVar = "GENESIS_ALLOCATIONS"
 
 // newService builds the chain service, funding the genesis block of an empty
 // repository from GENESIS_ALLOCATIONS.
-func newService(repo storage.BlockRepository, engine consensus.Consensus) (*chain.Service, error) {
+func newService(repo storage.IndexedRepository, engine consensus.Consensus) (*chain.Service, error) {
 	outs, err := parseGenesisAllocations(os.Getenv(genesisAllocationsEnvVar))
 	if err != nil {
 		return nil, err
@@ -172,7 +172,7 @@ const dataDirEnvVar = "DATA_DIR"
 
 // openRepository returns an in-memory repository when dataDir is empty, or opens
 // a bbolt repository at dataDir/chain.db, creating dataDir with 0o700 if needed.
-func openRepository(dataDir string) (storage.BlockRepository, func() error, error) {
+func openRepository(dataDir string) (storage.IndexedRepository, func() error, error) {
 	if strings.TrimSpace(dataDir) == "" {
 		return memory.New(), func() error { return nil }, nil
 	}

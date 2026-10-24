@@ -19,7 +19,7 @@ import (
 
 // allFailingRepo fails All once armed.
 type allFailingRepo struct {
-	storage.BlockRepository
+	storage.IndexedRepository
 	armed atomic.Bool
 }
 
@@ -27,12 +27,12 @@ func (r *allFailingRepo) All() ([]*domain.Block, error) {
 	if r.armed.Load() {
 		return nil, errors.New("all failed")
 	}
-	return r.BlockRepository.All()
+	return r.IndexedRepository.All()
 }
 
 // snapshotRepo fails Last, or returns an empty All, once armed.
 type snapshotRepo struct {
-	storage.BlockRepository
+	storage.IndexedRepository
 	failLast, emptyAll atomic.Bool
 }
 
@@ -40,14 +40,14 @@ func (r *snapshotRepo) Last() (*domain.Block, error) {
 	if r.failLast.Load() {
 		return nil, errors.New("last failed")
 	}
-	return r.BlockRepository.Last()
+	return r.IndexedRepository.Last()
 }
 
 func (r *snapshotRepo) All() ([]*domain.Block, error) {
 	if r.emptyAll.Load() {
 		return nil, nil
 	}
-	return r.BlockRepository.All()
+	return r.IndexedRepository.All()
 }
 
 var _ = Describe("Service difficulty retargeting", func() {
@@ -113,7 +113,7 @@ var _ = Describe("Service difficulty retargeting", func() {
 	})
 
 	It("returns the repository error when the history cannot be read", func() {
-		failing := &allFailingRepo{BlockRepository: repo}
+		failing := &allFailingRepo{IndexedRepository: repo}
 		svc, f := funded(failing, pow.New(1))
 		failing.armed.Store(true)
 
@@ -122,7 +122,7 @@ var _ = Describe("Service difficulty retargeting", func() {
 	})
 
 	It("mines on the parent taken from the history snapshot, without calling Last", func() {
-		wrapped := &snapshotRepo{BlockRepository: repo}
+		wrapped := &snapshotRepo{IndexedRepository: repo}
 		svc, f := funded(wrapped, pow.New(1))
 		before, err := repo.All()
 		Expect(err).NotTo(HaveOccurred())
@@ -136,7 +136,7 @@ var _ = Describe("Service difficulty retargeting", func() {
 	})
 
 	It("returns storage.ErrEmpty when the history snapshot is empty", func() {
-		wrapped := &snapshotRepo{BlockRepository: repo}
+		wrapped := &snapshotRepo{IndexedRepository: repo}
 		called := false
 		svc, f := funded(wrapped, pow.New(1), WithGenerator(func(context.Context, consensus.Consensus, []*domain.Block, []domain.Transaction) (*domain.Block, error) {
 			called = true

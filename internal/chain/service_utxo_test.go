@@ -19,37 +19,24 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
 )
 
-// failingUTXOSet fails Apply on demand.
-type failingUTXOSet struct {
-	storage.UTXOSet
-	applyErr error
+// stubRepo returns a fixed chain whose indexes are always stale, bypassing the
+// append-order checks of the in-memory repository. Reindex replays the chain.
+type stubRepo struct {
+	storage.IndexedRepository
+	blocks []*domain.Block
 }
 
-func (f *failingUTXOSet) Apply(d domain.UTXODelta) error {
-	if f.applyErr != nil {
-		return f.applyErr
-	}
-	return f.UTXOSet.Apply(d)
+func (s *stubRepo) Last() (*domain.Block, error)  { return s.blocks[len(s.blocks)-1], nil }
+func (s *stubRepo) All() ([]*domain.Block, error) { return s.blocks, nil }
+func (s *stubRepo) IndexCurrent() (bool, error)   { return false, nil }
+func (s *stubRepo) Reindex() error {
+	_, err := domain.BuildUTXOSet(s.blocks)
+	return err
 }
-
-// stubRepo returns a fixed chain, bypassing the append-order checks of the
-// in-memory repository.
-type stubRepo struct{ blocks []*domain.Block }
-
-func (s *stubRepo) Last() (*domain.Block, error) { return s.blocks[len(s.blocks)-1], nil }
-func (s *stubRepo) Append(*domain.Block) error   { return storage.ErrConflict }
-func (s *stubRepo) All() ([]*domain.Block, error) {
-	return s.blocks, nil
-}
-func (s *stubRepo) ByHeight(int) (*domain.Block, error)     { return nil, storage.ErrNotFound }
-func (s *stubRepo) ByHash(string) (*domain.Block, error)    { return nil, storage.ErrNotFound }
-func (s *stubRepo) Range(int, int) ([]*domain.Block, error) { return nil, storage.ErrNotFound }
-func (s *stubRepo) ReplaceFrom(int, []*domain.Block) error  { return storage.ErrConflict }
 
 var _ = Describe("Service UTXO rules", func() {
 	var (
 		repo  *memory.Repository
-		utxos *memory.UTXOSet
 		eng   *pow.ProofOfWork
 		svc   *Service
 		f     *funding
@@ -68,34 +55,33 @@ var _ = Describe("Service UTXO rules", func() {
 	expectUntouched := func(fn func()) {
 		before, err := repo.All()
 		Expect(err).NotTo(HaveOccurred())
-		snapshot := utxos.Snapshot()
+		snapshot := utxoSnapshot(repo)
 		fn()
 		after, err := repo.All()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(after).To(Equal(before))
-		Expect(utxos.Snapshot()).To(Equal(snapshot))
+		Expect(utxoSnapshot(repo)).To(Equal(snapshot))
 	}
 	expectRebuildMatches := func() {
 		all, err := repo.All()
 		Expect(err).NotTo(HaveOccurred())
 		built, err := domain.BuildUTXOSet(all)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(utxos.Snapshot()).To(Equal(built))
+		Expect(utxoSnapshot(repo)).To(Equal(built))
 	}
 
 	BeforeEach(func() {
 		var err error
 		repo = memory.New()
-		utxos = memory.NewUTXOSet()
 		eng = pow.NewProofOfWork(1)
-		svc, f = funded(repo, eng, WithUTXOSet(utxos))
+		svc, f = funded(repo, eng)
 		other, err = wallet.New()
 		Expect(err).NotTo(HaveOccurred())
 	})
 
 	Describe("NewService", func() {
 		It("allocates the genesis outputs in an empty repository", func() {
-			Expect(utxos.Snapshot()).To(HaveLen(fundedOutputs))
+			Expect(utxoSnapshot(repo)).To(HaveLen(fundedOutputs))
 			all, _ := repo.All()
 			Expect(all).To(HaveLen(1))
 			genesis := all[0]
@@ -107,19 +93,19 @@ var _ = Describe("Service UTXO rules", func() {
 			Expect(alloc.ID).To(Equal(alloc.CalculateHash()))
 			for i, op := range f.ops {
 				Expect(op).To(Equal(domain.OutPoint{TxID: alloc.CalculateHash(), Index: uint32(i)}))
-				got, found := utxos.Lookup(op)
+				got, found := repo.Lookup(op)
 				Expect(found).To(BeTrue())
 				Expect(got).To(Equal(alloc.Outputs[i]))
 			}
 		})
 
 		It("creates an empty genesis without allocations", func() {
-			emptyRepo, emptySet := memory.New(), memory.NewUTXOSet()
-			_, err := NewService(emptyRepo, eng, WithUTXOSet(emptySet))
+			emptyRepo := memory.New()
+			_, err := NewService(emptyRepo, eng)
 			Expect(err).NotTo(HaveOccurred())
 			all, _ := emptyRepo.All()
 			Expect(all[0].Transactions).To(BeEmpty())
-			Expect(emptySet.Snapshot()).To(BeEmpty())
+			Expect(utxoSnapshot(emptyRepo)).To(BeEmpty())
 		})
 
 		It("creates an empty genesis for an empty allocation list", func() {
@@ -130,14 +116,8 @@ var _ = Describe("Service UTXO rules", func() {
 			Expect(all[0].Transactions).To(BeEmpty())
 		})
 
-		It("defaults to an in-memory UTXO set", func() {
-			defaultRepo := memory.New()
-			_, err := NewService(defaultRepo, eng, WithGenesisAllocations([]domain.TxOut{{Amount: 1, Address: other.Address()}}))
-			Expect(err).NotTo(HaveOccurred())
-		})
-
 		It("ignores the allocations when the repository already has a chain", func() {
-			again, err := NewService(repo, eng, WithGenesisAllocations([]domain.TxOut{{Amount: 99, Address: other.Address()}}), WithUTXOSet(memory.NewUTXOSet()))
+			again, err := NewService(repo, eng, WithGenesisAllocations([]domain.TxOut{{Amount: 99, Address: other.Address()}}))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(chainLen()).To(Equal(1))
 			blocks, _ := again.Blocks()
@@ -162,10 +142,11 @@ var _ = Describe("Service UTXO rules", func() {
 			_, err = mine(f.tx()[0])
 			Expect(err).NotTo(HaveOccurred())
 
-			rebuilt := memory.NewUTXOSet()
-			_, err = NewService(repo, eng, WithUTXOSet(rebuilt))
+			before := utxoSnapshot(repo)
+			Expect(repo.Reindex()).To(Succeed())
+			_, err = NewService(repo, eng)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(rebuilt.Snapshot()).To(Equal(utxos.Snapshot()))
+			Expect(utxoSnapshot(repo)).To(Equal(before))
 		})
 
 		It("keeps rejecting an already mined spend after the rebuild", func() {
@@ -210,9 +191,19 @@ var _ = Describe("Service UTXO rules", func() {
 			Expect(err).To(MatchError(domain.ErrMissingInputs))
 		})
 
-		It("fails when the supplied UTXO set is not empty and conflicts with the chain", func() {
-			_, err := NewService(repo, eng, WithUTXOSet(utxos))
-			Expect(err).To(HaveOccurred())
+		It("rebuilds the indexes of a repository written without them", func() {
+			legacy := memory.New()
+			genesis := &domain.Block{Index: 0, Transactions: []domain.Transaction{}}
+			Expect(legacy.Append(genesis)).To(Succeed())
+			current, err := legacy.IndexCurrent()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(current).To(BeFalse())
+
+			_, err = NewService(legacy, eng)
+			Expect(err).NotTo(HaveOccurred())
+			current, err = legacy.IndexCurrent()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(current).To(BeTrue())
 		})
 	})
 
@@ -226,8 +217,7 @@ var _ = Describe("Service UTXO rules", func() {
 
 		It("rejects a block whose merkle root does not match and changes nothing", func() {
 			wrong := domain.MerkleRoot(nil)
-			badSet := memory.NewUTXOSet()
-			bad, err := NewService(repo, eng, WithUTXOSet(badSet), WithGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+			bad, err := NewService(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 				b, err := GenerateBlockWithContext(ctx, c, history, txs)
 				if err != nil {
 					return nil, err
@@ -240,7 +230,7 @@ var _ = Describe("Service UTXO rules", func() {
 
 			before, err := repo.All()
 			Expect(err).NotTo(HaveOccurred())
-			snapshot := badSet.Snapshot()
+			snapshot := utxoSnapshot(repo)
 
 			blk, err := bad.Mine(context.Background(), f.tx())
 			Expect(blk).To(BeNil())
@@ -252,7 +242,7 @@ var _ = Describe("Service UTXO rules", func() {
 			after, err := repo.All()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(after).To(Equal(before))
-			Expect(badSet.Snapshot()).To(Equal(snapshot))
+			Expect(utxoSnapshot(repo)).To(Equal(snapshot))
 		})
 
 		It("applies the delta of a mined block to the set", func() {
@@ -261,7 +251,7 @@ var _ = Describe("Service UTXO rules", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(blk.Transactions).To(Equal([]domain.Transaction{tx}))
 
-			snap := utxos.Snapshot()
+			snap := utxoSnapshot(repo)
 			Expect(snap).To(HaveLen(fundedOutputs))
 			_, stillThere := snap[f.ops[0]]
 			Expect(stillThere).To(BeFalse())
@@ -276,8 +266,8 @@ var _ = Describe("Service UTXO rules", func() {
 
 			_, err := mine(first, second)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(utxos.Snapshot()).To(HaveKey(domain.OutPoint{TxID: second.CalculateHash()}))
-			Expect(utxos.Snapshot()).NotTo(HaveKey(domain.OutPoint{TxID: first.CalculateHash()}))
+			Expect(utxoSnapshot(repo)).To(HaveKey(domain.OutPoint{TxID: second.CalculateHash()}))
+			Expect(utxoSnapshot(repo)).NotTo(HaveKey(domain.OutPoint{TxID: first.CalculateHash()}))
 			expectRebuildMatches()
 		})
 
@@ -385,54 +375,55 @@ var _ = Describe("Service UTXO rules", func() {
 			Expect(domain.SignInput(&tx, 1, f.owner)).To(Succeed())
 			_, err := mine(tx)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(utxos.Snapshot()).To(HaveLen(fundedOutputs - 1))
+			Expect(utxoSnapshot(repo)).To(HaveLen(fundedOutputs - 1))
 			expectRebuildMatches()
 		})
 
 		It("leaves the chain and the set untouched when consensus rejects the block", func() {
-			rejRepo, rejSet := memory.New(), memory.NewUTXOSet()
-			rej, rf := funded(rejRepo, rejectingConsensus{inner: eng}, WithUTXOSet(rejSet))
-			before := rejSet.Snapshot()
+			rejRepo := memory.New()
+			rej, rf := funded(rejRepo, rejectingConsensus{inner: eng})
+			before := utxoSnapshot(rejRepo)
 
 			_, err := rej.Mine(context.Background(), rf.tx())
 			Expect(err).To(MatchError(ErrInvalidBlock))
 			all, _ := rejRepo.All()
 			Expect(all).To(HaveLen(1))
-			Expect(rejSet.Snapshot()).To(Equal(before))
+			Expect(utxoSnapshot(rejRepo)).To(Equal(before))
 		})
 
-		It("does not apply the delta when the append fails", func() {
-			boom := errors.New("boom")
-			fr := &failingRepo{BlockRepository: memory.New()}
-			fset := memory.NewUTXOSet()
-			fs, ff := funded(fr, eng, WithUTXOSet(fset))
-			fr.appendErr = boom
-			before := fset.Snapshot()
+		It("returns a tip conflict from the commit as is and keeps accepting writes", func() {
+			failing := &failingWrites{IndexedRepository: memory.New()}
+			s, ff := funded(failing, eng)
+			failing.commitErr = storage.ErrConflict
 
-			_, err := fs.Mine(context.Background(), ff.tx())
-			Expect(err).To(MatchError(boom))
-			Expect(fset.Snapshot()).To(Equal(before))
+			_, err := s.Mine(context.Background(), ff.tx())
+			Expect(err).To(MatchError(storage.ErrConflict))
+			Expect(errors.Is(err, ErrStateDiverged)).To(BeFalse())
+
+			failing.commitErr = nil
+			_, err = s.Mine(context.Background(), ff.tx())
+			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("fails stop when applying the delta fails after the append", func() {
+		It("stops the service when the commit fails after the seal", func() {
 			boom := errors.New("boom")
-			failing := &failingUTXOSet{UTXOSet: memory.NewUTXOSet()}
 			memRepo := memory.New()
+			failing := &failingWrites{IndexedRepository: memRepo}
 			var genCalls atomic.Int32
-			s, ff := funded(memRepo, eng, WithUTXOSet(failing), WithGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
+			s, ff := funded(failing, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 				genCalls.Add(1)
 				return GenerateBlockWithContext(ctx, c, history, txs)
 			}))
-			failing.applyErr = boom
+			failing.commitErr = boom
 
 			_, err := s.Mine(context.Background(), ff.tx())
 			Expect(err).To(MatchError(ContainSubstring("boom")))
 			Expect(errors.Is(err, ErrStateDiverged)).To(BeTrue())
 
-			// Block was appended to repository before failure
+			// The failed commit changed nothing
 			all, err := memRepo.All()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(all).To(HaveLen(2))
+			Expect(all).To(HaveLen(1))
 			callsBefore := genCalls.Load()
 
 			// Every subsequent Mine returns ErrStateDiverged without calling Generator or Append
@@ -442,12 +433,12 @@ var _ = Describe("Service UTXO rules", func() {
 
 			allAfter, err := memRepo.All()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(allAfter).To(HaveLen(2))
+			Expect(allAfter).To(HaveLen(1))
 
 			// Blocks() continues to respond
 			blocks, err := s.Blocks()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(blocks).To(HaveLen(2))
+			Expect(blocks).To(HaveLen(1))
 		})
 
 		It("keeps the set equal to a rebuild from the chain after many blocks", func() {

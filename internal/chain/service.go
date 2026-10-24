@@ -14,7 +14,6 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/internal/mempool"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
-	"github.com/petersonsalme/blockchain-with-go/internal/storage/memory"
 )
 
 // ErrInvalidBlock is returned by Mine when the sealed block is nil or fails consensus verification.
@@ -67,13 +66,6 @@ func WithGenerator(g Generator) Option {
 	return func(s *Service) { s.generate = g }
 }
 
-// WithUTXOSet replaces the default in-memory UTXO set. NewService rebuilds it
-// from the chain, so it must start empty. The set belongs exclusively to the
-// Service; no external caller may invoke Apply or Revert on it.
-func WithUTXOSet(u storage.UTXOSet) Option {
-	return func(s *Service) { s.utxos = u }
-}
-
 // WithGenesisAllocations makes the genesis block of an empty repository carry
 // one transaction without inputs that creates outs.
 func WithGenesisAllocations(outs []domain.TxOut) Option {
@@ -86,12 +78,12 @@ func WithMempool(p *mempool.Pool) Option {
 	return func(s *Service) { s.pool = p }
 }
 
-// Service mines blocks onto the chain held by a storage.BlockRepository.
+// Service mines blocks onto the chain held by a storage.IndexedRepository,
+// which also holds the UTXO set and the transaction indexes.
 type Service struct {
-	repo        storage.BlockRepository
+	repo        storage.IndexedRepository
 	consensus   consensus.Consensus
 	generate    Generator
-	utxos       storage.UTXOSet
 	allocations []domain.TxOut
 	pool        *mempool.Pool
 	diverged    bool
@@ -100,8 +92,9 @@ type Service struct {
 }
 
 // NewService builds a Service over repo, stores the genesis block when repo is
-// empty and rebuilds the UTXO set from the chain.
-func NewService(repo storage.BlockRepository, c consensus.Consensus, opts ...Option) (*Service, error) {
+// empty. It rebuilds the persisted UTXO set and indexes only when the
+// repository reports them out of date.
+func NewService(repo storage.IndexedRepository, c consensus.Consensus, opts ...Option) (*Service, error) {
 	if repo == nil {
 		return nil, ErrNilRepository
 	}
@@ -112,9 +105,6 @@ func NewService(repo storage.BlockRepository, c consensus.Consensus, opts ...Opt
 	for _, opt := range opts {
 		opt(s)
 	}
-	if s.utxos == nil {
-		s.utxos = memory.NewUTXOSet()
-	}
 	if s.pool == nil {
 		s.pool = mempool.New(mempool.DefaultMaxTxs)
 	}
@@ -124,24 +114,21 @@ func NewService(repo storage.BlockRepository, c consensus.Consensus, opts ...Opt
 			return nil, err
 		}
 		genesis := s.genesis()
-		if _, err := domain.BlockDelta(s.utxos, genesis, true); err != nil {
+		delta, err := domain.BlockDelta(repo, genesis, true)
+		if err != nil {
 			return nil, err
 		}
-		if err := repo.Append(genesis); err != nil {
+		if err := repo.Commit(genesis, delta); err != nil {
 			return nil, err
 		}
 	}
 
-	blocks, err := repo.All()
+	current, err := repo.IndexCurrent()
 	if err != nil {
 		return nil, err
 	}
-	for i, b := range blocks {
-		delta, err := domain.BlockDelta(s.utxos, b, i == 0 && b.Index == 0)
-		if err != nil {
-			return nil, err
-		}
-		if err := s.utxos.Apply(delta); err != nil {
+	if !current {
+		if err := repo.Reindex(); err != nil {
 			return nil, err
 		}
 	}
@@ -222,19 +209,31 @@ type UTXO struct {
 // Transaction returns the transaction with the given ID, the hash and height of
 // the block that contains it, or storage.ErrNotFound.
 func (s *Service) Transaction(id string) (*domain.Transaction, string, int, error) {
-	blocks, err := s.repo.All()
+	b, i, err := s.locate(id)
 	if err != nil {
 		return nil, "", 0, err
 	}
-	for _, b := range blocks {
-		for i := range b.Transactions {
-			if b.Transactions[i].ID == id {
-				tx := b.Transactions[i]
-				return &tx, b.Hash, b.Index, nil
-			}
+	tx := b.Transactions[i]
+	return &tx, b.Hash, b.Index, nil
+}
+
+// locate finds the block holding the transaction id and its position there,
+// through the persisted index. It returns storage.ErrNotFound when none does.
+func (s *Service) locate(id string) (*domain.Block, int, error) {
+	h, err := s.repo.TxHeight(id)
+	if err != nil {
+		return nil, 0, err
+	}
+	b, err := s.repo.ByHeight(h)
+	if err != nil {
+		return nil, 0, err
+	}
+	for i := range b.Transactions {
+		if b.Transactions[i].ID == id {
+			return b, i, nil
 		}
 	}
-	return nil, "", 0, storage.ErrNotFound
+	return nil, 0, storage.ErrNotFound
 }
 
 // InclusionProof proves that a transaction belongs to the block at BlockIndex:
@@ -248,53 +247,135 @@ type InclusionProof struct {
 	Steps      []domain.MerkleStep
 }
 
-// TxProof returns the inclusion proof of the first transaction with the given
-// ID, scanning from genesis, or ErrTxNotFound. It reads a snapshot and never
-// waits for Mine.
+// TxProof returns the inclusion proof of the transaction with the given ID,
+// or ErrTxNotFound. It reads through the transaction index and never waits for
+// Mine.
 func (s *Service) TxProof(id string) (*InclusionProof, error) {
-	blocks, err := s.repo.All()
+	b, i, err := s.locate(id)
+	if errors.Is(err, storage.ErrNotFound) {
+		return nil, ErrTxNotFound
+	}
 	if err != nil {
 		return nil, err
 	}
-	for _, b := range blocks {
-		for i := range b.Transactions {
-			if b.Transactions[i].ID != id {
-				continue
-			}
-			proof, err := domain.BuildMerkleProof(b.Transactions, i)
-			if err != nil {
+	proof, err := domain.BuildMerkleProof(b.Transactions, i)
+	if err != nil {
+		return nil, err
+	}
+	return &InclusionProof{
+		BlockIndex: b.Index,
+		BlockHash:  b.Hash,
+		MerkleRoot: b.MerkleRoot,
+		LeafIndex:  i,
+		LeafHash:   domain.MerkleLeafHash(&b.Transactions[i]),
+		Steps:      proof.Steps,
+	}, nil
+}
+
+// TransactionsByAddress returns, in chain order, the transactions that create
+// or spend an output of addr. A reorg drops the transactions of the removed
+// blocks and adds those of the new ones. It never waits for Mine.
+func (s *Service) TransactionsByAddress(addr string) ([]domain.Transaction, error) {
+	var txs []domain.Transaction
+	err := s.consistent(func() error {
+		var err error
+		txs, err = s.addressTxs(addr)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return txs, nil
+}
+
+// addressTxs reads the transactions of addr from the index and the blocks.
+func (s *Service) addressTxs(addr string) ([]domain.Transaction, error) {
+	ids, err := s.repo.TxsByAddress(addr)
+	if err != nil {
+		return nil, err
+	}
+	txs := make([]domain.Transaction, 0, len(ids))
+	blocks := map[int]*domain.Block{}
+	for _, id := range ids {
+		h, err := s.repo.TxHeight(id)
+		if err != nil {
+			return nil, err
+		}
+		b, ok := blocks[h]
+		if !ok {
+			if b, err = s.repo.ByHeight(h); err != nil {
 				return nil, err
 			}
-			return &InclusionProof{
-				BlockIndex: b.Index,
-				BlockHash:  b.Hash,
-				MerkleRoot: b.MerkleRoot,
-				LeafIndex:  i,
-				LeafHash:   domain.MerkleLeafHash(&b.Transactions[i]),
-				Steps:      proof.Steps,
-			}, nil
+			blocks[h] = b
+		}
+		i := slices.IndexFunc(b.Transactions, func(tx domain.Transaction) bool { return tx.ID == id })
+		if i < 0 {
+			return nil, storage.ErrNotFound
+		}
+		txs = append(txs, b.Transactions[i])
+	}
+	return txs, nil
+}
+
+// readAttempts bounds how many times consistent repeats a read that raced a write.
+const readAttempts = 5
+
+// ErrTipMoving is returned by the index queries when blocks kept landing while
+// they read, so no attempt saw a single chain.
+var ErrTipMoving = errors.New("chain: tip kept moving while reading")
+
+// consistent runs read until the chain tip is the same before and after it, so
+// a read that spans several repository calls never mixes two chains. An error
+// from a read that raced a write is retried too; one that does not is returned.
+// After readAttempts attempts it gives up with ErrTipMoving.
+func (s *Service) consistent(read func() error) error {
+	for range readAttempts {
+		before, err := s.repo.Last()
+		if err != nil {
+			return err
+		}
+		readErr := read()
+		after, err := s.repo.Last()
+		if err != nil {
+			return err
+		}
+		if before.Hash == after.Hash {
+			return readErr
 		}
 	}
-	return nil, ErrTxNotFound
+	return ErrTipMoving
 }
 
 // Balance returns the unspent outputs owned by addr, sorted by (TxID, Index),
-// plus their sum, from a single snapshot of the UTXO set.
+// plus their sum. Every unspent output of addr was created by a transaction in
+// the address index, so it reads those transactions and keeps their outputs
+// that the persisted UTXO set still holds. The result is empty when the
+// repository cannot be read.
 func (s *Service) Balance(addr string) (uint64, []UTXO) {
-	snap := s.utxos.Snapshot()
 	var (
 		balance uint64
-		utxos   = make([]UTXO, 0)
+		utxos   []UTXO
 	)
-	for op, out := range snap {
-		if out.Address == addr {
-			balance += out.Amount
-			utxos = append(utxos, UTXO{
-				TxID:   op.TxID,
-				Index:  op.Index,
-				Amount: out.Amount,
-			})
+	err := s.consistent(func() error {
+		txs, err := s.addressTxs(addr)
+		balance, utxos = 0, make([]UTXO, 0)
+		if err != nil {
+			return err
 		}
+		for i := range txs {
+			txid := txs[i].CalculateHash()
+			for j := range txs[i].Outputs {
+				op := domain.OutPoint{TxID: txid, Index: uint32(j)}
+				if got, ok := s.repo.Lookup(op); ok && got.Address == addr {
+					balance += got.Amount
+					utxos = append(utxos, UTXO{TxID: op.TxID, Index: op.Index, Amount: got.Amount})
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, make([]UTXO, 0)
 	}
 	slices.SortFunc(utxos, func(a, b UTXO) int {
 		if c := strings.Compare(a.TxID, b.TxID); c != 0 {
@@ -351,11 +432,11 @@ func (s *Service) Mine(ctx context.Context, txs []domain.Transaction) (*domain.B
 // MinePending discards it.
 func (s *Service) Submit(tx domain.Transaction) error {
 	txs := []domain.Transaction{tx}
-	delta, err := domain.BlockDelta(s.utxos, &domain.Block{Transactions: txs}, false)
+	delta, err := domain.BlockDelta(s.repo, &domain.Block{Transactions: txs}, false)
 	if err != nil {
 		return err
 	}
-	if err := verifyInputs(s.utxos, txs); err != nil {
+	if err := verifyInputs(s.repo, txs); err != nil {
 		return err
 	}
 
@@ -429,7 +510,7 @@ func (s *Service) dropStale(txs []domain.Transaction) []domain.Transaction {
 	var stale []string
 	for i := range txs {
 		one := txs[i : i+1]
-		if _, err := domain.BlockDelta(s.utxos, &domain.Block{Transactions: one}, false); err != nil || verifyInputs(s.utxos, one) != nil {
+		if _, err := domain.BlockDelta(s.repo, &domain.Block{Transactions: one}, false); err != nil || verifyInputs(s.repo, one) != nil {
 			stale = append(stale, txs[i].ID)
 			continue
 		}
@@ -459,6 +540,18 @@ func sealedSize(txs []domain.Transaction) (int, error) {
 	return b.Size()
 }
 
+// writeFailed classifies an error of Commit or Reorg, which run after the block
+// was verified. storage.ErrConflict means the tip moved under the Service and
+// the write changed nothing, so it is returned as is; any other error leaves the
+// state unknown and stops the service. The caller holds writeSem.
+func (s *Service) writeFailed(err error) error {
+	if errors.Is(err, storage.ErrConflict) {
+		return err
+	}
+	s.diverged = true
+	return fmt.Errorf("%w: %w", ErrStateDiverged, err)
+}
+
 // mineLocked seals txs and appends the block. The caller holds writeSem.
 func (s *Service) mineLocked(ctx context.Context, txs []domain.Transaction) (*domain.Block, error) {
 	history, err := s.repo.All()
@@ -470,11 +563,11 @@ func (s *Service) mineLocked(ctx context.Context, txs []domain.Transaction) (*do
 	}
 	prev := history[len(history)-1]
 
-	delta, err := domain.BlockDelta(s.utxos, &domain.Block{Transactions: txs}, false)
+	delta, err := domain.BlockDelta(s.repo, &domain.Block{Transactions: txs}, false)
 	if err != nil {
 		return nil, err
 	}
-	if err := verifyInputs(s.utxos, txs); err != nil {
+	if err := verifyInputs(s.repo, txs); err != nil {
 		return nil, err
 	}
 
@@ -493,16 +586,11 @@ func (s *Service) mineLocked(ctx context.Context, txs []domain.Transaction) (*do
 		return nil, ErrInvalidBlock
 	}
 
-	if err := s.repo.Append(block); err != nil {
-		return nil, err
+	if err := s.repo.Commit(block, delta); err != nil {
+		return nil, s.writeFailed(err)
 	}
 
-	if err := s.utxos.Apply(delta); err != nil {
-		s.diverged = true
-		return nil, fmt.Errorf("%w: %w", ErrStateDiverged, err)
-	}
-
-	s.pool.Prune(block, s.utxos)
+	s.pool.Prune(block, s.repo)
 	return block, nil
 }
 
@@ -513,8 +601,9 @@ func (s *Service) mineLocked(ctx context.Context, txs []domain.Transaction) (*do
 // consensus, the block rules, the UTXO rules and its input signatures, against
 // the UTXO state of the candidate branch itself, before anything is written.
 // The first failure returns its error and leaves the repository and the UTXO
-// set untouched. The swap is one ReplaceFrom, then one Apply of the net UTXO
-// difference; a failure of that Apply stops the service like Mine does. Calls
+// set untouched. The swap is one Reorg, which reverts the stored deltas of the
+// dropped blocks and commits the candidate's; a failure of it stops the service
+// like Mine does. Calls
 // are serialized with Mine; waiting for the turn is bounded by ctx.
 // Transactions of the dropped blocks are returned in Reorg.Orphaned; the pool is not revalidated.
 func (s *Service) ReplaceChain(ctx context.Context, candidate []*domain.Block) (*Reorg, error) {
@@ -541,27 +630,17 @@ func (s *Service) ReplaceChain(ctx context.Context, candidate []*domain.Block) (
 	}
 
 	// forkState is the UTXO set at the fork, the base the candidate is checked
-	// against; oldState is the local chain's, replayed from it.
+	// against.
 	forkState, err := domain.BuildUTXOSet(local[:fork])
 	if err != nil {
 		return nil, err
-	}
-	oldState := domain.UTXOSet{}
-	for op, out := range forkState {
-		oldState[op] = out
-	}
-	for _, b := range local[fork:] {
-		delta, err := domain.BlockDelta(oldState, b, false)
-		if err != nil {
-			return nil, err
-		}
-		oldState.Apply(delta)
 	}
 
 	// The shared prefix is the local one, whatever else the candidate carries there.
 	history := make([]*domain.Block, fork, len(candidate))
 	copy(history, local[:fork])
 	now := time.Now()
+	var deltas []domain.UTXODelta
 	for _, b := range candidate[fork:] {
 		if b == nil {
 			return nil, ErrInvalidBlock
@@ -580,6 +659,7 @@ func (s *Service) ReplaceChain(ctx context.Context, candidate []*domain.Block) (
 			return nil, err
 		}
 		forkState.Apply(delta)
+		deltas = append(deltas, delta)
 		history = append(history, b)
 	}
 
@@ -588,12 +668,8 @@ func (s *Service) ReplaceChain(ctx context.Context, candidate []*domain.Block) (
 	}
 
 	connected := slices.Clone(candidate[fork:])
-	if err := s.repo.ReplaceFrom(fork, connected); err != nil {
-		return nil, err
-	}
-	if err := s.utxos.Apply(domain.DiffUTXO(oldState, forkState)); err != nil {
-		s.diverged = true
-		return nil, fmt.Errorf("%w: %w", ErrStateDiverged, err)
+	if err := s.repo.Reorg(fork, connected, deltas); err != nil {
+		return nil, s.writeFailed(err)
 	}
 
 	disconnected := slices.Clone(local[fork:])

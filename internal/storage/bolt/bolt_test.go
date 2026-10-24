@@ -17,7 +17,6 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/bolt"
-	"github.com/petersonsalme/blockchain-with-go/internal/storage/memory"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/storagetest"
 	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
 )
@@ -256,9 +255,7 @@ var _ = Describe("Bolt Repository", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		engine := pow.New(1)
-		utxoBefore := memory.NewUTXOSet()
 		svc, err := chain.NewService(repo, engine,
-			chain.WithUTXOSet(utxoBefore),
 			chain.WithGenesisAllocations([]domain.TxOut{
 				{Amount: 50, Address: w1.Address()},
 			}),
@@ -294,7 +291,8 @@ var _ = Describe("Bolt Repository", func() {
 		beforeBlocks, err := svc.Blocks()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(beforeBlocks).To(HaveLen(2))
-		beforeSnapshot := utxoBefore.Snapshot()
+		w1Before, w1UTXOsBefore := svc.Balance(w1.Address())
+		w2Before, w2UTXOsBefore := svc.Balance(w2.Address())
 
 		// Close repository
 		Expect(repo.Close()).To(Succeed())
@@ -307,9 +305,7 @@ var _ = Describe("Bolt Repository", func() {
 		// When reopened, GENESIS_ALLOCATIONS must be ignored
 		w3, err := wallet.New()
 		Expect(err).NotTo(HaveOccurred())
-		utxoAfter := memory.NewUTXOSet()
 		reopenedSvc, err := chain.NewService(reopened, engine,
-			chain.WithUTXOSet(utxoAfter),
 			chain.WithGenesisAllocations([]domain.TxOut{
 				{Amount: 1000, Address: w3.Address()},
 			}),
@@ -326,11 +322,15 @@ var _ = Describe("Bolt Repository", func() {
 			Expect(afterBlocks[i].Transactions).To(Equal(beforeBlocks[i].Transactions))
 		}
 
-		// Rebuilt UTXO snapshot must exactly match snapshot before restart
-		afterSnapshot := utxoAfter.Snapshot()
-		Expect(afterSnapshot).To(Equal(beforeSnapshot))
+		// The persisted UTXO set must exactly match the one before restart
+		w1After, w1UTXOsAfter := reopenedSvc.Balance(w1.Address())
+		w2After, w2UTXOsAfter := reopenedSvc.Balance(w2.Address())
+		Expect(w1After).To(Equal(w1Before))
+		Expect(w1UTXOsAfter).To(Equal(w1UTXOsBefore))
+		Expect(w2After).To(Equal(w2Before))
+		Expect(w2UTXOsAfter).To(Equal(w2UTXOsBefore))
 		spentGenOp := domain.OutPoint{TxID: genTxID, Index: 0}
-		_, spentFound := afterSnapshot[spentGenOp]
+		_, spentFound := reopened.Lookup(spentGenOp)
 		Expect(spentFound).To(BeFalse())
 
 		// Attempt double spend of the genesis output (already spent before restart)

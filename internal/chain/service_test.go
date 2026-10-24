@@ -34,55 +34,90 @@ type errOnlyCtx struct{ context.Context }
 
 func (errOnlyCtx) Err() error { return context.Canceled }
 
-// failingRepo fails Append and Last on demand.
+// failingRepo fails Commit, Last and the reads on demand.
 type failingRepo struct {
-	storage.BlockRepository
-	appendErr error
-	lastErr   error
-	allErr    error
-	readErr   error
+	storage.IndexedRepository
+	commitErr                error
+	lastErr                  error
+	txErr                    error
+	allErr                   error
+	readErr                  error
+	indexErr                 error
+	reindexErr               error
+	all, reindexes, currents atomic.Int32
 }
 
 func (f *failingRepo) ByHeight(h int) (*domain.Block, error) {
 	if f.readErr != nil {
 		return nil, f.readErr
 	}
-	return f.BlockRepository.ByHeight(h)
+	return f.IndexedRepository.ByHeight(h)
 }
 
 func (f *failingRepo) ByHash(hash string) (*domain.Block, error) {
 	if f.readErr != nil {
 		return nil, f.readErr
 	}
-	return f.BlockRepository.ByHash(hash)
+	return f.IndexedRepository.ByHash(hash)
 }
 
 func (f *failingRepo) Range(from, limit int) ([]*domain.Block, error) {
 	if f.readErr != nil {
 		return nil, f.readErr
 	}
-	return f.BlockRepository.Range(from, limit)
+	return f.IndexedRepository.Range(from, limit)
+}
+
+func (f *failingRepo) IndexCurrent() (bool, error) {
+	f.currents.Add(1)
+	if f.indexErr != nil {
+		return false, f.indexErr
+	}
+	return f.IndexedRepository.IndexCurrent()
+}
+
+func (f *failingRepo) Reindex() error {
+	f.reindexes.Add(1)
+	if f.reindexErr != nil {
+		return f.reindexErr
+	}
+	return f.IndexedRepository.Reindex()
 }
 
 func (f *failingRepo) All() ([]*domain.Block, error) {
+	f.all.Add(1)
 	if f.allErr != nil {
 		return nil, f.allErr
 	}
-	return f.BlockRepository.All()
+	return f.IndexedRepository.All()
 }
 
-func (f *failingRepo) Append(b *domain.Block) error {
-	if f.appendErr != nil {
-		return f.appendErr
+func (f *failingRepo) Commit(b *domain.Block, d domain.UTXODelta) error {
+	if f.commitErr != nil {
+		return f.commitErr
 	}
-	return f.BlockRepository.Append(b)
+	return f.IndexedRepository.Commit(b, d)
+}
+
+func (f *failingRepo) TxHeight(txid string) (int, error) {
+	if f.txErr != nil {
+		return 0, f.txErr
+	}
+	return f.IndexedRepository.TxHeight(txid)
+}
+
+func (f *failingRepo) TxsByAddress(addr string) ([]string, error) {
+	if f.txErr != nil {
+		return nil, f.txErr
+	}
+	return f.IndexedRepository.TxsByAddress(addr)
 }
 
 func (f *failingRepo) Last() (*domain.Block, error) {
 	if f.lastErr != nil {
 		return nil, f.lastErr
 	}
-	return f.BlockRepository.Last()
+	return f.IndexedRepository.Last()
 }
 
 var _ = Describe("Service", func() {
@@ -136,19 +171,47 @@ var _ = Describe("Service", func() {
 
 		It("fails when the repository cannot be read", func() {
 			boom := errors.New("boom")
-			_, err := NewService(&failingRepo{BlockRepository: repo, lastErr: boom}, eng)
+			_, err := NewService(&failingRepo{IndexedRepository: repo, lastErr: boom}, eng)
 			Expect(err).To(MatchError(boom))
 		})
 
-		It("fails when the chain cannot be scanned for nonces", func() {
+		It("fails when the index state cannot be read", func() {
 			boom := errors.New("boom")
-			_, err := NewService(&failingRepo{BlockRepository: repo, allErr: boom}, eng)
+			_, err := NewService(&failingRepo{IndexedRepository: repo, indexErr: boom}, eng)
+			Expect(err).To(MatchError(boom))
+		})
+
+		It("neither scans the chain nor reindexes when the indexes are current", func() {
+			_, err := NewService(repo, eng)
+			Expect(err).NotTo(HaveOccurred())
+
+			spy := &failingRepo{IndexedRepository: repo, allErr: errors.New("must not scan")}
+			_, err = NewService(spy, eng)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(spy.all.Load()).To(BeZero())
+			Expect(spy.currents.Load()).To(Equal(int32(1)))
+			Expect(spy.reindexes.Load()).To(BeZero())
+		})
+
+		It("reindexes once when the indexes are stale", func() {
+			Expect(repo.Append(&domain.Block{Index: 0})).To(Succeed())
+
+			spy := &failingRepo{IndexedRepository: repo}
+			_, err := NewService(spy, eng)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(spy.reindexes.Load()).To(Equal(int32(1)))
+		})
+
+		It("fails when the reindex fails", func() {
+			boom := errors.New("boom")
+			Expect(repo.Append(&domain.Block{Index: 0})).To(Succeed())
+			_, err := NewService(&failingRepo{IndexedRepository: repo, reindexErr: boom}, eng)
 			Expect(err).To(MatchError(boom))
 		})
 
 		It("fails when the genesis cannot be stored", func() {
 			boom := errors.New("boom")
-			_, err := NewService(&failingRepo{BlockRepository: repo, appendErr: boom}, eng)
+			_, err := NewService(&failingRepo{IndexedRepository: repo, commitErr: boom}, eng)
 			Expect(err).To(MatchError(boom))
 		})
 	})
@@ -204,7 +267,7 @@ var _ = Describe("Service", func() {
 
 		It("propagates repository errors", func() {
 			boom := errors.New("boom")
-			failing := &failingRepo{BlockRepository: repo}
+			failing := &failingRepo{IndexedRepository: repo}
 			bad, err := NewService(failing, eng)
 			Expect(err).NotTo(HaveOccurred())
 			failing.readErr, failing.lastErr = boom, boom
@@ -242,10 +305,10 @@ var _ = Describe("Service", func() {
 
 		It("propagates repository errors from Transaction", func() {
 			boom := errors.New("boom")
-			failing := &failingRepo{BlockRepository: repo}
+			failing := &failingRepo{IndexedRepository: repo}
 			bad, err := NewService(failing, eng)
 			Expect(err).NotTo(HaveOccurred())
-			failing.allErr = boom
+			failing.txErr = boom
 			_, _, _, err = bad.Transaction("any")
 			Expect(err).To(MatchError(boom))
 		})
@@ -447,9 +510,9 @@ var _ = Describe("Service", func() {
 
 		It("propagates repository Append errors", func() {
 			boom := errors.New("boom")
-			fr := &failingRepo{BlockRepository: repo}
+			fr := &failingRepo{IndexedRepository: repo}
 			svc, f := funded(fr, eng)
-			fr.appendErr = boom
+			fr.commitErr = boom
 			_, err := svc.Mine(context.Background(), f.tx())
 			Expect(err).To(MatchError(boom))
 		})

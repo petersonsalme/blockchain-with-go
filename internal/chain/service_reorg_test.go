@@ -89,30 +89,16 @@ func (f fixedDifficulty) Verify(history []*domain.Block, b *domain.Block) error 
 	return nil
 }
 
-// replaceFailingRepo fails ReplaceFrom on demand.
-type replaceFailingRepo struct {
-	storage.BlockRepository
-	err error
-}
-
-func (r *replaceFailingRepo) ReplaceFrom(h int, bs []*domain.Block) error {
-	if r.err != nil {
-		return r.err
-	}
-	return r.BlockRepository.ReplaceFrom(h, bs)
-}
-
 // forkFixture is a service holding branch A, with a heavier competing branch B
 // that forks from the same ancestor.
 //
 //	genesis - common - A2[shared, onlyA]
 //	                \- B2[shared] - B3[spend of B2's output, owner spend]
 type forkFixture struct {
-	svc   *Service
-	repo  *memory.Repository
-	utxos *memory.UTXOSet
-	eng   consensus.Consensus
-	f     *funding
+	svc  *Service
+	repo *memory.Repository
+	eng  consensus.Consensus
+	f    *funding
 
 	base      []*domain.Block // genesis, common
 	local     []*domain.Block // base, A2
@@ -123,8 +109,8 @@ type forkFixture struct {
 }
 
 func newForkFixture(ec engineCase, opts ...Option) *forkFixture {
-	fx := &forkFixture{repo: memory.New(), utxos: memory.NewUTXOSet(), eng: ec.new()}
-	fx.svc, fx.f = funded(fx.repo, fx.eng, append([]Option{WithUTXOSet(fx.utxos)}, opts...)...)
+	fx := &forkFixture{repo: memory.New(), eng: ec.new()}
+	fx.svc, fx.f = funded(fx.repo, fx.eng, opts...)
 
 	_, err := fx.svc.Mine(context.Background(), fx.f.tx())
 	Expect(err).NotTo(HaveOccurred())
@@ -162,11 +148,11 @@ var _ = Describe("Service.ReplaceChain", func() {
 
 			untouched := func(run func() error) {
 				beforeBlocks, _ := fx.svc.Blocks()
-				beforeUTXO := fx.utxos.Snapshot()
+				beforeUTXO := utxoSnapshot(fx.repo)
 				Expect(run()).NotTo(Succeed())
 				afterBlocks, _ := fx.svc.Blocks()
 				Expect(hashes(afterBlocks)).To(Equal(hashes(beforeBlocks)))
-				Expect(fx.utxos.Snapshot()).To(Equal(beforeUTXO))
+				Expect(utxoSnapshot(fx.repo)).To(Equal(beforeUTXO))
 			}
 
 			Describe("a heavier branch", func() {
@@ -185,7 +171,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 					Expect(hashes(blocks)).To(Equal(hashes(fx.candidate)))
 
 					want := replay(blocks)
-					Expect(fx.utxos.Snapshot()).To(Equal(want))
+					Expect(utxoSnapshot(fx.repo)).To(Equal(want))
 					for _, addr := range []string{fx.f.owner.Address(), recipient().Address()} {
 						var sum uint64
 						for _, out := range want {
@@ -215,7 +201,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 					Expect(b.PrevHash).To(Equal(tip.Hash))
 					Expect(b.Index).To(Equal(tip.Index + 1))
 					blocks, _ := fx.svc.Blocks()
-					Expect(fx.utxos.Snapshot()).To(Equal(replay(blocks)))
+					Expect(utxoSnapshot(fx.repo)).To(Equal(replay(blocks)))
 				})
 
 				It("returns an empty Orphaned when the branches hold the same transactions", func() {
@@ -256,7 +242,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 					Expect(reorg.Orphaned).To(BeEmpty())
 					blocks, _ := fx.svc.Blocks()
 					Expect(hashes(blocks)).To(Equal(hashes(longer)))
-					Expect(fx.utxos.Snapshot()).To(Equal(replay(blocks)))
+					Expect(utxoSnapshot(fx.repo)).To(Equal(replay(blocks)))
 				})
 
 				It("verifies the candidate's own blocks, not the prefix it shares with the local chain", func() {
@@ -466,48 +452,48 @@ var _ = Describe("Service.ReplaceChain", func() {
 			})
 
 			Describe("failures while committing", func() {
-				It("returns the repository error, changing nothing and not diverging", func() {
+				It("returns a tip conflict as is, changing nothing and not diverging", func() {
 					eng := ec.new()
-					boom := errors.New("boom")
-					repo := &replaceFailingRepo{BlockRepository: memory.New()}
-					utxos := memory.NewUTXOSet()
-					svc, f := funded(repo, eng, WithUTXOSet(utxos))
+					mem := memory.New()
+					repo := &failingWrites{IndexedRepository: mem}
+					svc, f := funded(repo, eng)
 					_, err := svc.Mine(context.Background(), f.tx())
 					Expect(err).NotTo(HaveOccurred())
 					local, _ := repo.All()
 					cand := grow(eng, local[:1], f.tx(), f.tx(), f.tx())
-					repo.err = boom
-					before := utxos.Snapshot()
+					repo.reorgErr = storage.ErrConflict
+					before := utxoSnapshot(mem)
 
 					reorg, err := svc.ReplaceChain(context.Background(), cand)
 					Expect(reorg).To(BeNil())
-					Expect(err).To(MatchError(boom))
-					Expect(utxos.Snapshot()).To(Equal(before))
+					Expect(err).To(MatchError(storage.ErrConflict))
+					Expect(errors.Is(err, ErrStateDiverged)).To(BeFalse())
+					Expect(utxoSnapshot(mem)).To(Equal(before))
 					after, _ := repo.All()
 					Expect(hashes(after)).To(Equal(hashes(local)))
 
-					repo.err = nil
+					repo.reorgErr = nil
 					_, err = svc.Mine(context.Background(), []domain.Transaction{spend(f.owner, f.ops[8], 9)})
 					Expect(err).NotTo(HaveOccurred())
 				})
 
-				It("fails stop when applying the UTXO difference fails after the swap", func() {
+				It("fails stop when the reorg write fails", func() {
 					eng := ec.new()
 					boom := errors.New("boom")
-					failing := &failingUTXOSet{UTXOSet: memory.NewUTXOSet()}
 					repo := memory.New()
-					svc, f := funded(repo, eng, WithUTXOSet(failing))
+					failing := &failingWrites{IndexedRepository: repo}
+					svc, f := funded(failing, eng)
 					_, err := svc.Mine(context.Background(), f.tx())
 					Expect(err).NotTo(HaveOccurred())
 					local, _ := repo.All()
 					cand := grow(eng, local[:1], f.tx(), f.tx())
-					failing.applyErr = boom
+					failing.reorgErr = boom
 
 					_, err = svc.ReplaceChain(context.Background(), cand)
 					Expect(errors.Is(err, ErrStateDiverged)).To(BeTrue())
 					Expect(err).To(MatchError(ContainSubstring("boom")))
 
-					failing.applyErr = nil
+					failing.reorgErr = nil
 					_, err = svc.ReplaceChain(context.Background(), grow(eng, cand, f.tx()))
 					Expect(err).To(MatchError(ErrStateDiverged))
 					_, err = svc.Mine(context.Background(), f.tx())
@@ -516,10 +502,10 @@ var _ = Describe("Service.ReplaceChain", func() {
 
 				It("refuses a diverged service without reading the candidate", func() {
 					eng := ec.new()
-					failing := &failingUTXOSet{UTXOSet: memory.NewUTXOSet()}
 					repo := memory.New()
-					svc, f := funded(repo, eng, WithUTXOSet(failing))
-					failing.applyErr = errors.New("boom")
+					failing := &failingWrites{IndexedRepository: repo}
+					svc, f := funded(failing, eng)
+					failing.commitErr = errors.New("boom")
 					_, err := svc.Mine(context.Background(), f.tx())
 					Expect(err).To(MatchError(ErrStateDiverged))
 					before, _ := repo.All()
@@ -532,9 +518,9 @@ var _ = Describe("Service.ReplaceChain", func() {
 
 				It("returns the repository error when the local chain cannot be read", func() {
 					eng := ec.new()
-					repo := &allFailingRepo{BlockRepository: memory.New()}
+					repo := &allFailingRepo{IndexedRepository: memory.New()}
 					svc, f := funded(repo, eng)
-					cand := grow(eng, mustAll(repo.BlockRepository), f.tx())
+					cand := grow(eng, mustAll(repo.IndexedRepository), f.tx())
 					repo.armed.Store(true)
 
 					_, err := svc.ReplaceChain(context.Background(), cand)
@@ -589,19 +575,19 @@ var _ = Describe("Service.ReplaceChain", func() {
 	}
 
 	Describe("fork choice by work, not length", func() {
-		newChain := func(d int, n int) (*Service, *memory.Repository, *memory.UTXOSet) {
-			repo, utxos := memory.New(), memory.NewUTXOSet()
-			svc, err := NewService(repo, fixedDifficulty{d}, WithUTXOSet(utxos))
+		newChain := func(d int, n int) (*Service, *memory.Repository) {
+			repo := memory.New()
+			svc, err := NewService(repo, fixedDifficulty{d})
 			Expect(err).NotTo(HaveOccurred())
 			for i := 0; i < n; i++ {
 				_, err := svc.Mine(context.Background(), []domain.Transaction{})
 				Expect(err).NotTo(HaveOccurred())
 			}
-			return svc, repo, utxos
+			return svc, repo
 		}
 
 		It("keeps three blocks of 4 bits against one block of 5 bits, and yields to one of 6 bits", func() {
-			svc, repo, _ := newChain(4, 3)
+			svc, repo := newChain(4, 3)
 			local := mustAll(repo)
 
 			_, err := svc.ReplaceChain(context.Background(), grow(fixedDifficulty{5}, local[:1], nil))
@@ -617,7 +603,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 
 		It("weighs only the blocks after the fork", func() {
 			// Equal tails over a heavy common prefix: the prefix must not tip the balance.
-			svc, repo, _ := newChain(4, 2)
+			svc, repo := newChain(4, 2)
 			local := mustAll(repo)
 			_, err := svc.ReplaceChain(context.Background(), grow(fixedDifficulty{4}, local[:2], nil, nil))
 			Expect(err).NotTo(HaveOccurred())
@@ -627,9 +613,9 @@ var _ = Describe("Service.ReplaceChain", func() {
 
 	Describe("concurrent with Mine", func() {
 		It("ends with a linked chain and a UTXO set equal to its replay", func() {
-			repo, utxos := memory.New(), memory.NewUTXOSet()
+			repo := memory.New()
 			eng := pow.New(1)
-			svc, f := funded(repo, eng, WithUTXOSet(utxos))
+			svc, f := funded(repo, eng)
 			base := mustAll(repo)
 
 			// Candidates of growing length over the genesis, each spending its own outputs.
@@ -678,12 +664,12 @@ var _ = Describe("Service.ReplaceChain", func() {
 				Expect(blocks[i].PrevHash).To(Equal(blocks[i-1].Hash))
 				Expect(eng.Verify(blocks[:i], blocks[i])).To(Succeed())
 			}
-			Expect(utxos.Snapshot()).To(Equal(replay(blocks)))
+			Expect(utxoSnapshot(repo)).To(Equal(replay(blocks)))
 		})
 	})
 })
 
-func mustAll(repo storage.BlockRepository) []*domain.Block {
+func mustAll(repo storage.IndexedRepository) []*domain.Block {
 	blocks, err := repo.All()
 	Expect(err).NotTo(HaveOccurred())
 	return blocks

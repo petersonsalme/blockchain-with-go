@@ -101,12 +101,13 @@ var _ = Describe("Service.TxProof", func() {
 	})
 
 	It("returns the repository error, not ErrTxNotFound, when the chain cannot be read", func() {
-		failing := &allFailingRepo{BlockRepository: memory.New()}
+		boom := errors.New("boom")
+		failing := &failingRepo{IndexedRepository: memory.New()}
 		s, _ := funded(failing, pow.New(1))
-		failing.armed.Store(true)
+		failing.txErr = boom
 
 		_, err := s.TxProof("deadbeef")
-		Expect(err).To(HaveOccurred())
+		Expect(err).To(MatchError(boom))
 		Expect(errors.Is(err, ErrTxNotFound)).To(BeFalse())
 	})
 
