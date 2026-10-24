@@ -17,6 +17,24 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for ProofStepSide.
+const (
+	Left  ProofStepSide = "left"
+	Right ProofStepSide = "right"
+)
+
+// Valid indicates whether the value is a known member of the ProofStepSide enum.
+func (e ProofStepSide) Valid() bool {
+	switch e {
+	case Left:
+		return true
+	case Right:
+		return true
+	default:
+		return false
+	}
+}
+
 // BalanceResponse defines model for balanceResponse.
 type BalanceResponse struct {
 	Address string `json:"address"`
@@ -76,6 +94,26 @@ type PageResponse struct {
 	// Next Height of the next page; present only when a block exists there.
 	Next *int `json:"next,omitempty"`
 }
+
+// ProofResponse defines model for proofResponse.
+type ProofResponse struct {
+	BlockHash  string      `json:"block_hash"`
+	BlockIndex int         `json:"block_index"`
+	LeafHash   string      `json:"leaf_hash"`
+	LeafIndex  int         `json:"leaf_index"`
+	MerkleRoot string      `json:"merkle_root"`
+	Proof      []ProofStep `json:"proof"`
+	TxId       string      `json:"tx_id"`
+}
+
+// ProofStep defines model for proofStep.
+type ProofStep struct {
+	Hash string        `json:"hash"`
+	Side ProofStepSide `json:"side"`
+}
+
+// ProofStepSide defines model for ProofStep.Side.
+type ProofStepSide string
 
 // SubmitResponse defines model for submitResponse.
 type SubmitResponse struct {
@@ -330,6 +368,11 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /tx/{id} (the `GetTx` operationId).
 	GetTx(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetTxProof Get the Merkle inclusion proof of a transaction
+	//
+	// Corresponds with GET /tx/{id}/proof (the `GetTxProof` operationId).
+	GetTxProof(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 // GetBlockchain List the whole chain
@@ -573,6 +616,21 @@ func (c *Client) SubmitTx(ctx context.Context, body SubmitTxJSONRequestBody, req
 // Corresponds with GET /tx/{id} (the `GetTx` operationId).
 func (c *Client) GetTx(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetTxRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetTxProof Get the Merkle inclusion proof of a transaction
+//
+// Corresponds with GET /tx/{id}/proof (the `GetTxProof` operationId).
+func (c *Client) GetTxProof(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetTxProofRequest(c.Server, id)
 	if err != nil {
 		return nil, err
 	}
@@ -1006,6 +1064,40 @@ func NewGetTxRequest(server string, id string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewGetTxProofRequest constructs an http.Request for the GetTxProof method
+func NewGetTxProofRequest(server string, id string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/tx/%s/proof", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -1170,6 +1262,13 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /tx/{id} (the `GetTx` operationId).
 	GetTxWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*GetTxResponse, error)
+
+	// GetTxProofWithResponse Get the Merkle inclusion proof of a transaction
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /tx/{id}/proof (the `GetTxProof` operationId).
+	GetTxProofWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*GetTxProofResponse, error)
 }
 
 // GetBlockchainResponse429Headers the declared response headers of an HTTP 429 response for GetBlockchain
@@ -2028,6 +2127,82 @@ func (r GetTxResponse) ContentType() string {
 	return ""
 }
 
+// GetTxProofResponse429Headers the declared response headers of an HTTP 429 response for GetTxProof
+type GetTxProofResponse429Headers struct {
+	RetryAfter int
+}
+
+type GetTxProofResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ProofResponse
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *RateLimited
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalError
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *GetTxProofResponse429Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetTxProofResponse) GetJSON200() *ProofResponse {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r GetTxProofResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetTxProofResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r GetTxProofResponse) GetJSON429() *RateLimited {
+	return r.JSON429
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r GetTxProofResponse) GetJSON500() *InternalError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetTxProofResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetTxProofResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetTxProofResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetTxProofResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // GetBlockchainWithResponse List the whole chain
 //
 // Returns a wrapper object for the known response body format(s).
@@ -2236,6 +2411,19 @@ func (c *ClientWithResponses) GetTxWithResponse(ctx context.Context, id string, 
 		return nil, err
 	}
 	return ParseGetTxResponse(rsp)
+}
+
+// GetTxProofWithResponse Get the Merkle inclusion proof of a transaction
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /tx/{id}/proof (the `GetTxProof` operationId).
+func (c *ClientWithResponses) GetTxProofWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*GetTxProofResponse, error) {
+	rsp, err := c.GetTxProof(ctx, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetTxProofResponse(rsp)
 }
 
 // ParseGetBlockchainResponse parses an HTTP response from a GetBlockchainWithResponse call
@@ -2976,6 +3164,73 @@ func ParseGetTxResponse(rsp *http.Response) (*GetTxResponse, error) {
 	switch {
 	case rsp.StatusCode == 429:
 		var headers GetTxResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseGetTxProofResponse parses an HTTP response from a GetTxProofWithResponse call
+func ParseGetTxProofResponse(rsp *http.Response) (*GetTxProofResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetTxProofResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ProofResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest RateLimited
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers GetTxProofResponse429Headers
 		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
 			var value int
 			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {
