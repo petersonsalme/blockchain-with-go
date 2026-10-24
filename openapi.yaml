@@ -252,6 +252,105 @@ paths:
                 $ref: "#/components/schemas/errorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
+  /tx:
+    post:
+      operationId: submitTx
+      summary: Admit one signed transaction into the mempool
+      description: Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). It never mines.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/transaction"
+      responses:
+        "202":
+          description: The transaction is in the pool.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/submitResponse"
+        "400":
+          description: Malformed body, bad ID, missing timestamp or a transaction rejected as malformed (missing/invalid signature or key, owner mismatch, invalid output, missing inputs).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "409":
+          description: Already in the pool (`duplicate_tx`), spends an outpoint a pool transaction spends (`mempool_conflict`), the pool is full and the fee rate is too low (`mempool_full`), or an input is missing or already spent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "413":
+          description: Request body exceeds the maximum size (`request_too_large`; `details.max` is the limit).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "422":
+          description: Inputs do not cover the outputs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /mine:
+    post:
+      operationId: minePending
+      summary: Mine a block from the mempool
+      description: Takes the pool transactions of highest fee per byte that fit `MAX_BLOCK_BYTES`, in selection order (fee rate descending, then ID); an empty pool mines an empty block. Same timeout and errors as `POST /`.
+      responses:
+        "201":
+          description: The mined block, already appended to the chain; its transactions left the pool.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/block"
+        "408":
+          description: Mining was cancelled (client went away).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "409":
+          description: The chain changed during mining (`chain_conflict`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "422":
+          description: The block was rejected by validation or consensus.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "504":
+          description: Mining exceeded `MINING_TIMEOUT`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+  /mempool:
+    get:
+      operationId: getMempool
+      summary: List the mempool in selection order
+      responses:
+        "200":
+          description: Every pool transaction, fee rate descending, then ID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/mempoolResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 components:
   responses:
     BadRequest:
@@ -441,3 +540,17 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/utxo"
+    submitResponse:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+    mempoolResponse:
+      type: object
+      required: [transactions]
+      properties:
+        transactions:
+          type: array
+          items:
+            $ref: "#/components/schemas/transaction"
