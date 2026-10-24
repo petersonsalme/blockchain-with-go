@@ -201,6 +201,7 @@ func parseGenesisAllocations(raw string) ([]domain.TxOut, error) {
 		if !ok {
 			return nil, fmt.Errorf("%s: invalid item %q: want address:amount", genesisAllocationsEnvVar, item)
 		}
+		addr, value = strings.TrimSpace(addr), strings.TrimSpace(value)
 		if err := wallet.ValidateAddress(addr); err != nil {
 			return nil, fmt.Errorf("%s: invalid item %q: %w", genesisAllocationsEnvVar, item, err)
 		}
