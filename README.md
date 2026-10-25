@@ -262,6 +262,39 @@ $ go test -run='^$' -fuzz='^FuzzVerifyTamper$' -fuzztime=60s ./internal/consensu
 
 A failing input is written to `testdata/fuzz/<FuzzName>/`; commit it so it becomes a regression seed.
 
+### Benchmarks
+
+`BenchmarkMineParallel` in `internal/consensus/pow` mines one new block per iteration for each difficulty (8, 12, 16 leading zero bits) and worker count (1, 2, 4, 8).
+
+```shell
+$ go test -run='^$' -bench=BenchmarkMineParallel -benchtime=50x ./internal/consensus/pow/
+```
+
+`ns/op` is the average time to mine one block. Each extra bit of difficulty doubles the expected work, so +4 bits ≈ 16× the time. The speedup from more workers is bounded by the CPU count. Results vary between runs because the number of hashes per block is random (geometric); compare runs with `benchstat`.
+
+Reference run:
+
+- `goos`: linux
+- `goarch`: amd64
+- `cpu`: AMD Ryzen 7 8700F 8-Core Processor
+- Go: go1.26.10
+- Commit: 07af10e (task 1, `BenchmarkMineParallel`)
+
+| Difficulty (bits) | Workers | ms/op |
+|---|---|---|
+| 8 | 1 | 0.2 |
+| 8 | 2 | 0.1 |
+| 8 | 4 | 0.1 |
+| 8 | 8 | 0.1 |
+| 12 | 1 | 3.9 |
+| 12 | 2 | 2.1 |
+| 12 | 4 | 1.2 |
+| 12 | 8 | 0.8 |
+| 16 | 1 | 44.1 |
+| 16 | 2 | 25.2 |
+| 16 | 4 | 14.1 |
+| 16 | 8 | 8.5 |
+
 ## API Calls
 
 The HTTP contract is [`openapi.yaml`](openapi.yaml) (OpenAPI 3.0.3, see [ADR-0007](docs/adr/0007-openapi-contract.md)). `internal/server/contract_test.go` checks the server against it, so a route, status or JSON field change must update the spec in the same PR.
