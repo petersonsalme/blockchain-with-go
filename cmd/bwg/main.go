@@ -17,11 +17,17 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	err := newRootCmdWith(logger).ExecuteContext(ctx)
 	stop() // os.Exit skips deferred calls
+	finish(err, logger, os.Exit)
+}
+
+// finish exits 1 on err. A node error is logged as a JSON "node stopped" line;
+// other commands have already printed theirs through cobra.
+func finish(err error, logger *slog.Logger, exit func(code int)) {
 	var stopped nodeStopped
 	if errors.As(err, &stopped) {
-		fatalIf(stopped.err, logger, os.Exit)
+		fatalIf(stopped.err, logger, exit)
 	} else if err != nil {
-		os.Exit(1)
+		exit(1)
 	}
 }
 
