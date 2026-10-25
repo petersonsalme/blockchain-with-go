@@ -3,6 +3,8 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -29,6 +31,7 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/p2p"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/memory"
+	"github.com/petersonsalme/blockchain-with-go/internal/vm"
 )
 
 const specPath = "../../openapi.yaml"
@@ -207,6 +210,15 @@ func contractCases() []contractCase {
 		}},
 		{method: "GET", route: "/balance/{addr}", status: 400, serve: plain("/balance/bad")},
 		{method: "GET", route: "/balance/{addr}", status: 429, serve: limited("/balance/bad"), warmup: 1},
+
+		{method: "GET", route: "/contracts/{id}", status: 200, serve: func() (http.Handler, string, string) {
+			h, funds := real(Config{})
+			id := deployCounter(h, funds)
+			return h, "/contracts/" + id, ""
+		}},
+		{method: "GET", route: "/contracts/{id}", status: 400, serve: plain("/contracts/xyz")},
+		{method: "GET", route: "/contracts/{id}", status: 404, serve: plain("/contracts/" + zeroHash)},
+		{method: "GET", route: "/contracts/{id}", status: 429, serve: limited("/contracts/" + zeroHash), warmup: 1},
 
 		{method: "GET", route: "/health", status: 200, serve: plain("/health")},
 		{method: "GET", route: "/health", status: 429, serve: limited("/health"), warmup: 1},
@@ -473,6 +485,27 @@ var _ = Describe("OpenAPI contract", func() {
 			Expect(resp.JSON503.Code).To(HaveValue(Equal("unhealthy")))
 		})
 
+		It("deploys with POST /tx and decodes GET /contracts/{id} into JSON200, JSON400 and JSON404", func() {
+			id := deployCounter(srv.Config.Handler, funds)
+
+			resp, err := api.GetContractWithResponse(ctx, id)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(resp.JSON200).NotTo(BeNil(), string(resp.Body))
+			Expect(resp.JSON200.Id).To(Equal(id))
+			Expect(resp.JSON200.Code).To(Equal(hex.EncodeToString(vm.CounterCode)))
+			Expect(resp.JSON200.Storage).To(BeEmpty())
+
+			bad, err := api.GetContractWithResponse(ctx, "xyz")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(bad.JSON400).NotTo(BeNil())
+			Expect(bad.JSON400.Code).To(HaveValue(Equal("invalid_contract_id")))
+
+			missing, err := api.GetContractWithResponse(ctx, zeroHash)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(missing.JSON404).NotTo(BeNil())
+			Expect(missing.JSON404.Code).To(HaveValue(Equal("contract_not_found")))
+		})
+
 		It("decodes GET /block/{ref} into JSON200 and JSON404", func() {
 			resp, err := api.GetBlockWithResponse(ctx, "0")
 			Expect(err).NotTo(HaveOccurred())
@@ -567,4 +600,29 @@ func toClientTx(tx domain.Transaction) client.Transaction {
 // toMessage converts a domain transaction to the generated request body.
 func toMessage(tx domain.Transaction) client.WriteBlockJSONRequestBody {
 	return client.WriteBlockJSONRequestBody{Transactions: []client.Transaction{toClientTx(tx)}}
+}
+
+// deployCounter submits a signed deploy of vm.CounterCode through h, mines it and returns the contract ID.
+// toContractClientTx is toClientTx plus the contract object of tx.
+func toContractClientTx(tx domain.Transaction) client.Transaction {
+	req := toClientTx(tx)
+	if c := tx.Contract; c != nil {
+		req.Contract = &client.ContractOp{Kind: client.ContractOpKind(c.Kind), Code: &c.Code, Target: &c.Target, Args: &c.Args, GasLimit: c.GasLimit}
+	}
+	return req
+}
+
+func deployCounter(h http.Handler, funds *bank) string {
+	tx := funds.tx(newWallet().Address(), 10)
+	tx.Contract = &domain.ContractOp{Kind: domain.ContractDeploy, Code: hex.EncodeToString(vm.CounterCode), GasLimit: 100}
+	tx.ID = tx.CalculateHash()
+	Expect(domain.SignInput(&tx, 0, funds.owner)).To(Succeed())
+	body, err := json.Marshal(toContractClientTx(tx))
+	Expect(err).NotTo(HaveOccurred())
+	for _, step := range []struct{ path, body string }{{"/tx", string(body)}, {"/mine", ""}} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, step.path, strings.NewReader(step.body)))
+		Expect(rec.Code).To(BeNumerically("<", 300), rec.Body.String())
+	}
+	return tx.ID
 }

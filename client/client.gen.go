@@ -17,6 +17,24 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for ContractOpKind.
+const (
+	Call   ContractOpKind = "call"
+	Deploy ContractOpKind = "deploy"
+)
+
+// Valid indicates whether the value is a known member of the ContractOpKind enum.
+func (e ContractOpKind) Valid() bool {
+	switch e {
+	case Call:
+		return true
+	case Deploy:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ProofStepSide.
 const (
 	Left  ProofStepSide = "left"
@@ -58,6 +76,28 @@ type Block struct {
 // BlocksResponse defines model for blocksResponse.
 type BlocksResponse struct {
 	Blocks []Block `json:"Blocks"`
+}
+
+// ContractOp The optional `contract` of a transaction, accepted by `POST /tx` and covered by its hash and signatures (ADR-0014); mined transactions are served with the Go field names (`Contract`, `Kind`, `GasLimit`). A `deploy` carries `code` (lowercase hex, 1 to 1024 bytes) and no `target`; a `call` carries `target` (the contract ID) and no `code`.
+type ContractOp struct {
+	Args     *[]uint64      `json:"args,omitempty"`
+	Code     *string        `json:"code,omitempty"`
+	GasLimit uint64         `json:"gas_limit"`
+	Kind     ContractOpKind `json:"kind"`
+	Target   *string        `json:"target,omitempty"`
+}
+
+// ContractOpKind defines model for ContractOp.Kind.
+type ContractOpKind string
+
+// ContractResponse defines model for contractResponse.
+type ContractResponse struct {
+	// Code The deployed bytecode, lowercase hex.
+	Code string `json:"code"`
+	Id   string `json:"id"`
+
+	// Storage Cells written so far, decimal key to value.
+	Storage map[string]uint64 `json:"storage"`
 }
 
 // ErrorResponse defines model for errorResponse.
@@ -160,6 +200,9 @@ type Transaction struct {
 	Inputs    *[]TxIn   `json:"Inputs"`
 	Outputs   []TxOut   `json:"Outputs"`
 	Timestamp time.Time `json:"Timestamp"`
+
+	// Contract The optional `contract` of a transaction, accepted by `POST /tx` and covered by its hash and signatures (ADR-0014); mined transactions are served with the Go field names (`Contract`, `Kind`, `GasLimit`). A `deploy` carries `code` (lowercase hex, 1 to 1024 bytes) and no `target`; a `call` carries `target` (the contract ID) and no `code`.
+	Contract *ContractOp `json:"contract,omitempty"`
 }
 
 // TxIn defines model for txIn.
@@ -336,6 +379,13 @@ type ClientInterface interface {
 	// Corresponds with GET /blocks (the `GetBlocks` operationId).
 	GetBlocks(ctx context.Context, params *GetBlocksParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetContract Get the code and storage of a deployed contract
+	//
+	// The ID of a contract is the ID of the transaction that deployed it (ADR-0014). The state is the confirmed one; a deploy or call still in the mempool is not visible.
+	//
+	// Corresponds with GET /contracts/{id} (the `GetContract` operationId).
+	GetContract(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetEvents Stream node events (server-sent events)
 	//
 	// Long-lived `text/event-stream`. The node sends `event: block` with the mined block as one-line JSON (the body of the `201` of `POST /` or `POST /mine`) after each block it mines, and `event: tx` with the admitted transaction as one-line JSON after each `202` of `POST /tx`. A client that falls more than 16 events behind is disconnected; there is no replay of missed events.
@@ -414,7 +464,7 @@ type ClientInterface interface {
 
 	// SubmitTxWithBody Admit one signed transaction into the mempool
 	//
-	// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). It never mines.
+	// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -423,7 +473,7 @@ type ClientInterface interface {
 
 	// SubmitTx Admit one signed transaction into the mempool
 	//
-	// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). It never mines.
+	// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -525,6 +575,23 @@ func (c *Client) GetBlock(ctx context.Context, ref string, reqEditors ...Request
 // Corresponds with GET /blocks (the `GetBlocks` operationId).
 func (c *Client) GetBlocks(ctx context.Context, params *GetBlocksParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetBlocksRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetContract Get the code and storage of a deployed contract
+//
+// The ID of a contract is the ID of the transaction that deployed it (ADR-0014). The state is the confirmed one; a deploy or call still in the mempool is not visible.
+//
+// Corresponds with GET /contracts/{id} (the `GetContract` operationId).
+func (c *Client) GetContract(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetContractRequest(c.Server, id)
 	if err != nil {
 		return nil, err
 	}
@@ -711,7 +778,7 @@ func (c *Client) GetP2PPeers(ctx context.Context, reqEditors ...RequestEditorFn)
 
 // SubmitTxWithBody Admit one signed transaction into the mempool
 //
-// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). It never mines.
+// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
 //
 // Takes any type of body and a specified content type.
 //
@@ -730,7 +797,7 @@ func (c *Client) SubmitTxWithBody(ctx context.Context, contentType string, body 
 
 // SubmitTx Admit one signed transaction into the mempool
 //
-// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). It never mines.
+// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -968,6 +1035,40 @@ func NewGetBlocksRequest(server string, params *GetBlocksParams) (*http.Request,
 			rawQueryFragments = append(rawQueryFragments, encoded)
 		}
 		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetContractRequest constructs an http.Request for the GetContract method
+func NewGetContractRequest(server string, id string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/contracts/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
@@ -1414,6 +1515,15 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /blocks (the `GetBlocks` operationId).
 	GetBlocksWithResponse(ctx context.Context, params *GetBlocksParams, reqEditors ...RequestEditorFn) (*GetBlocksResponse, error)
 
+	// GetContractWithResponse Get the code and storage of a deployed contract
+	//
+	// The ID of a contract is the ID of the transaction that deployed it (ADR-0014). The state is the confirmed one; a deploy or call still in the mempool is not visible.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /contracts/{id} (the `GetContract` operationId).
+	GetContractWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*GetContractResponse, error)
+
 	// GetEventsWithResponse Stream node events (server-sent events)
 	//
 	// Long-lived `text/event-stream`. The node sends `event: block` with the mined block as one-line JSON (the body of the `201` of `POST /` or `POST /mine`) after each block it mines, and `event: tx` with the admitted transaction as one-line JSON after each `202` of `POST /tx`. A client that falls more than 16 events behind is disconnected; there is no replay of missed events.
@@ -1504,7 +1614,7 @@ type ClientWithResponsesInterface interface {
 
 	// SubmitTxWithBodyWithResponse Admit one signed transaction into the mempool
 	//
-	// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). It never mines.
+	// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -1513,7 +1623,7 @@ type ClientWithResponsesInterface interface {
 
 	// SubmitTxWithResponse Admit one signed transaction into the mempool
 	//
-	// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). It never mines.
+	// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -1902,6 +2012,75 @@ func (r GetBlocksResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetBlocksResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// GetContractResponse429Headers the declared response headers of an HTTP 429 response for GetContract
+type GetContractResponse429Headers struct {
+	RetryAfter int
+}
+
+type GetContractResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ContractResponse
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ErrorResponse
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *ErrorResponse
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *RateLimited
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *GetContractResponse429Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetContractResponse) GetJSON200() *ContractResponse {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r GetContractResponse) GetJSON400() *ErrorResponse {
+	return r.JSON400
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetContractResponse) GetJSON404() *ErrorResponse {
+	return r.JSON404
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r GetContractResponse) GetJSON429() *RateLimited {
+	return r.JSON429
+}
+
+// GetBody returns the raw response body bytes
+func (r GetContractResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetContractResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetContractResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetContractResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -2752,6 +2931,21 @@ func (c *ClientWithResponses) GetBlocksWithResponse(ctx context.Context, params 
 	return ParseGetBlocksResponse(rsp)
 }
 
+// GetContractWithResponse Get the code and storage of a deployed contract
+//
+// The ID of a contract is the ID of the transaction that deployed it (ADR-0014). The state is the confirmed one; a deploy or call still in the mempool is not visible.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /contracts/{id} (the `GetContract` operationId).
+func (c *ClientWithResponses) GetContractWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*GetContractResponse, error) {
+	rsp, err := c.GetContract(ctx, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetContractResponse(rsp)
+}
+
 // GetEventsWithResponse Stream node events (server-sent events)
 //
 // Long-lived `text/event-stream`. The node sends `event: block` with the mined block as one-line JSON (the body of the `201` of `POST /` or `POST /mine`) after each block it mines, and `event: tx` with the admitted transaction as one-line JSON after each `202` of `POST /tx`. A client that falls more than 16 events behind is disconnected; there is no replay of missed events.
@@ -2901,7 +3095,7 @@ func (c *ClientWithResponses) GetP2PPeersWithResponse(ctx context.Context, reqEd
 
 // SubmitTxWithBodyWithResponse Admit one signed transaction into the mempool
 //
-// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). It never mines.
+// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -2916,7 +3110,7 @@ func (c *ClientWithResponses) SubmitTxWithBodyWithResponse(ctx context.Context, 
 
 // SubmitTxWithResponse Admit one signed transaction into the mempool
 //
-// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). It never mines.
+// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -3270,6 +3464,66 @@ func ParseGetBlocksResponse(rsp *http.Response) (*GetBlocksResponse, error) {
 	switch {
 	case rsp.StatusCode == 429:
 		var headers GetBlocksResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseGetContractResponse parses an HTTP response from a GetContractWithResponse call
+func ParseGetContractResponse(rsp *http.Response) (*GetContractResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetContractResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ContractResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest RateLimited
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers GetContractResponse429Headers
 		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
 			var value int
 			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {
