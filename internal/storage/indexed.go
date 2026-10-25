@@ -20,6 +20,9 @@ var ErrIndexStale = errors.New("storage: indexes are stale, run Reindex")
 // address -> transactions), all updated atomically with the blocks.
 // Implementations must be safe for concurrent use.
 //
+// With pruning enabled, Reorg and ReplaceFrom with height < PrunedBelow return
+// ErrReorgTooDeep and change nothing.
+//
 // Append and ReplaceFrom keep their BlockRepository behaviour and do not touch
 // the indexes; after ReplaceFrom, or an Append that moves the tip, IndexCurrent
 // reports false until Reindex runs. Commit and Reorg refuse to run on stale
@@ -49,9 +52,25 @@ type IndexedRepository interface {
 	// empty repository is current.
 	IndexCurrent() (bool, error)
 	// Reindex discards the UTXO set, undo data and indexes and rebuilds them
-	// from the blocks, atomically. It returns the error of the first block
-	// that does not replay, leaving the repository unchanged.
+	// from the blocks, atomically. When PrunedBelow is positive it starts from
+	// the stored snapshot and replays the blocks above it, otherwise from the
+	// genesis. It returns the error of the first block that does not replay,
+	// leaving the repository unchanged.
 	Reindex() error
+	// Snapshot returns the stored UTXO snapshot, or ErrNotFound when there is none.
+	Snapshot() (Snapshot, error)
+	// PrunedBelow returns the lowest height whose block still has its body and
+	// undo data; every block below it is a header. It is 0 when nothing was
+	// pruned and never decreases.
+	PrunedBelow() (int, error)
+	// UTXOsByAddress returns the unspent outputs of addr ordered by TxID, then
+	// Index. It returns an empty, non-nil slice when there are none.
+	UTXOsByAddress(addr string) ([]AddressUTXO, error)
+	// ForkState returns the UTXO set as before the block at height: the
+	// current set reverted by the stored undo data from the tip down to
+	// height. It returns ErrReorgTooDeep when height < PrunedBelow, ErrConflict
+	// when height is negative or past the chain, and ErrIndexStale on stale indexes.
+	ForkState(height int) (domain.UTXOSet, error)
 }
 
 // TxIndex describes one transaction of a block for the indexes: its id, its

@@ -400,3 +400,15 @@ var _ = Describe("Bolt Repository", func() {
 		wg.Wait()
 	})
 })
+
+var _ = Describe("Bolt Repository with pruning", func() {
+	storagetest.PrunedRepositoryContract(func(p storage.Pruning) storage.IndexedRepository {
+		path := filepath.Join(GinkgoT().TempDir(), "pruned.db")
+		repo, err := bolt.OpenPruned(path, p)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() {
+			_ = repo.Close()
+		})
+		return repo
+	})
+})

@@ -1,6 +1,10 @@
 package memory
 
 import (
+	"cmp"
+	"slices"
+	"strings"
+
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 )
@@ -15,10 +19,16 @@ type addrEntry struct {
 
 // index is the state Commit, Reorg and Reindex keep next to the blocks.
 type index struct {
-	utxos  domain.UTXOSet
-	undo   map[int]domain.UTXODelta
-	txs    map[string]int
-	addrtx map[string][]addrEntry
+	utxos domain.UTXOSet
+	// addrutxo is utxos grouped by address.
+	addrutxo map[string]map[domain.OutPoint]uint64
+	undo     map[int]domain.UTXODelta
+	txs      map[string]int
+	addrtx   map[string][]addrEntry
+	// snap is the stored snapshot, or nil; it is replaced, never edited in place.
+	snap *storage.Snapshot
+	// prunedBelow is the lowest height that still has a body and undo data.
+	prunedBelow int
 	// tip is the height the index describes; it is only meaningful while hasTip is set.
 	tip    int
 	hasTip bool
@@ -26,10 +36,11 @@ type index struct {
 
 func newIndex() index {
 	return index{
-		utxos:  domain.UTXOSet{},
-		undo:   map[int]domain.UTXODelta{},
-		txs:    map[string]int{},
-		addrtx: map[string][]addrEntry{},
+		utxos:    domain.UTXOSet{},
+		addrutxo: map[string]map[domain.OutPoint]uint64{},
+		undo:     map[int]domain.UTXODelta{},
+		txs:      map[string]int{},
+		addrtx:   map[string][]addrEntry{},
 	}
 }
 
@@ -44,6 +55,13 @@ func cloneOuts(m map[domain.OutPoint]domain.TxOut) map[domain.OutPoint]domain.Tx
 func (ix index) clone() index {
 	c := newIndex()
 	c.utxos = domain.UTXOSet(cloneOuts(ix.utxos))
+	for a, outs := range ix.addrutxo {
+		m := make(map[domain.OutPoint]uint64, len(outs))
+		for op, amount := range outs {
+			m[op] = amount
+		}
+		c.addrutxo[a] = m
+	}
 	for h, d := range ix.undo {
 		c.undo[h] = domain.UTXODelta{Spent: cloneOuts(d.Spent), Created: cloneOuts(d.Created)}
 	}
@@ -54,6 +72,7 @@ func (ix index) clone() index {
 		c.addrtx[a] = append([]addrEntry(nil), entries...)
 	}
 	c.tip, c.hasTip = ix.tip, ix.hasTip
+	c.snap, c.prunedBelow = ix.snap, ix.prunedBelow
 	return c
 }
 
@@ -82,7 +101,7 @@ func (ix *index) apply(b *domain.Block, d domain.UTXODelta) error {
 	if !holds(ix.utxos, d.Spent) || intersects(ix.utxos, d.Created) {
 		return storage.ErrUTXOConflict
 	}
-	ix.utxos.Apply(d)
+	ix.applyDelta(d)
 	ix.undo[b.Index] = domain.UTXODelta{Spent: cloneOuts(d.Spent), Created: cloneOuts(d.Created)}
 	for _, t := range storage.IndexTxs(b, d) {
 		ix.txs[t.TxID] = b.Index
@@ -101,8 +120,14 @@ func (ix *index) revert(b *domain.Block) error {
 	if !holds(ix.utxos, d.Created) || intersects(ix.utxos, d.Spent) {
 		return storage.ErrUTXOConflict
 	}
-	ix.utxos.Revert(d)
+	ix.revertDelta(d)
 	delete(ix.undo, b.Index)
+	ix.dropTxs(b, d)
+	return nil
+}
+
+// dropTxs removes the txs and addrtx entries of block b, whose delta is d.
+func (ix *index) dropTxs(b *domain.Block, d domain.UTXODelta) {
 	for _, t := range storage.IndexTxs(b, d) {
 		delete(ix.txs, t.TxID)
 		for _, a := range t.Addrs {
@@ -119,7 +144,69 @@ func (ix *index) revert(b *domain.Block) error {
 			}
 		}
 	}
-	return nil
+}
+
+// applyDelta moves utxos and addrutxo together, like domain.UTXOSet.Apply.
+func (ix *index) applyDelta(d domain.UTXODelta) {
+	for op, o := range d.Spent {
+		ix.dropOut(op, o)
+	}
+	for op, o := range d.Created {
+		ix.putOut(op, o)
+	}
+}
+
+// revertDelta undoes applyDelta, like domain.UTXOSet.Revert.
+func (ix *index) revertDelta(d domain.UTXODelta) {
+	for op, o := range d.Created {
+		ix.dropOut(op, o)
+	}
+	for op, o := range d.Spent {
+		ix.putOut(op, o)
+	}
+}
+
+func (ix *index) putOut(op domain.OutPoint, o domain.TxOut) {
+	ix.utxos[op] = o
+	if ix.addrutxo[o.Address] == nil {
+		ix.addrutxo[o.Address] = map[domain.OutPoint]uint64{}
+	}
+	ix.addrutxo[o.Address][op] = o.Amount
+}
+
+func (ix *index) dropOut(op domain.OutPoint, o domain.TxOut) {
+	delete(ix.utxos, op)
+	delete(ix.addrutxo[o.Address], op)
+	if len(ix.addrutxo[o.Address]) == 0 {
+		delete(ix.addrutxo, o.Address)
+	}
+}
+
+// snapshotStep stores the snapshot that the Commit of height t calls for and,
+// with p.KeepBlocks > 0, prunes the bodies up to it. chain holds the blocks
+// 0..t; pruned entries are replaced by headers in chain.
+func (ix *index) snapshotStep(p storage.Pruning, chain []*domain.Block, t int) {
+	s, ok := p.SnapshotHeight(t)
+	if !ok || s < ix.prunedBelow {
+		return
+	}
+	set := domain.UTXOSet(cloneOuts(ix.utxos))
+	for h := t; h > s; h-- {
+		set.Revert(ix.undo[h])
+	}
+	hash := chain[s].Hash
+	ix.snap = &storage.Snapshot{Height: s, BlockHash: hash, Hash: storage.SnapshotHash(hash, set), UTXOs: set}
+	if p.KeepBlocks == 0 {
+		return
+	}
+	for h := ix.prunedBelow; h <= s; h++ {
+		ix.dropTxs(chain[h], ix.undo[h])
+		delete(ix.undo, h)
+		header := *chain[h]
+		header.Transactions = []domain.Transaction{}
+		chain[h] = &header
+	}
+	ix.prunedBelow = s + 1
 }
 
 // current reports whether the index describes the tip of blocks.
@@ -158,7 +245,17 @@ func (r *Repository) Commit(b *domain.Block, d domain.UTXODelta) error {
 	}
 	r.blocks = append(r.blocks, b)
 	r.byHash[b.Hash] = b
+	pruned := r.idx.prunedBelow
+	r.idx.snapshotStep(r.pruning, r.blocks, b.Index)
+	r.rehash(r.blocks, pruned, r.idx.prunedBelow)
 	return nil
+}
+
+// rehash points byHash at the headers that replaced the bodies in [from, to).
+func (r *Repository) rehash(chain []*domain.Block, from, to int) {
+	for h := from; h < to; h++ {
+		r.byHash[chain[h].Hash] = chain[h]
+	}
 }
 
 // Reorg swaps the chain tail and its indexes under one lock, on copies that replace the live state only on success.
@@ -178,6 +275,9 @@ func (r *Repository) Reorg(height int, blocks []*domain.Block, deltas []domain.U
 	if err := r.checkSplice(height, blocks); err != nil {
 		return err
 	}
+	if height < r.idx.prunedBelow {
+		return storage.ErrReorgTooDeep
+	}
 	if !r.current() {
 		return storage.ErrIndexStale
 	}
@@ -188,13 +288,22 @@ func (r *Repository) Reorg(height int, blocks []*domain.Block, deltas []domain.U
 			return err
 		}
 	}
+	if ix.snap != nil && ix.snap.Height >= height {
+		ix.snap = nil
+	}
+	// The cap limit forces append to copy; the pruning below edits only this copy.
+	chain := append(r.blocks[:height:height], blocks...)
 	for i, b := range blocks {
 		if err := ix.apply(b, deltas[i]); err != nil {
 			return err
 		}
+		ix.snapshotStep(r.pruning, chain, b.Index)
 	}
 
+	pruned := r.idx.prunedBelow
 	r.splice(height, blocks)
+	r.blocks = chain
+	r.rehash(chain, pruned, ix.prunedBelow)
 	r.idx = ix
 	return nil
 }
@@ -229,13 +338,20 @@ func (r *Repository) IndexCurrent() (bool, error) {
 	return r.current(), nil
 }
 
-// Reindex rebuilds the UTXO set, undo data and indexes from the blocks, under one lock.
+// Reindex rebuilds the UTXO set, undo data and indexes from the blocks, under
+// one lock. A pruned repository starts from its snapshot instead of the genesis.
 func (r *Repository) Reindex() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	ix := newIndex()
-	for _, b := range r.blocks {
+	ix.snap, ix.prunedBelow = r.idx.snap, r.idx.prunedBelow
+	from := 0
+	if ix.prunedBelow > 0 {
+		ix.applyDelta(domain.UTXODelta{Created: cloneOuts(ix.snap.UTXOs)})
+		from = ix.prunedBelow
+	}
+	for _, b := range r.blocks[from:] {
 		d, err := domain.BlockDelta(ix.utxos, b, b.Index == 0)
 		if err != nil {
 			return err
@@ -244,6 +360,64 @@ func (r *Repository) Reindex() error {
 			return err
 		}
 	}
+	if n := len(r.blocks); n > 0 {
+		ix.tip, ix.hasTip = n-1, true
+	}
 	r.idx = ix
 	return nil
+}
+
+// Snapshot returns a copy of the stored snapshot, or storage.ErrNotFound.
+func (r *Repository) Snapshot() (storage.Snapshot, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if r.idx.snap == nil {
+		return storage.Snapshot{}, storage.ErrNotFound
+	}
+	snap := *r.idx.snap
+	snap.UTXOs = domain.UTXOSet(cloneOuts(snap.UTXOs))
+	return snap, nil
+}
+
+func (r *Repository) PrunedBelow() (int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return r.idx.prunedBelow, nil
+}
+
+func (r *Repository) UTXOsByAddress(addr string) ([]storage.AddressUTXO, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	out := make([]storage.AddressUTXO, 0, len(r.idx.addrutxo[addr]))
+	for op, amount := range r.idx.addrutxo[addr] {
+		out = append(out, storage.AddressUTXO{OutPoint: op, Amount: amount})
+	}
+	slices.SortFunc(out, func(a, b storage.AddressUTXO) int {
+		return cmp.Or(strings.Compare(a.OutPoint.TxID, b.OutPoint.TxID), cmp.Compare(a.OutPoint.Index, b.OutPoint.Index))
+	})
+	return out, nil
+}
+
+// ForkState reverts the stored undo data from the tip down to height on a copy of the UTXO set.
+func (r *Repository) ForkState(height int) (domain.UTXOSet, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if height < 0 || height > len(r.blocks) {
+		return nil, storage.ErrConflict
+	}
+	if height < r.idx.prunedBelow {
+		return nil, storage.ErrReorgTooDeep
+	}
+	if !r.current() {
+		return nil, storage.ErrIndexStale
+	}
+	set := domain.UTXOSet(cloneOuts(r.idx.utxos))
+	for h := len(r.blocks) - 1; h >= height; h-- {
+		set.Revert(r.idx.undo[h])
+	}
+	return set, nil
 }

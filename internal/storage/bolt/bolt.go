@@ -19,14 +19,15 @@ var (
 )
 
 // indexBuckets are the buckets Commit, Reorg and Reindex maintain; Reindex rebuilds all of them.
-var indexBuckets = [][]byte{utxosBucket, undoBucket, txsBucket, addrtxBucket, metaBucket}
+var indexBuckets = [][]byte{utxosBucket, undoBucket, txsBucket, addrtxBucket, addrutxoBucket}
 
 // ErrNilBlock is returned by Append and ReplaceFrom when given a nil block.
 var ErrNilBlock = errors.New("bolt: nil block")
 
 // Repository stores blocks in a bbolt database file.
 type Repository struct {
-	db *bbolt.DB
+	db      *bbolt.DB
+	pruning storage.Pruning
 }
 
 var _ storage.BlockRepository = (*Repository)(nil)
@@ -34,16 +35,36 @@ var _ storage.BlockRepository = (*Repository)(nil)
 // Open opens or creates a bbolt database at path, initializing the buckets.
 // If the database is locked by another process, Open fails after 1 second.
 func Open(path string) (*Repository, error) {
+	return OpenPruned(path, storage.Pruning{})
+}
+
+// OpenPruned is Open with snapshots and pruning as p says. It returns
+// storage.ErrInvalidPruning when p is invalid or when the database is already
+// pruned and p.KeepBlocks is 0: pruning is irreversible.
+func OpenPruned(path string, p storage.Pruning) (*Repository, error) {
+	if err := p.Validate(); err != nil {
+		return nil, err
+	}
 	db, err := bbolt.Open(path, 0o600, &bbolt.Options{Timeout: time.Second})
 	if err != nil {
 		return nil, err
 	}
 
 	err = db.Update(func(tx *bbolt.Tx) error {
-		for _, name := range append([][]byte{blocksBucket, hashesBucket}, indexBuckets...) {
+		// A database written before addrutxo existed has indexes that miss it: mark them stale.
+		legacy := tx.Bucket(addrutxoBucket) == nil
+		for _, name := range append([][]byte{blocksBucket, hashesBucket, snapshotBucket, metaBucket}, indexBuckets...) {
 			if _, err := tx.CreateBucketIfNotExists(name); err != nil {
 				return err
 			}
+		}
+		if legacy {
+			if err := tx.Bucket(metaBucket).Delete(indexedTipKey); err != nil {
+				return err
+			}
+		}
+		if p.KeepBlocks == 0 && metaInt(tx, prunedBelowKey) > 0 {
+			return storage.ErrInvalidPruning
 		}
 		return nil
 	})
@@ -52,7 +73,7 @@ func Open(path string) (*Repository, error) {
 		return nil, err
 	}
 
-	return &Repository{db: db}, nil
+	return &Repository{db: db, pruning: p}, nil
 }
 
 // Close closes the underlying bbolt database.
@@ -264,6 +285,12 @@ func (r *Repository) ReplaceFrom(height int, blocks []*domain.Block) error {
 		hBucket := tx.Bucket(hashesBucket)
 
 		if err := checkSplice(bBucket, height, blocks); err != nil {
+			return err
+		}
+		if height < metaInt(tx, prunedBelowKey) {
+			return storage.ErrReorgTooDeep
+		}
+		if err := dropSnapshotFrom(tx, height); err != nil {
 			return err
 		}
 
