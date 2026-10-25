@@ -78,6 +78,14 @@ func WithMempool(p *mempool.Pool) Option {
 	return func(s *Service) { s.pool = p }
 }
 
+// WithMinerAddress makes every block the Service mines start with a coinbase
+// that pays Subsidy(height) plus the block's fees to addr. Without it blocks
+// carry no coinbase. The address is not validated here: a block with an invalid
+// one fails Mine with domain.ErrInvalidOutput.
+func WithMinerAddress(addr string) Option {
+	return func(s *Service) { s.minerAddr = addr }
+}
+
 // Service mines blocks onto the chain held by a storage.IndexedRepository,
 // which also holds the UTXO set and the transaction indexes.
 type Service struct {
@@ -85,6 +93,7 @@ type Service struct {
 	consensus   consensus.Consensus
 	generate    Generator
 	allocations []domain.TxOut
+	minerAddr   string
 	pool        *mempool.Pool
 	diverged    bool
 	// writeSem serializes Mine; a buffered channel lets waiters honour ctx.
@@ -493,15 +502,20 @@ func (s *Service) MinePending(ctx context.Context) (*domain.Block, error) {
 // selection just made. It falls on every pass, so the loop ends.
 func (s *Service) fit() ([]domain.Transaction, error) {
 	limit := domain.MaxBlockBytes()
-	empty, err := sealedSize([]domain.Transaction{})
+	empty, err := s.sealedSize([]domain.Transaction{})
 	if err != nil {
 		return nil, err
 	}
 	room := limit - empty
 	budget := room
+	// With a coinbase in the block every pool transaction costs a separator.
+	firstFree := 1
+	if s.minerAddr != "" {
+		firstFree = 0
+	}
 	for {
 		txs := s.pool.Select(budget)
-		size, err := sealedSize(txs)
+		size, err := s.sealedSize(txs)
 		if err != nil {
 			return nil, err
 		}
@@ -509,7 +523,7 @@ func (s *Service) fit() ([]domain.Transaction, error) {
 		if size <= limit || len(txs) == 0 {
 			return txs, nil
 		}
-		budget = room - (len(txs) - 1)
+		budget = room - (len(txs) - firstFree)
 	}
 }
 
@@ -533,9 +547,18 @@ func (s *Service) dropStale(txs []domain.Transaction) []domain.Transaction {
 
 // sealedSize is the serialized size txs can reach in a sealed block: every
 // header field of the largest width consensus can give it, so the real block
-// is never bigger. The block generator only reserves a hash.
-func sealedSize(txs []domain.Transaction) (int, error) {
+// is never bigger. The block generator only reserves a hash. With a miner
+// address it also counts the coinbase, at the widest amount it can carry.
+func (s *Service) sealedSize(txs []domain.Transaction) (int, error) {
 	hash := strings.Repeat("0", 64)
+	if s.minerAddr != "" {
+		coinbase := domain.Transaction{
+			ID:        hash,
+			Outputs:   []domain.TxOut{{Amount: math.MaxUint64, Address: s.minerAddr}},
+			Timestamp: time.Date(2000, 1, 1, 0, 0, 0, 123456789, time.FixedZone("", 3600)),
+		}
+		txs = append([]domain.Transaction{coinbase}, txs...)
+	}
 	b := domain.Block{
 		Index:        math.MaxInt,
 		Timestamp:    time.Date(2000, 1, 1, 0, 0, 0, 123456789, time.FixedZone("", 3600)),
@@ -578,6 +601,12 @@ func (s *Service) mineLocked(ctx context.Context, txs []domain.Transaction) (*do
 	if err != nil {
 		return nil, err
 	}
+	if s.minerAddr != "" {
+		txs, delta, err = s.withCoinbase(prev.Index+1, txs, delta)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if err := verifyInputs(s.repo, txs); err != nil {
 		return nil, err
 	}
@@ -603,6 +632,29 @@ func (s *Service) mineLocked(ctx context.Context, txs []domain.Transaction) (*do
 
 	s.pool.Prune(block, s.repo)
 	return block, nil
+}
+
+// withCoinbase puts at position 0 of txs the coinbase paying the miner
+// Subsidy(height) plus the fees of txs, and returns the delta of the whole
+// block. delta is the delta of txs alone, whose net effect is the fees: what it
+// spends less what it creates. When the reward is zero (late halving, no fees)
+// no coinbase is added.
+func (s *Service) withCoinbase(height int, txs []domain.Transaction, delta domain.UTXODelta) ([]domain.Transaction, domain.UTXODelta, error) {
+	reward := domain.Subsidy(height)
+	for _, o := range delta.Spent {
+		reward += o.Amount
+	}
+	for _, o := range delta.Created {
+		reward -= o.Amount
+	}
+	if reward == 0 {
+		return txs, delta, nil
+	}
+	cb := domain.Transaction{Outputs: []domain.TxOut{{Amount: reward, Address: s.minerAddr}}, Timestamp: time.Now()}
+	cb.ID = cb.CalculateHash()
+	txs = append([]domain.Transaction{cb}, txs...)
+	full, err := domain.BlockDelta(s.repo, &domain.Block{Index: height, Transactions: txs}, false)
+	return txs, full, err
 }
 
 // ReplaceChain switches the local chain to candidate, a full chain starting at

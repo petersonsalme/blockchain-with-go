@@ -476,3 +476,83 @@ func TestFinish(t *testing.T) {
 		}
 	}
 }
+
+func TestParseMinerAddress(t *testing.T) {
+	a := newAddress(t)
+	for _, tc := range []struct{ name, raw, want string }{
+		{"empty", "", ""},
+		{"spaces only", "  \t", ""},
+		{"valid", a, a},
+		{"valid with spaces", "  " + a + " ", a},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseMinerAddress(tc.raw)
+			if err != nil || got != tc.want {
+				t.Fatalf("parseMinerAddress(%q) = %q, %v; want %q", tc.raw, got, err, tc.want)
+			}
+		})
+	}
+
+	t.Run("invalid cites the variable", func(t *testing.T) {
+		_, err := parseMinerAddress("not-an-address")
+		if err == nil || !strings.Contains(err.Error(), "MINER_ADDRESS") || !strings.Contains(err.Error(), "not-an-address") {
+			t.Fatalf("err = %v, want one citing MINER_ADDRESS", err)
+		}
+	})
+}
+
+func TestBuildServiceMinerAddress(t *testing.T) {
+	t.Setenv("POW_DIFFICULTY", "1")
+	t.Setenv(genesisAllocationsEnvVar, "")
+	eng := pow.NewProofOfWorkFromEnv()
+
+	t.Run("set pays the coinbase to the address", func(t *testing.T) {
+		a := newAddress(t)
+		t.Setenv(minerAddressEnvVar, " "+a+" ")
+		svc, err := newService(memory.New(), eng)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := svc.MinePending(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(b.Transactions) != 1 || b.Transactions[0].Outputs[0].Address != a ||
+			b.Transactions[0].Outputs[0].Amount != domain.Subsidy(b.Index) {
+			t.Fatalf("block = %+v, want one coinbase paying the subsidy to %s", b.Transactions, a)
+		}
+	})
+
+	for _, raw := range []string{"", "   "} {
+		t.Run(fmt.Sprintf("blank %q adds no coinbase", raw), func(t *testing.T) {
+			t.Setenv(minerAddressEnvVar, raw)
+			svc, err := newService(memory.New(), eng)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, err := svc.MinePending(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(b.Transactions) != 0 {
+				t.Fatalf("transactions = %+v, want none", b.Transactions)
+			}
+		})
+	}
+
+	t.Run("invalid stops the service at startup", func(t *testing.T) {
+		t.Setenv(minerAddressEnvVar, "bad")
+		if _, err := newService(memory.New(), eng); err == nil || !strings.Contains(err.Error(), "MINER_ADDRESS") {
+			t.Fatalf("err = %v, want one citing MINER_ADDRESS", err)
+		}
+	})
+
+	t.Run("run fails on an invalid address", func(t *testing.T) {
+		t.Setenv("PORT", freePort(t))
+		t.Setenv(minerAddressEnvVar, "bad")
+		err := run(context.Background(), discardLogger())
+		if err == nil || !strings.Contains(err.Error(), "MINER_ADDRESS") {
+			t.Fatalf("run = %v, want error citing MINER_ADDRESS", err)
+		}
+	})
+}

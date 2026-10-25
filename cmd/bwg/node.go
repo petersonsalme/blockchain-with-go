@@ -201,7 +201,31 @@ func newService(repo storage.IndexedRepository, engine consensus.Consensus) (*ch
 	if err != nil {
 		return nil, err
 	}
-	return chain.NewService(repo, engine, chain.WithGenesisAllocations(outs))
+	opts := []chain.Option{chain.WithGenesisAllocations(outs)}
+	miner, err := parseMinerAddress(os.Getenv(minerAddressEnvVar))
+	if err != nil {
+		return nil, err
+	}
+	if miner != "" {
+		opts = append(opts, chain.WithMinerAddress(miner))
+	}
+	return chain.NewService(repo, engine, opts...)
+}
+
+// minerAddressEnvVar holds the address that receives the coinbase of every mined block.
+const minerAddressEnvVar = "MINER_ADDRESS"
+
+// parseMinerAddress trims raw and validates it as a wallet address. A blank
+// value means no coinbase and yields "".
+func parseMinerAddress(raw string) (string, error) {
+	addr := strings.TrimSpace(raw)
+	if addr == "" {
+		return "", nil
+	}
+	if err := wallet.ValidateAddress(addr); err != nil {
+		return "", fmt.Errorf("%s: invalid address %q: %w", minerAddressEnvVar, addr, err)
+	}
+	return addr, nil
 }
 
 // parseGenesisAllocations parses address:amount items separated by commas. A
