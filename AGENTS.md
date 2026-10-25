@@ -13,8 +13,7 @@ Educational blockchain implementation in Go with block validation, SHA-256 hashi
 ```
 blockchain-with-go/
 ├── cmd/
-│   ├── node/          # Application entry point (main.go)
-│   └── bwg/           # CLI (cobra): wallet new/balance/send, miner
+│   └── bwg/           # The only binary and composition root (cobra): node, wallet new/balance/send, miner
 ├── client/            # Go client generated from openapi.yaml by oapi-codegen (do not edit by hand)
 ├── internal/
 │   ├── chain/         # chain.Service (Blocks/Mine), block generation, ErrInvalidBlock
@@ -38,9 +37,9 @@ blockchain-with-go/
 
 ## Architecture (Ports & Adapters)
 
-- Dependencies point inward: `cmd/node` → `server`/`chain`/adapters → `domain`. `internal/domain` never imports `storage`, `chain`, `server`, `net/http` or `os/signal`; `internal/chain` does not import `server` or `net/http`.
+- Dependencies point inward: `cmd/bwg` → `server`/`chain`/adapters → `domain`. `internal/domain` never imports `storage`, `chain`, `server`, `net/http` or `os/signal`; `internal/chain` does not import `server` or `net/http`.
 - No global state: `internal/server` and `internal/chain` only have `const` and `errors.New` sentinels at package level. Dependencies (repository, consensus, block generator) are injected through constructors (`chain.NewService(repo, consensus, opts...)`, `server.NewServer(svc, cfg)`).
-- Composition root in `cmd/node/main.go`; it is the only place that triggers configuration reading (`PORT`, `MINING_TIMEOUT` and `DATA_DIR` directly; `CONSENSUS` (`pow`|`poa`) picks the engine, `POW_DIFFICULTY`, `POW_RETARGET_INTERVAL`, `TARGET_BLOCK_TIME` and `MINING_WORKERS` are read via `pow.NewProofOfWorkFromEnv`, `POA_VALIDATORS`/`POA_KEYSTORE`/`POA_KEYSTORE_PASSWORD` are parsed in `cmd/node`; `GENESIS_ALLOCATIONS`, genesis outputs as `address:amount[,...]`, parsed in `cmd/node` and ignored when the repository is not empty); the one exception is `MAX_BLOCK_BYTES`, read on demand by `domain.MaxBlockBytes()` in `internal/domain/rules.go` (falls back to `DefaultMaxBlockBytes`, 1 MiB, when unset or not a positive integer).
+- Composition root in `cmd/bwg` (the only binary; `bwg node` runs the node); it is the only place that triggers configuration reading (`PORT`, `MINING_TIMEOUT` and `DATA_DIR` directly; `CONSENSUS` (`pow`|`poa`) picks the engine, `POW_DIFFICULTY`, `POW_RETARGET_INTERVAL`, `TARGET_BLOCK_TIME` and `MINING_WORKERS` are read via `pow.NewProofOfWorkFromEnv`, `POA_VALIDATORS`/`POA_KEYSTORE`/`POA_KEYSTORE_PASSWORD` are parsed in `cmd/bwg`; `GENESIS_ALLOCATIONS`, genesis outputs as `address:amount[,...]`, parsed in `cmd/bwg` and ignored when the repository is not empty); the one exception is `MAX_BLOCK_BYTES`, read on demand by `domain.MaxBlockBytes()` in `internal/domain/rules.go` (falls back to `DefaultMaxBlockBytes`, 1 MiB, when unset or not a positive integer).
 
 ## Core Areas (Risk: core)
 
@@ -54,16 +53,15 @@ A story is **Risk: core** when it changes any of the areas below. Core stories n
 - **Keys and signatures:** `pkg/wallet/` (Ed25519, addressing, keystore).
 - **Schema:** any change to the persisted or hashed shape of `Block`, `Transaction` or UTXO, and any ADR-level change.
 
-Everything else (HTTP handlers and DTOs, logging, docs, README, CLI, build files, `cmd/node` wiring that does not change configuration semantics) is **normal**. When a story is borderline, mark it core.
+Everything else (HTTP handlers and DTOs, logging, docs, README, CLI, build files, `cmd/bwg` wiring that does not change configuration semantics) is **normal**. When a story is borderline, mark it core.
 
 ## Rules and Commands
 
 1. **Validation and Tests:**
    - Run tests and type checking: `go test ./...`
    - Standard Go formatting: `gofmt -s -w .` or `goimports`
-   - Build check: `go build -o /dev/null ./cmd/node`
-   - CLI build check: `go build -o /dev/null ./cmd/bwg`
-   - Run the node locally: `go run ./cmd/node`
+   - Build check: `go build -o /dev/null ./cmd/bwg`
+   - Run the node locally: `go run ./cmd/bwg node`
    - Regenerate the client after editing `openapi.yaml`: `go generate ./client/...` (CI fails on `git diff --exit-code client/`)
    - CI quality gates (`.github/workflows/go-ci.yml`), local equivalents:
      - Tests with race detector and coverage profile: `go test -race -covermode=atomic -coverprofile=coverage.out ./...`

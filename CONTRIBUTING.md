@@ -9,7 +9,7 @@ Follow the rules in [AGENTS.md](AGENTS.md):
 ```
 go test ./...
 gofmt -s -l .
-go build -o /dev/null ./cmd/node
+go build -o /dev/null ./cmd/bwg
 ```
 
 - Keep the architecture: dependencies point inward (`domain` imports nothing internal), and no global state.

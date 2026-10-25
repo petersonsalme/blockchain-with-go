@@ -64,7 +64,7 @@ func dropBucket(t *testing.T, dir, name string) {
 func runReindexArgs(t *testing.T) (string, error) {
 	t.Helper()
 	var out bytes.Buffer
-	err := execute(context.Background(), discardLogger(), []string{"-reindex"}, &out)
+	err := execute(context.Background(), discardLogger(), []string{"node", "--reindex"}, &out)
 	return out.String(), err
 }
 
@@ -77,7 +77,7 @@ func TestReindexRebuildsDroppedIndex(t *testing.T) {
 
 	out, err := runReindexArgs(t)
 	if err != nil {
-		t.Fatalf("-reindex returned %v, want nil", err)
+		t.Fatalf("--reindex returned %v, want nil", err)
 	}
 	if out != "reindexed: tip height 4\n" {
 		t.Fatalf("output = %q, want %q", out, "reindexed: tip height 4\n")
@@ -113,7 +113,7 @@ func TestReindexTwiceLeavesTheSameState(t *testing.T) {
 		t.Fatal(err)
 	}
 	if twice := dumpIndexes(t, dir); !reflect.DeepEqual(once, twice) {
-		t.Fatal("second -reindex changed the index buckets")
+		t.Fatal("second --reindex changed the index buckets")
 	}
 	if len(once) != 5 {
 		t.Fatalf("dumped %d buckets, want 5", len(once))
@@ -157,7 +157,7 @@ func TestReindexReadsDataDirFromDotEnv(t *testing.T) {
 
 	out, err := runReindexArgs(t)
 	if err != nil || !strings.Contains(out, "tip height 4") {
-		t.Fatalf("-reindex = %q, %v; want tip height 4", out, err)
+		t.Fatalf("--reindex = %q, %v; want tip height 4", out, err)
 	}
 }
 
@@ -200,7 +200,7 @@ func TestReindexFailsWhenDatabaseIsLocked(t *testing.T) {
 
 	out, err := runReindexArgs(t)
 	if err == nil {
-		t.Fatal("-reindex on a locked chain.db returned nil, want the Open error")
+		t.Fatal("--reindex on a locked chain.db returned nil, want the Open error")
 	}
 	if out != "" {
 		t.Fatalf("output = %q, want none", out)
@@ -213,7 +213,7 @@ func TestReindexDoesNotCreateMissingDataDir(t *testing.T) {
 	t.Setenv(dataDirEnvVar, missing)
 
 	if _, err := runReindexArgs(t); err == nil {
-		t.Fatal("-reindex on a missing DATA_DIR returned nil")
+		t.Fatal("--reindex on a missing DATA_DIR returned nil")
 	}
 	if _, err := os.Stat(missing); !os.IsNotExist(err) {
 		t.Fatalf("DATA_DIR was created: %v", err)
@@ -222,7 +222,7 @@ func TestReindexDoesNotCreateMissingDataDir(t *testing.T) {
 
 func TestExecuteRejectsUnknownFlag(t *testing.T) {
 	var out bytes.Buffer
-	if err := execute(context.Background(), discardLogger(), []string{"-bogus"}, &out); err == nil {
+	if err := execute(context.Background(), discardLogger(), []string{"node", "--bogus"}, &out); err == nil {
 		t.Fatal("unknown flag returned nil")
 	}
 }
@@ -230,7 +230,22 @@ func TestExecuteRejectsUnknownFlag(t *testing.T) {
 func TestExecuteWithoutFlagBootstraps(t *testing.T) {
 	t.Chdir(t.TempDir()) // no .env: bootstrap fails the same way as before the flag existed
 	var out bytes.Buffer
-	if err := execute(context.Background(), discardLogger(), nil, &out); !errors.Is(err, os.ErrNotExist) {
+	if err := execute(context.Background(), discardLogger(), []string{"node"}, &out); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("err = %v, want the missing .env error from bootstrap", err)
+	}
+}
+
+func TestNodeErrorsAreMarkedForTheFatalLog(t *testing.T) {
+	t.Chdir(t.TempDir()) // no .env
+	for _, args := range [][]string{{"node"}, {"node", "--bogus"}} {
+		var out bytes.Buffer
+		var stopped nodeStopped
+		err := execute(context.Background(), discardLogger(), args, &out)
+		if !errors.As(err, &stopped) {
+			t.Fatalf("%v: err = %v, want a nodeStopped error", args, err)
+		}
+		if out.Len() != 0 {
+			t.Fatalf("%v: output = %q, want no cobra text", args, out.String())
+		}
 	}
 }

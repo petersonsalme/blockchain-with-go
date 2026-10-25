@@ -91,13 +91,13 @@ func main() {
 ```
 
 ```shell
-$ CONSENSUS=poa POA_VALIDATORS=<hex> POA_KEYSTORE=validator.key POA_KEYSTORE_PASSWORD=choose-a-password go run ./cmd/node
+$ CONSENSUS=poa POA_VALIDATORS=<hex> POA_KEYSTORE=validator.key POA_KEYSTORE_PASSWORD=choose-a-password go run ./cmd/bwg node
 ```
 
 ## Architectural Trade-offs
 1. **In-Memory Storage vs. Persistence**: The node supports both in-memory and persistent disk storage. When `DATA_DIR` is set, blocks and hash indexes are persisted to `$DATA_DIR/chain.db` via the bbolt adapter (`internal/storage/bolt`). When `DATA_DIR` is empty, state lives in memory (`internal/storage/memory`) and is lost on restart. The UTXO set remains derived in memory and is rebuilt from the chain at startup (ADR-0001, ADR-0004).
 2. **Centralization vs. P2P Network**: Currently, the blockchain runs as a single centralized HTTP server rather than a decentralized peer-to-peer network. This eliminates the complexity of network discovery, peer management, and gossip protocols, but makes the system centralized.
-3. **Sybil Protection (Proof of Work)**: A Proof of Work (PoW) mechanism is implemented to require computational effort for block creation and mitigate spam. The difficulty (number of leading zero **bits** required in the 256-bit block hash, so one step doubles the expected work; [ADR-0012](docs/adr/0012-difficulty-bits.md)) is configured via the `POW_DIFFICULTY` environment variable, defaulting to `8`. The logic lives in the `consensus` package behind the `Consensus` interface (`Seal`/`Verify`); `consensus.ProofOfWork` is the default implementation, and `POW_DIFFICULTY` is read once at startup (`cmd/node`).
+3. **Sybil Protection (Proof of Work)**: A Proof of Work (PoW) mechanism is implemented to require computational effort for block creation and mitigate spam. The difficulty (number of leading zero **bits** required in the 256-bit block hash, so one step doubles the expected work; [ADR-0012](docs/adr/0012-difficulty-bits.md)) is configured via the `POW_DIFFICULTY` environment variable, defaulting to `8`. The logic lives in the `consensus` package behind the `Consensus` interface (`Seal`/`Verify`); `consensus.ProofOfWork` is the default implementation, and `POW_DIFFICULTY` is read once at startup (`cmd/bwg`).
    - **Difficulty Retargeting**: Each block records its difficulty in `b.Difficulty` (included in the SHA-256 hash), and validation requires it to equal the difficulty the rule expects for that position in the chain, then checks the proof of work against it. The child of genesis uses `POW_DIFFICULTY`; every `POW_RETARGET_INTERVAL` blocks the difficulty moves by one towards `TARGET_BLOCK_TIME` (up when the window took less than half the target, down when it took more than twice), within `1..32`; other blocks inherit the parent's difficulty. `Seal` and `Verify` receive the chain history for this ([ADR-0008](docs/adr/0008-difficulty-retargeting.md)). Miners still choose block timestamps within the ENG-18 bounds, so time-warp attacks are not prevented.
    - **Parallel Mining**: `Seal` searches the nonce space with `MINING_WORKERS` goroutines (worker `i` tries the nonces `i, i+w, i+2w, …` on its own copy of the block). The first valid nonce cancels the others, and `Seal` returns only after all workers stopped. Any nonce that solves the difficulty is valid, so the nonce found may differ between runs when there is more than one worker; validation is unchanged.
    - **Context Cancellation & Timeouts**: Mining supports cooperative cancellation via `context.Context` (`consensus.MineWithContext`, `GenerateBlockWithContext`). The HTTP handler applies a configurable mining timeout via `MINING_TIMEOUT` (defaulting to 10 seconds; keep it at least 5 × `TARGET_BLOCK_TIME`, so that block times inside the retarget band rarely hit it) and aborts immediately if the client disconnects or cancels the request, preventing request processing from blocking indefinitely.
@@ -121,6 +121,7 @@ Design decisions live in [`docs/adr/`](docs/adr/0009-merkle-tree.md):
 | [0010](docs/adr/0010-prometheus-metrics.md) | Prometheus metrics written by hand, no client library |
 | [0012](docs/adr/0012-difficulty-bits.md) | Proof-of-work difficulty counts leading zero bits; defaults realigned with `MINING_TIMEOUT` |
 | [0015](docs/adr/0015-coinbase-and-halving.md) | Coinbase reward capped at `Subsidy(height) + fees`, with halving every 210,000 blocks |
+| [0016](docs/adr/0016-bwg-cli-composition-root.md) | One `bwg` binary is the composition root; `bwg node` replaces `cmd/node` |
 
 ## Configuration & Environment Variables
 
@@ -179,7 +180,7 @@ blockchain-with-go/
 | Application | `internal/chain` (`Service`) | `Blocks()`, `Tip()`, `BlockByHeight`, `BlockByHash`, `BlocksRange` and `Mine(ctx, txs)`: genesis, pre-validation, `Seal`, rules, `Verify`, `Append`. Rejection → `chain.ErrInvalidBlock`. |
 | Adapter (inbound) | `internal/server` (`Server`) | HTTP; maps `Service` errors to HTTP status codes. |
 | Adapters (outbound) | `internal/storage/bolt`, `internal/storage/memory`, `internal/consensus/pow` | Disk repository (bbolt), in-memory repository (`sync.RWMutex`) and Proof of Work. |
-| Composition root | `cmd/node` | Reads `.env`/environment, wires repo → pow → service → server and handles graceful shutdown. |
+| Composition root | `cmd/bwg` | Reads `.env`/environment, wires repo → pow → service → server and handles graceful shutdown. |
 
 **Dependency rule:** arrows point inward (adapters → application → domain). `domain` does not depend on `storage`, `chain`, `server`, `net/http` or `os/signal`; `chain` does not import `server` or `net/http`. There is no global state: each `Server` receives its `Service` by injection.
 
@@ -187,17 +188,17 @@ blockchain-with-go/
 
 Build the node binary:
 ```shell
-$ go build -o /dev/null ./cmd/node
+$ go build -o /dev/null ./cmd/bwg
 ```
 
 Run the node in-memory:
 ```shell
-$ go run ./cmd/node
+$ go run ./cmd/bwg node
 ```
 
 Run the node with disk storage:
 ```shell
-$ DATA_DIR=./data go run ./cmd/node
+$ DATA_DIR=./data go run ./cmd/bwg node
 ```
 
 To run test suites:
@@ -217,11 +218,11 @@ $ go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --timeout-c
 The bbolt file keeps the blocks plus derived indexes (UTXO set, undo data, transaction heights, transactions by address; ADR-0011). A `chain.db` written before ADR-0011 is reindexed by the node itself at startup, so nothing needs to be done. For manual repair (for example after editing the file or restoring a partial backup), stop the node and run:
 
 ```shell
-$ DATA_DIR=./data go run ./cmd/node -reindex
+$ DATA_DIR=./data go run ./cmd/bwg node --reindex
 reindexed: tip height 42
 ```
 
-`-reindex` opens `$DATA_DIR/chain.db`, drops and rebuilds the indexes from the blocks in one transaction, prints the tip height (`reindexed: empty chain` when there are no blocks) and exits with code 0 without opening an HTTP port. Running it twice leaves the file in the same state as running it once. It exits with a non-zero code and an error on stderr when `DATA_DIR` is empty (the in-memory repository has nothing to rebuild), when `DATA_DIR` does not exist, or when another process holds `chain.db` (the lock wait is 1 second). `DATA_DIR` is also read from `.env` when present.
+`--reindex` opens `$DATA_DIR/chain.db`, drops and rebuilds the indexes from the blocks in one transaction, prints the tip height (`reindexed: empty chain` when there are no blocks) and exits with code 0 without opening an HTTP port. Running it twice leaves the file in the same state as running it once. It exits with a non-zero code and an error on stderr when `DATA_DIR` is empty (the in-memory repository has nothing to rebuild), when `DATA_DIR` does not exist, or when another process holds `chain.db` (the lock wait is 1 second). `DATA_DIR` is also read from `.env` when present.
 
 ### CLI (bwg)
 
@@ -430,7 +431,7 @@ Create and mine a new block with a list of **signed** transactions. The node nev
 Every input is signed with Ed25519 over the transaction hash (`domain.SignInput`). Each input spends one unspent output, and `sum(inputs) − sum(outputs)` is the fee. To have something to spend, start the node with `GENESIS_ALLOCATIONS`:
 
 ```shell
-$ GENESIS_ALLOCATIONS=<sender address>:100 go run ./cmd/node
+$ GENESIS_ALLOCATIONS=<sender address>:100 go run ./cmd/bwg node
 ```
 
 The genesis transaction (see `GET /`) has an `ID`; spending its output 0 (100 coins) by sending 60 to a recipient, 39 back as change, and leaving 1 as the fee:
