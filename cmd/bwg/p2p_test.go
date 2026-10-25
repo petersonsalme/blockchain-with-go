@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -427,5 +429,37 @@ func TestRunWithDataDirPersistsPeers(t *testing.T) {
 	saved, err := p2p.LoadAddrs(filepath.Join(dir, "peers.json"))
 	if err != nil || !reflect.DeepEqual(saved, []string{"http://127.0.0.1:1"}) {
 		t.Fatalf("saved = %v, %v", saved, err)
+	}
+}
+
+func TestMaxOutboundPeersLimitsDialedPeers(t *testing.T) {
+	a1 := startP2PNode(t, 1, nil)
+	a2 := startP2PNode(t, 1, a1.genesis)
+	t.Setenv(seedPeersEnvVar, a1.srv.URL+","+a2.srv.URL)
+	t.Setenv(maxOutboundPeersEnvVar, "1")
+	b := startP2PNode(t, 0, a1.genesis)
+
+	b.node.Round(context.Background())
+
+	if got := getPeers(t, b.srv.URL); len(got.Peers) != 1 {
+		t.Fatalf("B peers = %+v, want exactly 1 outbound", got.Peers)
+	}
+}
+
+func TestNewP2PNodeLogsToTheGivenLogger(t *testing.T) {
+	dead := httptest.NewServer(http.NotFoundHandler())
+	url := dead.URL
+	dead.Close()
+	t.Setenv(seedPeersEnvVar, url)
+	var buf bytes.Buffer
+	n, err := newP2PNode(newTestService(t, 0, nil), "", slog.New(slog.NewTextHandler(&buf, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	n.Round(context.Background())
+
+	if buf.Len() == 0 {
+		t.Fatal("dial failure was not logged to the process logger")
 	}
 }
