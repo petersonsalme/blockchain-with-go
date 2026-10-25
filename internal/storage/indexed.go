@@ -71,6 +71,27 @@ type IndexedRepository interface {
 	// height. It returns ErrReorgTooDeep when height < PrunedBelow, ErrConflict
 	// when height is negative or past the chain, and ErrIndexStale on stale indexes.
 	ForkState(height int) (domain.UTXOSet, error)
+	// Restore fills an empty repository from a snapshot: the headers 0..S
+	// (stored without transactions), set as the UTXO set and the address
+	// index, the snapshot of S, PrunedBelow = S+1 and indexes current at S.
+	// It returns ErrConflict, and writes nothing, when the repository is not
+	// empty or CheckHeaders rejects headers.
+	Restore(headers []*domain.Block, set domain.UTXOSet) error
+}
+
+// CheckHeaders returns ErrConflict unless headers is a non-empty chain of
+// non-nil headers with headers[i].Index == i, each PrevHash after the first the
+// Hash of the one before and Hash == CalculateHash().
+func CheckHeaders(headers []*domain.Block) error {
+	if len(headers) == 0 {
+		return ErrConflict
+	}
+	for i, h := range headers {
+		if h == nil || h.Index != i || h.Hash != h.CalculateHash() || (i > 0 && h.PrevHash != headers[i-1].Hash) {
+			return ErrConflict
+		}
+	}
+	return nil
 }
 
 // TxIndex describes one transaction of a block for the indexes: its id, its

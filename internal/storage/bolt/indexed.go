@@ -645,3 +645,47 @@ func (r *Repository) ForkState(height int) (domain.UTXOSet, error) {
 	})
 	return set, err
 }
+
+// Restore fills an empty database from a snapshot in one transaction; see storage.IndexedRepository.
+func (r *Repository) Restore(headers []*domain.Block, set domain.UTXOSet) error {
+	if err := storage.CheckHeaders(headers); err != nil {
+		return err
+	}
+	s := len(headers) - 1
+	return r.db.Update(func(tx *bbolt.Tx) error {
+		if k, _ := tx.Bucket(blocksBucket).Cursor().First(); k != nil {
+			return storage.ErrConflict
+		}
+		for _, h := range headers {
+			header := *h
+			header.Transactions = []domain.Transaction{}
+			if err := putBlock(tx, &header); err != nil {
+				return err
+			}
+		}
+		if err := putOuts(tx, set); err != nil {
+			return err
+		}
+		sb := tx.Bucket(snapshotBucket)
+		for op, o := range set {
+			data, err := json.Marshal(o)
+			if err != nil {
+				return err
+			}
+			if err := sb.Put(utxoKey(op), data); err != nil {
+				return err
+			}
+		}
+		meta := tx.Bucket(metaBucket)
+		if err := meta.Put(snapshotHeightKey, heightKey(s)); err != nil {
+			return err
+		}
+		if err := meta.Put(snapshotHashKey, []byte(storage.SnapshotHash(headers[s].Hash, set))); err != nil {
+			return err
+		}
+		if err := meta.Put(prunedBelowKey, heightKey(s+1)); err != nil {
+			return err
+		}
+		return meta.Put(indexedTipKey, heightKey(s))
+	})
+}

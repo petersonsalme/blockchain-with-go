@@ -423,3 +423,33 @@ func (r *Repository) ForkState(height int) (domain.UTXOSet, error) {
 	}
 	return set, nil
 }
+
+// Restore fills an empty repository from a snapshot, under one lock; see storage.IndexedRepository.
+func (r *Repository) Restore(headers []*domain.Block, set domain.UTXOSet) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if len(r.blocks) > 0 {
+		return storage.ErrConflict
+	}
+	if err := storage.CheckHeaders(headers); err != nil {
+		return err
+	}
+	ix := newIndex()
+	ix.applyDelta(domain.UTXODelta{Created: cloneOuts(set)})
+	s := len(headers) - 1
+	ix.snap = &storage.Snapshot{Height: s, BlockHash: headers[s].Hash, Hash: storage.SnapshotHash(headers[s].Hash, set), UTXOs: domain.UTXOSet(cloneOuts(set))}
+	ix.prunedBelow = s + 1
+	ix.tip, ix.hasTip = s, true
+
+	blocks := make([]*domain.Block, len(headers))
+	byHash := make(map[string]*domain.Block, len(headers))
+	for i, h := range headers {
+		header := *h
+		header.Transactions = []domain.Transaction{}
+		blocks[i] = &header
+		byHash[header.Hash] = &header
+	}
+	r.blocks, r.byHash, r.idx = blocks, byHash, ix
+	return nil
+}
