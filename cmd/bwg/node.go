@@ -62,10 +62,9 @@ func newNodeCmd(logger *slog.Logger) *cobra.Command {
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			var err error
-			switch {
-			case snapshotExport != "" || snapshotImport != "" || hash != "":
+			if snapshotExport != "" || snapshotImport != "" || hash != "" {
 				err = runSnapshot(cmd, reindex, snapshotExport, snapshotImport, hash)
-			default:
+			} else {
 				err = runNode(cmd.Context(), logger, reindex, cmd.OutOrStdout())
 			}
 			if err != nil {
