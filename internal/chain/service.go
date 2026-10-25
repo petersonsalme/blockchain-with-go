@@ -5,15 +5,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/internal/mempool"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
+	"github.com/petersonsalme/blockchain-with-go/internal/vm"
 )
 
 // ErrInvalidBlock is returned by Mine when the sealed block is nil or fails consensus verification.
@@ -98,6 +101,11 @@ type Service struct {
 	diverged    bool
 	// writeSem serializes Mine; a buffered channel lets waiters honour ctx.
 	writeSem chan struct{}
+	// contracts is the contract state of the chain, equal to vm.BuildState of
+	// its blocks. Writers hold writeSem and take contractsMu to replace or
+	// apply to it; readers outside writeSem take contractsMu.RLock.
+	contracts   vm.State
+	contractsMu sync.RWMutex
 }
 
 // NewService builds a Service over repo, stores the genesis block when repo is
@@ -142,7 +150,43 @@ func NewService(repo storage.IndexedRepository, c consensus.Consensus, opts ...O
 		}
 	}
 
+	all, err := repo.All()
+	if err != nil {
+		return nil, err
+	}
+	if s.contracts, err = vm.BuildState(all); err != nil {
+		return nil, err
+	}
+
 	return s, nil
+}
+
+// Contract returns copies of the code and storage of the deployed contract id.
+// It never waits for Mine.
+func (s *Service) Contract(id string) (code []byte, storage map[uint64]uint64, ok bool) {
+	s.contractsMu.RLock()
+	defer s.contractsMu.RUnlock()
+	c, ok := s.contracts.Contract(id)
+	if !ok {
+		return nil, nil, false
+	}
+	return slices.Clone(c.Code), maps.Clone(c.Storage), true
+}
+
+// applyContracts adds d to the contract state once its block is committed.
+func (s *Service) applyContracts(d vm.Delta) {
+	s.contractsMu.Lock()
+	defer s.contractsMu.Unlock()
+	s.contracts.Apply(d)
+}
+
+// confirmedDelta is the contract delta of a block holding txs over the
+// confirmed state. Outside writeSem a block mined meanwhile only makes the
+// answer stale, as for the UTXO checks.
+func (s *Service) confirmedDelta(txs []domain.Transaction) (vm.Delta, error) {
+	s.contractsMu.RLock()
+	defer s.contractsMu.RUnlock()
+	return vm.BlockDelta(s.contracts, &domain.Block{Transactions: txs})
 }
 
 // genesis builds the first block, with an allocation transaction when configured.
@@ -459,6 +503,9 @@ func (s *Service) Submit(tx domain.Transaction) error {
 	if err := verifyInputs(s.repo, txs); err != nil {
 		return err
 	}
+	if _, err := s.confirmedDelta(txs); err != nil {
+		return err
+	}
 
 	// BlockDelta guarantees in >= out and no overflow for a transaction with inputs.
 	var in, out uint64
@@ -529,15 +576,26 @@ func (s *Service) fit() ([]domain.Transaction, error) {
 
 // dropStale removes from the pool, and from txs, the transactions Mine would no
 // longer accept: a Submit that validated before an earlier block can add them
-// after it. The caller holds writeSem, so the UTXO set cannot change underneath.
+// after it. The caller holds writeSem, so neither the UTXO set nor the contract
+// state can change underneath. Contract operations are checked in selection
+// order, each over the writes of the kept ones before it.
 func (s *Service) dropStale(txs []domain.Transaction) []domain.Transaction {
 	valid := make([]domain.Transaction, 0, len(txs))
+	var contractTxs []domain.Transaction
 	var stale []string
 	for i := range txs {
 		one := txs[i : i+1]
 		if _, err := domain.BlockDelta(s.repo, &domain.Block{Transactions: one}, false); err != nil || verifyInputs(s.repo, one) != nil {
 			stale = append(stale, txs[i].ID)
 			continue
+		}
+		if txs[i].Contract != nil {
+			withThis := append(slices.Clone(contractTxs), txs[i])
+			if _, err := s.confirmedDelta(withThis); err != nil {
+				stale = append(stale, txs[i].ID)
+				continue
+			}
+			contractTxs = withThis
 		}
 		valid = append(valid, txs[i])
 	}
@@ -610,6 +668,10 @@ func (s *Service) mineLocked(ctx context.Context, txs []domain.Transaction) (*do
 	if err := verifyInputs(s.repo, txs); err != nil {
 		return nil, err
 	}
+	contractDelta, err := s.confirmedDelta(txs)
+	if err != nil {
+		return nil, err
+	}
 
 	block, err := s.generate(ctx, s.consensus, history, txs)
 	if err != nil {
@@ -629,6 +691,7 @@ func (s *Service) mineLocked(ctx context.Context, txs []domain.Transaction) (*do
 	if err := s.repo.Commit(block, delta); err != nil {
 		return nil, s.writeFailed(err)
 	}
+	s.applyContracts(contractDelta)
 
 	s.pool.Prune(block, s.repo)
 	return block, nil
@@ -699,6 +762,11 @@ func (s *Service) ReplaceChain(ctx context.Context, candidate []*domain.Block) (
 		return nil, err
 	}
 
+	forkContracts, err := vm.BuildState(local[:fork])
+	if err != nil {
+		return nil, err
+	}
+
 	// The shared prefix is the local one, whatever else the candidate carries there.
 	history := make([]*domain.Block, fork, len(candidate))
 	copy(history, local[:fork])
@@ -721,7 +789,12 @@ func (s *Service) ReplaceChain(ctx context.Context, candidate []*domain.Block) (
 		if err := verifyInputs(forkState, b.Transactions); err != nil {
 			return nil, err
 		}
+		contractDelta, err := vm.BlockDelta(forkContracts, b)
+		if err != nil {
+			return nil, err
+		}
 		forkState.Apply(delta)
+		forkContracts.Apply(contractDelta)
 		deltas = append(deltas, delta)
 		history = append(history, b)
 	}
@@ -734,6 +807,9 @@ func (s *Service) ReplaceChain(ctx context.Context, candidate []*domain.Block) (
 	if err := s.repo.Reorg(fork, connected, deltas); err != nil {
 		return nil, s.writeFailed(err)
 	}
+	s.contractsMu.Lock()
+	s.contracts = forkContracts
+	s.contractsMu.Unlock()
 
 	disconnected := slices.Clone(local[fork:])
 	return &Reorg{

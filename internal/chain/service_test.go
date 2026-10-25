@@ -200,16 +200,22 @@ var _ = Describe("Service", func() {
 			Expect(err).To(MatchError(boom))
 		})
 
-		It("neither scans the chain nor reindexes when the indexes are current", func() {
+		It("replays the chain once for the contract state and does not reindex when the indexes are current", func() {
 			_, err := NewService(repo, eng)
 			Expect(err).NotTo(HaveOccurred())
 
-			spy := &failingRepo{IndexedRepository: repo, allErr: errors.New("must not scan")}
+			spy := &failingRepo{IndexedRepository: repo}
 			_, err = NewService(spy, eng)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(spy.all.Load()).To(BeZero())
+			Expect(spy.all.Load()).To(Equal(int32(1)))
 			Expect(spy.currents.Load()).To(Equal(int32(1)))
 			Expect(spy.reindexes.Load()).To(BeZero())
+		})
+
+		It("fails when the chain cannot be read for the contract state", func() {
+			boom := errors.New("boom")
+			_, err := NewService(&failingRepo{IndexedRepository: repo, allErr: boom}, eng)
+			Expect(err).To(MatchError(boom))
 		})
 
 		It("reindexes once when the indexes are stale", func() {
