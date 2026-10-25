@@ -63,6 +63,8 @@ type Transaction struct {
 	Inputs    []TxIn
 	Outputs   []TxOut
 	Timestamp time.Time
+	// Contract is an optional contract operation, covered by the hash and signatures.
+	Contract *ContractOp `json:",omitempty"`
 }
 
 // OutPoint identifies a transaction output.
@@ -112,10 +114,19 @@ type utxoHashPayload struct {
 	Inputs    []utxoInPayload  `json:"inputs"`
 	Outputs   []utxoOutPayload `json:"outputs"`
 	Timestamp string           `json:"timestamp"`
+	Contract  *contractPayload `json:"contract,omitempty"`
+}
+
+type contractPayload struct {
+	Kind     string   `json:"kind"`
+	Code     string   `json:"code"`
+	Target   string   `json:"target"`
+	Args     []uint64 `json:"args"`
+	GasLimit uint64   `json:"gas_limit"`
 }
 
 // CalculateHash is the SHA-256 hex of the canonical JSON of the inputs (without
-// PublicKey/Signature), the outputs and the UTC timestamp.
+// PublicKey/Signature), the outputs, the UTC timestamp and, when present, the contract operation.
 func (t *Transaction) CalculateHash() string {
 	if t == nil {
 		return ""
@@ -132,6 +143,16 @@ func (t *Transaction) CalculateHash() string {
 	for i, out := range t.Outputs {
 		//nolint:staticcheck // S1016: explicit field copy pins the hashed payload shape
 		payload.Outputs[i] = utxoOutPayload{Amount: out.Amount, Address: out.Address}
+	}
+
+	if c := t.Contract; c != nil {
+		payload.Contract = &contractPayload{
+			Kind:     c.Kind,
+			Code:     c.Code,
+			Target:   c.Target,
+			Args:     append([]uint64{}, c.Args...),
+			GasLimit: c.GasLimit,
+		}
 	}
 
 	data, _ := json.Marshal(payload)
