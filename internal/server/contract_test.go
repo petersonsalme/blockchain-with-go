@@ -26,6 +26,7 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus"
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus/pow"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
+	"github.com/petersonsalme/blockchain-with-go/internal/p2p"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/memory"
 )
@@ -76,6 +77,9 @@ const (
 	zeroHash = "0000000000000000000000000000000000000000000000000000000000000000"
 	fixedNow = 1700000000
 )
+
+// fakeLocal is the hello the contract tests' P2P double answers.
+var fakeLocal = p2p.Hello{Version: 1, NodeID: idA, GenesisHash: zeroHash, Height: 3, TipHash: zeroHash, ListenAddr: "http://10.0.0.1:8080"}
 
 // contractCases returns one case per declared (operation, status) pair.
 func contractCases() []contractCase {
@@ -134,6 +138,14 @@ func contractCases() []contractCase {
 		return func() (http.Handler, string, string) {
 			h, _, _ := limited(target)()
 			return h, target, "{}"
+		}
+	}
+
+	// p2pPost serves cfg over a real chain and sends a valid POST /p2p/hello body.
+	p2pPost := func(cfg Config) func() (http.Handler, string, string) {
+		return func() (http.Handler, string, string) {
+			h, _ := real(cfg)
+			return h, "/p2p/hello", helloBody(idB, 7)
 		}
 	}
 
@@ -251,6 +263,34 @@ func contractCases() []contractCase {
 
 		{method: "GET", route: "/mempool", status: 200, serve: plain("/mempool")},
 		{method: "GET", route: "/mempool", status: 429, serve: limited("/mempool"), warmup: 1},
+
+		{method: "POST", route: "/p2p/hello", status: 200, serve: p2pPost(Config{P2P: &fakePeers{local: fakeLocal}})},
+		{method: "POST", route: "/p2p/hello", status: 400, serve: p2pPost(Config{P2P: &fakePeers{err: p2p.ErrBadHello}})},
+		{method: "POST", route: "/p2p/hello", status: 404, serve: p2pPost(Config{})},
+		{method: "POST", route: "/p2p/hello", status: 409, serve: p2pPost(Config{P2P: &fakePeers{err: p2p.ErrSelf}})},
+		{method: "POST", route: "/p2p/hello", status: 413, serve: func() (http.Handler, string, string) {
+			h, target, body := p2pPost(Config{P2P: &fakePeers{}})()
+			return h, target, strings.TrimSuffix(body, "}") + `,"pad":"` + strings.Repeat("a", int(maxRequestBodyBytes())) + `"}`
+		}},
+		{method: "POST", route: "/p2p/hello", status: 429, serve: p2pPost(Config{P2P: &fakePeers{}, RateLimit: 1, Now: func() time.Time { return time.Unix(fixedNow, 0) }}), warmup: 1},
+		{method: "POST", route: "/p2p/hello", status: 500, serve: p2pPost(Config{P2P: &fakePeers{err: errors.New("boom")}})},
+		{method: "POST", route: "/p2p/hello", status: 503, serve: p2pPost(Config{P2P: &fakePeers{err: p2p.ErrPeerLimit}})},
+
+		{method: "GET", route: "/p2p/peers", status: 200, serve: func() (http.Handler, string, string) {
+			h, _, _ := p2pPost(Config{P2P: &fakePeers{
+				peers: []p2p.PeerInfo{{NodeID: idB, Addr: "http://10.0.0.2:8080", Height: 7, TipHash: zeroHash, Inbound: true, LastSeen: time.Unix(fixedNow, 0)}},
+				addrs: []string{"http://10.0.0.2:8080"},
+			}})()
+			return h, "/p2p/peers", ""
+		}},
+		{method: "GET", route: "/p2p/peers", status: 404, serve: func() (http.Handler, string, string) {
+			h, _, _ := p2pPost(Config{})()
+			return h, "/p2p/peers", ""
+		}},
+		{method: "GET", route: "/p2p/peers", status: 429, serve: func() (http.Handler, string, string) {
+			h, _, _ := p2pPost(Config{P2P: &fakePeers{}, RateLimit: 1, Now: func() time.Time { return time.Unix(fixedNow, 0) }})()
+			return h, "/p2p/peers", ""
+		}, warmup: 1},
 	}
 	return cases
 }
