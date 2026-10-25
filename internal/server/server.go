@@ -45,6 +45,7 @@ type Chain interface {
 	Submit(tx domain.Transaction) error
 	Pending() []domain.Transaction
 	MinePending(ctx context.Context) (*domain.Block, error)
+	Contract(id string) (code []byte, storage map[uint64]uint64, ok bool)
 }
 
 // Peers is the peer-to-peer port behind POST /p2p/hello and GET /p2p/peers (ADR-0013); *p2p.Node satisfies it.
@@ -145,6 +146,7 @@ func (s *Server) routes() []route {
 		{"GET /tx/{id}", s.handleGetTx},
 		{"GET /tx/{id}/proof", s.handleGetTxProof},
 		{"GET /balance/{addr}", s.handleGetBalance},
+		{"GET /contracts/{id}", s.handleGetContract},
 		{"GET /health", s.handleHealth},
 		{"GET /metrics", s.handleMetrics},
 		{"GET /events", s.handleEvents},
@@ -172,6 +174,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/tx/{id}", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/tx/{id}/proof", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/balance/{addr}", methodNotAllowed("GET, HEAD"))
+	mux.Handle("/contracts/{id}", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/health", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/metrics", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/events", methodNotAllowed("GET, HEAD"))
@@ -373,6 +376,24 @@ func (s *Server) handleGetTx(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleGetContract serves the code and storage of a deployed contract by its ID.
+func (s *Server) handleGetContract(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !isHash(id) {
+		respondWithJSON(w, http.StatusBadRequest, errorResponse{
+			Error: "contract id must be a 64-character lowercase hex string",
+			Code:  invalidContractIDCode,
+		})
+		return
+	}
+	code, storage, ok := s.chain.Contract(id)
+	if !ok {
+		respondWithJSON(w, http.StatusNotFound, errorResponse{Error: "contract not found", Code: contractNotFoundCode})
+		return
+	}
+	respondWithJSON(w, http.StatusOK, newContractResponse(id, code, storage))
+}
+
 // handleGetTxProof serves the Merkle inclusion proof of a transaction by its ID.
 func (s *Server) handleGetTxProof(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -481,8 +502,12 @@ func (s *Server) handleWriteBlock(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSubmitTx(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = r.Body.Close() }() // closing a server request body cannot fail usefully
 
-	var tx domain.Transaction
-	if !decodeJSONBody(w, r, &tx) || !checkTx(w, &tx) {
+	var req txRequest
+	if !decodeJSONBody(w, r, &req) {
+		return
+	}
+	tx := req.transaction()
+	if !checkTx(w, &tx) {
 		return
 	}
 	if err := s.chain.Submit(tx); err != nil {

@@ -130,6 +130,7 @@ func (brokenChain) Transaction(string) (*domain.Transaction, string, int, error)
 func (brokenChain) TxProof(string) (*chain.InclusionProof, error) {
 	return nil, errors.New("read failed")
 }
+func (brokenChain) Contract(string) ([]byte, map[uint64]uint64, bool) { return nil, nil, false }
 func (brokenChain) Balance(string) (uint64, []chain.UTXO) {
 	return 0, []chain.UTXO{}
 }
