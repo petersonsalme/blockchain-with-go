@@ -60,3 +60,13 @@ Option B (chosen by the board), with these rules:
 ## Out of scope
 - Fetching snapshots or headers from peers (ENG-30/ENG-31).
 - Pruning `hashes` or headers; more than one stored snapshot; compression.
+
+## What we learned
+Measured with `MEASURE_SNAPSHOT=1 go test -v ./internal/storage/bolt -run TestMeasureSnapshotCost` (20k blocks, bolt):
+
+| Config | `chain.db` | `Commit` mean (other blocks) | `Commit` mean (snapshot blocks t=1100, 2100, …) | max snapshot `Commit` |
+|---|---|---|---|---|
+| full (`N=0, K=0`) | 80.0 MiB | 0.82 ms | 0.87 ms | 2.6 ms |
+| `N=1000, K=100` | 49.5 MiB | 1.09 ms | 76.4 ms | 200 ms |
+
+Pruning cuts the file by about 38%; the price is a snapshot `Commit` roughly 90× slower, paid once every N blocks.
