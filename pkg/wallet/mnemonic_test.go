@@ -108,13 +108,29 @@ var _ = Describe("Mnemonic", func() {
 		}
 	})
 
-	It("ValidateMnemonic rejects an unknown word", func() {
+	It("ValidateMnemonic rejects unknown words at any position", func() {
 		v0 := vectors.English[0][1]
-		ws := strings.Fields(v0)
-		ws[len(ws)-1] = "zzzz"
-		unknown := strings.Join(ws, " ")
+		base := strings.Fields(v0)
+		cases := []struct {
+			pos  int
+			word string
+		}{
+			{0, "zzzz"},
+			{3, "abandono"},
+			{6, "aaaa"},
+			{11, "abandonx"},
+		}
 
-		Expect(errors.Is(ValidateMnemonic(unknown), ErrInvalidMnemonic)).To(BeTrue())
+		for _, tc := range cases {
+			i, w := tc.pos, tc.word
+			ws := slices.Clone(base)
+			ws[i] = w
+			m := strings.Join(ws, " ")
+
+			err := ValidateMnemonic(m)
+			Expect(errors.Is(err, ErrInvalidMnemonic)).To(BeTrue(), "word %q at %d", w, i)
+			Expect(err).To(MatchError(ContainSubstring("unknown word")), "word %q at %d", w, i)
+		}
 	})
 
 	It("ValidateMnemonic rejects a bad checksum", func() {
