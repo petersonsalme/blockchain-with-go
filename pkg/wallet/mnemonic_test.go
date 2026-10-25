@@ -80,14 +80,32 @@ var _ = Describe("Mnemonic", func() {
 		}
 	})
 
-	It("ValidateMnemonic rejects 11 and 13 words", func() {
+	It("ValidateMnemonic rejects word counts outside 12, 15, 18, 21 and 24", func() {
 		v0 := vectors.English[0][1]
 		ws := strings.Fields(v0)
 		short := strings.Join(ws[:11], " ")
 		long := v0 + " abandon"
 
-		Expect(errors.Is(ValidateMnemonic(short), ErrInvalidMnemonic)).To(BeTrue())
-		Expect(errors.Is(ValidateMnemonic(long), ErrInvalidMnemonic)).To(BeTrue())
+		cases := []struct {
+			m string
+			n int
+		}{
+			{short, 11},
+			{long, 13},
+		}
+		for _, n := range []int{1, 2, 3, 14, 25} {
+			cases = append(cases, struct {
+				m string
+				n int
+			}{strings.TrimSpace(strings.Repeat("abandon ", n)), n})
+		}
+
+		for _, tc := range cases {
+			m, n := tc.m, tc.n
+			err := ValidateMnemonic(m)
+			Expect(errors.Is(err, ErrInvalidMnemonic)).To(BeTrue(), "words %d", n)
+			Expect(err).To(MatchError(ContainSubstring("word count")), "words %d", n)
+		}
 	})
 
 	It("ValidateMnemonic rejects an unknown word", func() {
