@@ -19,6 +19,7 @@ import (
 
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus/pow"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
+	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/bolt"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/memory"
 	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
@@ -342,7 +343,7 @@ func TestBuildServiceGenesisAllocations(t *testing.T) {
 
 func TestOpenRepository(t *testing.T) {
 	t.Run("empty DATA_DIR chooses memory adapter", func(t *testing.T) {
-		repo, closeRepo, err := openRepository("")
+		repo, closeRepo, err := openRepository("", storage.Pruning{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -359,7 +360,7 @@ func TestOpenRepository(t *testing.T) {
 
 	t.Run("non-empty DATA_DIR creates directory and chooses bolt adapter", func(t *testing.T) {
 		dir := filepath.Join(t.TempDir(), "nested", "data")
-		repo, closeRepo, err := openRepository(dir)
+		repo, closeRepo, err := openRepository(dir, storage.Pruning{})
 		if err != nil {
 			t.Fatal(err)
 		}

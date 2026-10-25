@@ -81,13 +81,20 @@ type IndexedRepository interface {
 
 // CheckHeaders returns ErrConflict unless headers is a non-empty chain of
 // non-nil headers with headers[i].Index == i, each PrevHash after the first the
-// Hash of the one before and Hash == CalculateHash().
+// Hash of the one before and Hash == CalculateHash() (an empty Hash is also accepted at the unsealed genesis).
 func CheckHeaders(headers []*domain.Block) error {
 	if len(headers) == 0 {
 		return ErrConflict
 	}
 	for i, h := range headers {
-		if h == nil || h.Index != i || h.Hash != h.CalculateHash() || (i > 0 && h.PrevHash != headers[i-1].Hash) {
+		if h == nil || h.Index != i {
+			return ErrConflict
+		}
+		// The genesis is never sealed, so its Hash may be empty.
+		if h.Hash != h.CalculateHash() && (i > 0 || h.Hash != "") {
+			return ErrConflict
+		}
+		if i > 0 && h.PrevHash != headers[i-1].Hash {
 			return ErrConflict
 		}
 	}

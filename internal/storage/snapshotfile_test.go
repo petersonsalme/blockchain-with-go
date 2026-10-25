@@ -144,6 +144,15 @@ func TestCheckHeaders(t *testing.T) {
 	if err := storage.CheckHeaders(good); err != nil {
 		t.Fatalf("good headers: %v", err)
 	}
+	unsealed := clone0(good)
+	unsealed[0].Hash = ""
+	unsealed[1].PrevHash = ""
+	unsealed[1].Hash = unsealed[1].CalculateHash()
+	unsealed[2].PrevHash = unsealed[1].Hash
+	unsealed[2].Hash = unsealed[2].CalculateHash()
+	if err := storage.CheckHeaders(unsealed); err != nil {
+		t.Fatalf("unsealed genesis: %v", err)
+	}
 	clone := func() []*domain.Block {
 		out := make([]*domain.Block, len(good))
 		for i, b := range good {
@@ -158,6 +167,7 @@ func TestCheckHeaders(t *testing.T) {
 		"index":    func(h []*domain.Block) []*domain.Block { h[1].Index = 5; return h },
 		"prevhash": func(h []*domain.Block) []*domain.Block { h[2].PrevHash = "x"; return h },
 		"hash":     func(h []*domain.Block) []*domain.Block { h[1].Hash = "x"; return h },
+		"genesis":  func(h []*domain.Block) []*domain.Block { h[0].Hash = "x"; return h },
 		"nonce":    func(h []*domain.Block) []*domain.Block { h[2].Nonce++; return h },
 	}
 	for name, f := range bad {
@@ -165,4 +175,13 @@ func TestCheckHeaders(t *testing.T) {
 			t.Errorf("%s: err = %v, want ErrConflict", name, err)
 		}
 	}
+}
+
+func clone0(in []*domain.Block) []*domain.Block {
+	out := make([]*domain.Block, len(in))
+	for i, b := range in {
+		c := *b
+		out[i] = &c
+	}
+	return out
 }

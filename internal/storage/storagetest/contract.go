@@ -704,7 +704,10 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 				if i > 0 {
 					b.PrevHash = out[i-1].Hash
 				}
-				b.Hash = b.CalculateHash()
+				// The genesis of a real chain is never sealed: its Hash stays empty.
+				if i > 0 {
+					b.Hash = b.CalculateHash()
+				}
 				out[i] = b
 			}
 			return out
@@ -749,6 +752,9 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 				Expect(b.PrevHash).To(Equal(headers[i].PrevHash))
 				Expect(b.MerkleRoot).To(Equal(headers[i].MerkleRoot))
 				Expect(b.Transactions).To(BeEmpty())
+				if i == 0 {
+					continue
+				}
 				byHash, err := repo.ByHash(headers[i].Hash)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(byHash.Index).To(Equal(i))
@@ -860,6 +866,13 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 			Entry("a wrong hash", func(h []*domain.Block) []*domain.Block { h[3].Hash = "forged"; return h }),
 			Entry("a field changed after hashing", func(h []*domain.Block) []*domain.Block { h[3].Nonce++; return h }),
 			Entry("a wrong genesis hash", func(h []*domain.Block) []*domain.Block { h[0].Hash = "forged"; return h }),
+			Entry("a genesis changed after hashing", func(h []*domain.Block) []*domain.Block {
+				h[0].Hash = h[0].CalculateHash()
+				h[1].PrevHash = h[0].Hash
+				h[1].Hash = h[1].CalculateHash()
+				h[0].Nonce++
+				return h
+			}),
 		)
 	})
 
