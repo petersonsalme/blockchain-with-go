@@ -148,6 +148,13 @@ func (s *spyMineChain) Mine(ctx context.Context, txs []domain.Transaction) (*dom
 	return &domain.Block{Index: 1, Hash: "0000000000000000000000000000000000000000000000000000000000000001"}, nil
 }
 
+// coinbaseCapChain rejects every Mine with the coinbase cap error.
+type coinbaseCapChain struct{ brokenChain }
+
+func (coinbaseCapChain) Mine(context.Context, []domain.Transaction) (*domain.Block, error) {
+	return nil, domain.ErrCoinbaseTooLarge
+}
+
 // recordingChain records the transactions each Mine call receives.
 type recordingChain struct {
 	brokenChain
@@ -1544,6 +1551,16 @@ var _ = Describe("Server", func() {
 			Entry("outputs exceed inputs", func(tx *domain.Transaction) { tx.Outputs[0].Amount = bankAmount + 1; tx.ID = "" }, http.StatusUnprocessableEntity, "insufficient_inputs"),
 			Entry("unknown input", func(tx *domain.Transaction) { tx.Inputs[0].PrevTxID = "unknown"; tx.ID = "" }, http.StatusConflict, "input_missing_or_spent"),
 		)
+
+		It("answers 400 coinbase_too_large for a mining rejection by the coinbase cap", func() {
+			srv, err := NewServer(&coinbaseCapChain{}, Config{})
+			Expect(err).NotTo(HaveOccurred())
+
+			rec := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(payloadOf(funds.tx(newWallet().Address(), 5)))))
+
+			expectError(rec, http.StatusBadRequest, "coinbase_too_large")
+		})
 
 		It("never fills the signed Timestamp: a zero timestamp is 400 missing_timestamp", func() {
 			initialLen := chainLen()

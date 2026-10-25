@@ -120,6 +120,7 @@ Design decisions live in [`docs/adr/`](docs/adr/0009-merkle-tree.md):
 | [0009](docs/adr/0009-merkle-tree.md) | Transaction Merkle tree in the block header (RFC 6962 odd-node rule) |
 | [0010](docs/adr/0010-prometheus-metrics.md) | Prometheus metrics written by hand, no client library |
 | [0012](docs/adr/0012-difficulty-bits.md) | Proof-of-work difficulty counts leading zero bits; defaults realigned with `MINING_TIMEOUT` |
+| [0015](docs/adr/0015-coinbase-and-halving.md) | Coinbase reward capped at `Subsidy(height) + fees`, with halving every 210,000 blocks |
 
 ## Configuration & Environment Variables
 
@@ -531,7 +532,7 @@ BPM payloads cannot be signed, so the endpoint answers `410 Gone` (with `Depreca
 | `201 Created` | Block mined and appended to the blockchain via `POST /` or `POST /mine` | JSON object of the new block |
 | `202 Accepted` | Transaction admitted to the mempool via `POST /tx` | `{"id": "..."}` |
 | `400 Bad Request` | Malformed JSON body or invalid transaction payload (e.g. empty list) | `{"error": "invalid request body"}` |
-| `400 Bad Request` | Transaction rejected before mining | `{"error": "...", "code": "missing_signature" \| "invalid_signature" \| "invalid_public_key" \| "input_owner_mismatch" \| "invalid_output" \| "missing_inputs" \| "missing_timestamp"}` |
+| `400 Bad Request` | Transaction rejected before mining | `{"error": "...", "code": "missing_signature" \| "invalid_signature" \| "invalid_public_key" \| "input_owner_mismatch" \| "invalid_output" \| "missing_inputs" \| "coinbase_too_large" \| "missing_timestamp"}` |
 | `409 Conflict` | Input already spent or unknown, or the same output spent twice; on `POST /tx`, also a transaction already in the pool, one that conflicts with a pool transaction, or a full pool it cannot displace | `{"error": "...", "code": "input_missing_or_spent" \| "double_spend" \| "duplicate_tx" \| "mempool_conflict" \| "mempool_full"}` |
 | `422 Unprocessable Entity` | Outputs exceed inputs | `{"error": "...", "code": "insufficient_inputs"}` |
 | `410 Gone` | `POST /legacy/bpm` (removed) | `{"error": "...", "code": "endpoint_gone"}` |

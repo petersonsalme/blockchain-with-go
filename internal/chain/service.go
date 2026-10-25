@@ -416,6 +416,14 @@ func (s *Service) lock(ctx context.Context) (func(), error) {
 // and Blocks never waits for Mine, nor do the block queries. An accepted block
 // removes from the pool the transactions it holds and those it conflicts with.
 func (s *Service) Mine(ctx context.Context, txs []domain.Transaction) (*domain.Block, error) {
+	// Only the Service creates a coinbase; a caller's input-less transaction
+	// would mint coins.
+	for i := range txs {
+		if len(txs[i].Inputs) == 0 {
+			return nil, domain.ErrMissingInputs
+		}
+	}
+
 	release, err := s.lock(ctx)
 	if err != nil {
 		return nil, err
@@ -431,6 +439,9 @@ func (s *Service) Mine(ctx context.Context, txs []domain.Transaction) (*domain.B
 // never waits for Mine: a block mined meanwhile can leave tx stale, and
 // MinePending discards it.
 func (s *Service) Submit(tx domain.Transaction) error {
+	if len(tx.Inputs) == 0 {
+		return domain.ErrMissingInputs
+	}
 	txs := []domain.Transaction{tx}
 	delta, err := domain.BlockDelta(s.repo, &domain.Block{Transactions: txs}, false)
 	if err != nil {
@@ -563,7 +574,7 @@ func (s *Service) mineLocked(ctx context.Context, txs []domain.Transaction) (*do
 	}
 	prev := history[len(history)-1]
 
-	delta, err := domain.BlockDelta(s.repo, &domain.Block{Transactions: txs}, false)
+	delta, err := domain.BlockDelta(s.repo, &domain.Block{Index: prev.Index + 1, Transactions: txs}, false)
 	if err != nil {
 		return nil, err
 	}

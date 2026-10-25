@@ -386,13 +386,13 @@ var _ = Describe("Service.ReplaceChain", func() {
 										return onTop(h, []domain.Transaction{spend(fx.f.owner, fx.f.ops[3], 7), spend(fx.f.owner, fx.f.ops[3], 6)})
 									})
 								}, is(domain.ErrDoubleSpend)},
-								{"transaction without inputs", func() []*domain.Block {
+								{"coinbase above the subsidy", func() []*domain.Block {
 									return last(func(h []*domain.Block) *domain.Block {
-										tx := domain.Transaction{Outputs: []domain.TxOut{{Amount: 1, Address: fx.f.owner.Address()}}, Timestamp: time.Now()}
+										tx := domain.Transaction{Outputs: []domain.TxOut{{Amount: domain.InitialSubsidy + 1, Address: fx.f.owner.Address()}}, Timestamp: time.Now()}
 										tx.ID = tx.CalculateHash()
 										return onTop(h, []domain.Transaction{tx})
 									})
-								}, is(domain.ErrMissingInputs)},
+								}, is(domain.ErrCoinbaseTooLarge)},
 								{"invalid input signature", func() []*domain.Block {
 									return last(func(h []*domain.Block) *domain.Block {
 										tx := good()[0]
@@ -436,7 +436,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 							"nil block", "empty candidate", "nil genesis", "different genesis",
 							"genesis altered under the same hash", "tampered hash", "seal that does not verify",
 							"difficulty off the expected one", "wrong merkle root", "double spend",
-							"transaction without inputs", "invalid input signature", "input signed by another owner's key",
+							"coinbase above the subsidy", "invalid input signature", "input signed by another owner's key",
 							"input that only the local branch created", "input that the candidate already spent",
 							"invalid first block of the tail, valid after it", "block older than its parent",
 						} {
