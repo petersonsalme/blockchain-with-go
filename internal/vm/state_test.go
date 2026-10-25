@@ -136,6 +136,22 @@ var _ = Describe("contract state", func() {
 			Expect(err).To(MatchError(vm.ErrOutOfGas))
 		})
 
+		It("accumulates the writes of different keys from calls in the same block", func() {
+			dep := deployTx(argCode)
+			id := dep.CalculateHash()
+			s, err := vm.BuildState([]*domain.Block{blockOf(dep)})
+			Expect(err).NotTo(HaveOccurred())
+
+			b := blockOf(callTx(id, 100, 5, 1), callTx(id, 100, 6, 2))
+			delta, err := vm.BlockDelta(s, b)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(delta.Writes[id]).To(Equal(map[uint64]uint64{1: 5, 2: 6}))
+
+			s.Apply(delta)
+			c, _ := s.Contract(id)
+			Expect(c.Storage).To(Equal(map[uint64]uint64{1: 5, 2: 6}))
+		})
+
 		DescribeTable("rejects the block with an empty delta",
 			func(build func() (vm.State, *domain.Block), want error) {
 				s, b := build()
