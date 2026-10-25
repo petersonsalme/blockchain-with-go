@@ -216,6 +216,39 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "429":
           $ref: "#/components/responses/RateLimited"
+  /contracts/{id}:
+    get:
+      operationId: getContract
+      summary: Get the code and storage of a deployed contract
+      description: The ID of a contract is the ID of the transaction that deployed it (ADR-0014). The state is the confirmed one; a deploy or call still in the mempool is not visible.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Contract ID, 64 lowercase hex characters.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The contract.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/contractResponse"
+        "400":
+          description: The ID is not 64 lowercase hex characters (`invalid_contract_id`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "404":
+          description: No contract with that ID is deployed (`contract_not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /health:
     get:
       operationId: getHealth
@@ -304,7 +337,7 @@ paths:
     post:
       operationId: submitTx
       summary: Admit one signed transaction into the mempool
-      description: Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). It never mines.
+      description: Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
       requestBody:
         required: true
         content:
@@ -319,7 +352,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/submitResponse"
         "400":
-          description: Malformed body, bad ID, missing timestamp or a transaction rejected as malformed (missing/invalid signature or key, owner mismatch, invalid output, missing inputs).
+          description: Malformed body, bad ID, missing timestamp or a transaction rejected as malformed (missing/invalid signature or key, owner mismatch, invalid output, missing inputs), or a malformed contract operation (`invalid_contract_op`) or undeployable code (`invalid_code`).
           content:
             application/json:
               schema:
@@ -337,7 +370,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/errorResponse"
         "422":
-          description: Inputs do not cover the outputs.
+          description: Inputs do not cover the outputs, or the contract operation fails against the confirmed state (`unknown_contract`, `contract_exists`, `out_of_gas`, `reverted`, `stack_overflow`, `stack_underflow`, `bad_jump`, `arg_index`, `invalid_gas`).
           content:
             application/json:
               schema:
@@ -543,6 +576,51 @@ components:
         Timestamp:
           type: string
           format: date-time
+        contract:
+          $ref: "#/components/schemas/contractOp"
+    contractOp:
+      type: object
+      description: >-
+        The optional `contract` of a transaction, accepted by `POST /tx` and covered by
+        its hash and signatures (ADR-0014); mined transactions are served with the Go
+        field names (`Contract`, `Kind`, `GasLimit`). A `deploy` carries `code`
+        (lowercase hex, 1 to 1024 bytes) and no `target`; a `call` carries `target`
+        (the contract ID) and no `code`.
+      required: [kind, gas_limit]
+      properties:
+        kind:
+          type: string
+          enum: [deploy, call]
+        code:
+          type: string
+        target:
+          type: string
+        args:
+          type: array
+          nullable: true
+          items:
+            type: integer
+            format: uint64
+        gas_limit:
+          type: integer
+          format: uint64
+          minimum: 1
+          maximum: 100000
+    contractResponse:
+      type: object
+      required: [id, code, storage]
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+          description: The deployed bytecode, lowercase hex.
+        storage:
+          type: object
+          description: Cells written so far, decimal key to value.
+          additionalProperties:
+            type: integer
+            format: uint64
     txIn:
       type: object
       required: [PrevTxID, OutIndex, PublicKey, Signature]

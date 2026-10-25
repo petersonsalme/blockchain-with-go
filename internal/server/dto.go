@@ -1,6 +1,9 @@
 package server
 
 import (
+	"encoding/hex"
+	"time"
+
 	"github.com/petersonsalme/blockchain-with-go/internal/chain"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 )
@@ -74,4 +77,46 @@ type proofResponse struct {
 	LeafIndex  int         `json:"leaf_index"`
 	LeafHash   string      `json:"leaf_hash"`
 	Proof      []proofStep `json:"proof"`
+}
+
+// contractRequest is the contract object of POST /tx.
+type contractRequest struct {
+	Kind     string   `json:"kind"`
+	Code     string   `json:"code"`
+	Target   string   `json:"target"`
+	Args     []uint64 `json:"args"`
+	GasLimit uint64   `json:"gas_limit"`
+}
+
+// txRequest is the body of POST /tx: a transaction plus the optional lower-case contract object.
+type txRequest struct {
+	ID        string
+	Inputs    []domain.TxIn
+	Outputs   []domain.TxOut
+	Timestamp time.Time
+	Contract  *contractRequest `json:"contract"`
+}
+
+// transaction converts r to the domain transaction it carries.
+func (r txRequest) transaction() domain.Transaction {
+	tx := domain.Transaction{ID: r.ID, Inputs: r.Inputs, Outputs: r.Outputs, Timestamp: r.Timestamp}
+	if c := r.Contract; c != nil {
+		tx.Contract = &domain.ContractOp{Kind: c.Kind, Code: c.Code, Target: c.Target, Args: c.Args, GasLimit: c.GasLimit}
+	}
+	return tx
+}
+
+// contractResponse is the body of GET /contracts/{id}; Storage maps decimal keys to values.
+type contractResponse struct {
+	ID      string            `json:"id"`
+	Code    string            `json:"code"`
+	Storage map[uint64]uint64 `json:"storage"`
+}
+
+// newContractResponse builds the response for the deployed contract id.
+func newContractResponse(id string, code []byte, storage map[uint64]uint64) contractResponse {
+	if storage == nil {
+		storage = map[uint64]uint64{}
+	}
+	return contractResponse{ID: id, Code: hex.EncodeToString(code), Storage: storage}
 }

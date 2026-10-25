@@ -9,6 +9,7 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/internal/mempool"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
+	"github.com/petersonsalme/blockchain-with-go/internal/vm"
 )
 
 // requestTooLargeCode is the error code returned when the request body exceeds the allowed size.
@@ -44,6 +45,12 @@ const txNotFoundCode = "tx_not_found"
 // invalidAddressCode is the error code for an invalid address in GET /balance/{addr}.
 const invalidAddressCode = "invalid_address"
 
+// invalidContractIDCode is the error code for a GET /contracts/{id} that is not a 64-char lowercase hex ID.
+const invalidContractIDCode = "invalid_contract_id"
+
+// contractNotFoundCode is the error code for a contract that is not deployed.
+const contractNotFoundCode = "contract_not_found"
+
 // transactionErrors maps transaction rejections to their HTTP status and code.
 var transactionErrors = []struct {
 	err    error
@@ -60,6 +67,17 @@ var transactionErrors = []struct {
 	{domain.ErrInputMissingOrSpent, http.StatusConflict, domain.CodeInputMissingOrSpent},
 	{domain.ErrDoubleSpend, http.StatusConflict, domain.CodeDoubleSpend},
 	{domain.ErrInsufficientInputs, http.StatusUnprocessableEntity, domain.CodeInsufficientInputs},
+	{domain.ErrInvalidContractOp, http.StatusBadRequest, "invalid_contract_op"},
+	{vm.ErrInvalidCode, http.StatusBadRequest, "invalid_code"},
+	{vm.ErrUnknownContract, http.StatusUnprocessableEntity, "unknown_contract"},
+	{vm.ErrContractExists, http.StatusUnprocessableEntity, "contract_exists"},
+	{vm.ErrOutOfGas, http.StatusUnprocessableEntity, "out_of_gas"},
+	{vm.ErrReverted, http.StatusUnprocessableEntity, "reverted"},
+	{vm.ErrStackOverflow, http.StatusUnprocessableEntity, "stack_overflow"},
+	{vm.ErrStackUnderflow, http.StatusUnprocessableEntity, "stack_underflow"},
+	{vm.ErrBadJump, http.StatusUnprocessableEntity, "bad_jump"},
+	{vm.ErrArgIndex, http.StatusUnprocessableEntity, "arg_index"},
+	{vm.ErrInvalidGas, http.StatusUnprocessableEntity, "invalid_gas"},
 }
 
 // respondWithMineError maps an error from chain mining to its HTTP response.

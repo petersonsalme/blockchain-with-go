@@ -593,21 +593,77 @@ Transactions that are included leave the pool. A transaction that became invalid
 ### POST /legacy/bpm (Removed)
 BPM payloads cannot be signed, so the endpoint answers `410 Gone` (with `Deprecation: true`) and `{"error": "endpoint removed; send signed transactions to POST /", "code": "endpoint_gone"}` for any body.
 
+#### Contracts
+
+`POST /tx` also accepts the optional lower-case `contract` object, a deploy or a call of the stack-machine VM ([ADR-0014](docs/adr/0014-contract-vm.md)). Without it the request and the response are exactly as above.
+
+| Field | Deploy | Call |
+|---|---|---|
+| `kind` | `"deploy"` | `"call"` |
+| `code` | bytecode, lowercase hex, 1 to 1024 bytes | absent |
+| `target` | absent | contract ID, 64 lowercase hex characters |
+| `args` | numbers the code reads with `ARG` (optional) | same |
+| `gas_limit` | `1` to `100000` | same |
+
+The contract is part of the transaction hash and of every input signature (`CalculateHash`), so compute `ID` and sign after filling it in. A deploy's contract ID is the `ID` of its transaction. `POST /tx` runs the operation against the confirmed contract state and refuses what would fail (`400` for a malformed operation, `422` for an execution error); state changes only when `POST /mine` mines the transaction. Counter walkthrough (`vm.CounterCode`, which costs 29 gas per call):
+
+```shell
+# 1. deploy the counter (ID = hash of the signed transaction; inputs and outputs as in the example above)
+$ curl -X POST -H "Content-Type: application/json" -d '{"ID":"<deploy ID>","Inputs":[...],"Outputs":[...],
+    "Timestamp":"2026-10-16T12:05:00Z",
+    "contract":{"kind":"deploy","code":"01000000000000000030010000000000000001100100000000000000003100","gas_limit":100}}' http://localhost:8080/tx
+$ curl -X POST http://localhost:8080/mine
+
+# 2. call it 3 times: each call is a new transaction that spends a new output; mine after each one
+$ curl -X POST -H "Content-Type: application/json" -d '{"ID":"<call ID>","Inputs":[...],"Outputs":[...],
+    "Timestamp":"2026-10-16T12:06:00Z",
+    "contract":{"kind":"call","target":"<deploy ID>","args":[],"gas_limit":29}}' http://localhost:8080/tx
+$ curl -X POST http://localhost:8080/mine
+
+# 3. read the state after the third call
+$ curl http://localhost:8080/contracts/<deploy ID>
+{
+  "id": "<deploy ID>",
+  "code": "01000000000000000030010000000000000001100100000000000000003100",
+  "storage": {
+    "0": 3
+  }
+}
+
+# 4. a call with "gas_limit": 28 is rejected: the counter needs 29
+$ curl -X POST -H "Content-Type: application/json" -d '{... "contract":{"kind":"call","target":"<deploy ID>","args":[],"gas_limit":28}}' http://localhost:8080/tx
+{"error": "vm: out of gas", "code": "out_of_gas"}   # 422
+```
+
+Contract error codes: `400` `invalid_contract_op`, `invalid_code`; `422` `unknown_contract`, `contract_exists`, `out_of_gas`, `reverted`, `stack_overflow`, `stack_underflow`, `bad_jump`, `arg_index`, `invalid_gas`. A transaction that is already mined shows its operation in `GET /tx/{id}` and in blocks under the Go field names (`Contract`, `Kind`, `GasLimit`).
+
+### GET /contracts/{id}
+
+Returns the confirmed state of a deployed contract:
+
+```json
+{"id": "<deploy ID>", "code": "<bytecode, lowercase hex>", "storage": {"0": 3}}
+```
+
+`storage` maps the decimal key of every cell written so far to its value (`{}` for a contract nobody has called). `id` must be 64 lowercase hex characters, otherwise `400` with `"code": "invalid_contract_id"`; an ID that is not deployed returns `404` with `"code": "contract_not_found"`. A deploy or call still in the mempool is not visible until it is mined.
+
 ### HTTP Status Codes & Error Responses
 
 | Status Code | Description | Example Response Body |
 |---|---|---|
 | `200 OK` | Blockchain retrieved successfully via `GET /` | JSON array of blocks |
-| `200 OK` | `GET /blocks`, `GET /block/{ref}`, `GET /tx/{id}`, `GET /balance/{addr}`, `GET /health` | page, block, transaction, balance or health object (see above) |
-| `400 Bad Request` | Malformed query on `/blocks`, malformed `ref` on `/block/{ref}`, malformed `id` on `/tx/{id}` or `/tx/{id}/proof`, or invalid address on `/balance/{addr}` | `{"error": "...", "code": "invalid_query" \| "invalid_block_ref" \| "invalid_tx_id" \| "invalid_address"}` |
-| `404 Not Found` | `GET /block/{ref}` or `GET /tx/{id}` or `GET /tx/{id}/proof` outside the chain | `{"error": "...", "code": "block_not_found" \| "tx_not_found"}` |
+| `200 OK` | `GET /blocks`, `GET /block/{ref}`, `GET /tx/{id}`, `GET /balance/{addr}`, `GET /contracts/{id}`, `GET /health` | page, block, transaction, balance or health object (see above) |
+| `400 Bad Request` | Malformed query on `/blocks`, malformed `ref` on `/block/{ref}`, malformed `id` on `/tx/{id}` or `/tx/{id}/proof`, invalid address on `/balance/{addr}`, or malformed `id` on `/contracts/{id}` | `{"error": "...", "code": "invalid_query" \| "invalid_block_ref" \| "invalid_tx_id" \| "invalid_address" \| "invalid_contract_id"}` |
+| `404 Not Found` | `GET /block/{ref}` or `GET /tx/{id}` or `GET /tx/{id}/proof` outside the chain, or `GET /contracts/{id}` for a contract that is not deployed | `{"error": "...", "code": "block_not_found" \| "tx_not_found" \| "contract_not_found"}` |
 | `503 Service Unavailable` | `GET /health` cannot read the chain tip | `{"error": "...", "code": "unhealthy"}` |
 | `201 Created` | Block mined and appended to the blockchain via `POST /` or `POST /mine` | JSON object of the new block |
 | `202 Accepted` | Transaction admitted to the mempool via `POST /tx` | `{"id": "..."}` |
 | `400 Bad Request` | Malformed JSON body or invalid transaction payload (e.g. empty list) | `{"error": "invalid request body"}` |
 | `400 Bad Request` | Transaction rejected before mining | `{"error": "...", "code": "missing_signature" \| "invalid_signature" \| "invalid_public_key" \| "input_owner_mismatch" \| "invalid_output" \| "missing_inputs" \| "coinbase_too_large" \| "missing_timestamp"}` |
 | `409 Conflict` | Input already spent or unknown, or the same output spent twice; on `POST /tx`, also a transaction already in the pool, one that conflicts with a pool transaction, or a full pool it cannot displace | `{"error": "...", "code": "input_missing_or_spent" \| "double_spend" \| "duplicate_tx" \| "mempool_conflict" \| "mempool_full"}` |
+| `400 Bad Request` | `POST /tx` with a malformed contract operation or undeployable code | `{"error": "...", "code": "invalid_contract_op" \| "invalid_code"}` |
 | `422 Unprocessable Entity` | Outputs exceed inputs | `{"error": "...", "code": "insufficient_inputs"}` |
+| `422 Unprocessable Entity` | `POST /tx` with a contract operation that fails against the confirmed state | `{"error": "...", "code": "unknown_contract" \| "contract_exists" \| "out_of_gas" \| "reverted" \| "stack_overflow" \| "stack_underflow" \| "bad_jump" \| "arg_index" \| "invalid_gas"}` |
 | `410 Gone` | `POST /legacy/bpm` (removed) | `{"error": "...", "code": "endpoint_gone"}` |
 | `405 Method Not Allowed` | HTTP method not allowed on endpoint (e.g. `PUT`, `DELETE`) | empty body (router-level response) |
 | `408 Request Timeout` | Client disconnected or cancelled request during mining | `{"error": "mining cancelled"}` |
