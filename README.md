@@ -345,6 +345,18 @@ Outputs are sorted by `(TxID, Index)`. If `wallet.ValidateAddress` fails, return
 
 None of these reads waits for a `POST /` that is mining.
 
+### GET /events
+
+Server-sent events (`Content-Type: text/event-stream`), no polling. The node sends `event: block` after each block it mines (`POST /` or `POST /mine`) and `event: tx` after each transaction admitted by `POST /tx`; `data:` is the same compact one-line JSON as the `201`/`202` body of that request. The block is already readable at `GET /block/{hash}` when its event arrives.
+
+```
+curl -N localhost:8080/events
+event: block
+data: {"index":1,"hash":"...",...}
+```
+
+A client that stays more than 16 events behind is disconnected (reconnect to resume; missed events are not replayed). The stream ends when the node shuts down. Other methods answer `405` with `Allow: GET, HEAD`; the rate limiter applies as on every other route. Events of blocks that arrive by other means than the local mining endpoints are out of scope.
+
 ### GET /metrics
 
 Prometheus text exposition (format 0.0.4, `Content-Type: text/plain; version=0.0.4; charset=utf-8`), written by hand without a client library ([ADR-0010](docs/adr/0010-prometheus-metrics.md)). Other methods answer `405` with `Allow: GET, HEAD`; the rate limiter applies as on every other route.
