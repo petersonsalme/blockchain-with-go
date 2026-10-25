@@ -1253,6 +1253,42 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 				checkAgainst(repo, w, addrs, p)
 			})
 
+			It("hands out copies of the snapshot and fork state sets", func() {
+				repo := newRepo(p)
+				w := prunedWorld(addrs, 14, "m", 10)
+				commit(repo, w, 0, 14)
+				snap, err := repo.Snapshot()
+				Expect(err).NotTo(HaveOccurred())
+				for op := range snap.UTXOs {
+					delete(snap.UTXOs, op)
+					break
+				}
+				snap.UTXOs[domain.OutPoint{TxID: "forged", Index: 7}] = domain.TxOut{Amount: 1}
+				again, err := repo.Snapshot()
+				Expect(err).NotTo(HaveOccurred())
+				set, err := domain.BuildUTXOSet(w.blocks[:again.Height+1])
+				Expect(err).NotTo(HaveOccurred())
+				Expect(again.UTXOs).To(Equal(set))
+				Expect(again.Hash).To(Equal(storage.SnapshotHash(again.BlockHash, again.UTXOs)))
+
+				pb, err := repo.PrunedBelow()
+				Expect(err).NotTo(HaveOccurred())
+				fs, err := repo.ForkState(max(pb, 10))
+				Expect(err).NotTo(HaveOccurred())
+				for op := range fs {
+					delete(fs, op)
+					break
+				}
+				fs[domain.OutPoint{TxID: "forged", Index: 8}] = domain.TxOut{Amount: 1}
+				fs2, err := repo.ForkState(max(pb, 10))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(fs2).NotTo(HaveKey(domain.OutPoint{TxID: "forged", Index: 8}))
+				Expect(repo.Reindex()).To(Succeed())
+				checked, err := repo.Snapshot()
+				Expect(err).NotTo(HaveOccurred())
+				Expect(checked.UTXOs).To(Equal(set))
+			})
+
 			It("keeps the address index and fork states right across Commit and Reorg", func() {
 				repo := newRepo(p)
 				w := prunedWorld(addrs, 12, "m", 10)
