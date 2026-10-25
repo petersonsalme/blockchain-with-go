@@ -141,6 +141,9 @@ The application can be configured via environment variables (e.g., in a `.env` f
 | `DATA_DIR` | Directory for persistent disk storage (stores `chain.db`). When empty, the in-memory repository is used | empty (in-memory storage) |
 | `MAX_BLOCK_BYTES` | Maximum JSON-serialized block size in bytes (positive integer; invalid values fall back to the default) | `1048576` |
 | `RATE_LIMIT` | Maximum requests per minute per IP (positive integer; empty, invalid, or non-positive disables rate limiting) | disabled (`0`) |
+| `NODE_URL` | Base URL of the node used by `bwg wallet` and `bwg miner` (`--node` overrides it) | `http://localhost:8080` |
+| `WALLET_KEYSTORE` | Keystore path used by `bwg wallet new` and `bwg wallet send` (`--keystore` overrides it) | `wallet.key` |
+| `WALLET_PASSWORD` | Password of the wallet keystore; required by `bwg wallet new` and `bwg wallet send`. There is no flag for it, so it stays out of the shell history | empty |
 
 ## Project Structure
 
@@ -218,6 +221,20 @@ reindexed: tip height 42
 ```
 
 `-reindex` opens `$DATA_DIR/chain.db`, drops and rebuilds the indexes from the blocks in one transaction, prints the tip height (`reindexed: empty chain` when there are no blocks) and exits with code 0 without opening an HTTP port. Running it twice leaves the file in the same state as running it once. It exits with a non-zero code and an error on stderr when `DATA_DIR` is empty (the in-memory repository has nothing to rebuild), when `DATA_DIR` does not exist, or when another process holds `chain.db` (the lock wait is 1 second). `DATA_DIR` is also read from `.env` when present.
+
+### CLI (bwg)
+
+`cmd/bwg` is a command-line client for a running node. Every command prints one line on stdout (the value only, so it can be used in scripts); errors go to stderr with exit code 1.
+
+```shell
+$ export WALLET_PASSWORD='choose-a-password'
+$ go run ./cmd/bwg wallet new --keystore alice.key        # prints the new address; refuses an existing file
+$ go run ./cmd/bwg wallet balance <address>                # prints the confirmed balance
+$ go run ./cmd/bwg wallet send --keystore alice.key --to <address> --amount 30 --fee 1   # prints the transaction ID
+$ go run ./cmd/bwg miner --count 1                         # calls POST /mine; prints "block <index> <hash> txs=<n>"
+```
+
+`wallet send` spends the confirmed outputs of the keystore address in the order the node lists them, until they cover `amount + fee`, sends any change back to the same address, signs every input and submits the transaction to `POST /tx` (it is then in the mempool; `miner` or `POST /mine` confirms it). `miner` retries when the chain changed during mining (`409`) and, with `--count 0` (the default), mines until interrupted (`Ctrl+C`). `--node` (or `NODE_URL`) selects the node; the default matches the node's default `PORT`.
 
 ### Logs and shutdown
 
