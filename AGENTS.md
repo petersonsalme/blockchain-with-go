@@ -24,9 +24,10 @@ blockchain-with-go/
 │   ├── domain/        # Domain models (Block, Transaction, rules) — no internal dependencies
 │   ├── mempool/       # mempool.Pool: admitted transactions, fee-rate selection (ADR-0012); depends only on domain
 │   ├── server/        # HTTP adapter: server.Server (DI), handlers, DTOs and error mapping
-│   └── storage/       # BlockRepository port
-│       ├── bolt/      # bbolt disk adapter
-│       └── memory/    # In-memory adapter (sync.RWMutex)
+│   ├── storage/       # BlockRepository port
+│   │   ├── bolt/      # bbolt disk adapter
+│   │   └── memory/    # In-memory adapter (sync.RWMutex)
+│   └── vm/            # Contract VM: pure stack-machine interpreter with gas (ADR-0014); depends only on domain
 ├── pkg/
 │   └── wallet/        # Ed25519 keys, addressing and keystore
 ├── openapi.yaml       # HTTP API contract (OpenAPI 3.0.3); internal/server/contract_test.go checks the server against it
@@ -48,6 +49,7 @@ A story is **Risk: core** when it changes any of the areas below. Core stories n
 - **Consensus:** `internal/consensus/` and `internal/consensus/pow/` (`Seal`/`Verify`, difficulty, error sentinels).
 - **Chain write path and concurrency:** `internal/chain/service.go` (`Mine`, append, any lock or semaphore, future reorg and sync) and `internal/mempool/` (pool lock, admission and eviction order).
 - **Storage guarantees:** `internal/storage/` contracts and adapters (`memory`, `bolt`), including atomicity of `Append`/`Apply`/`Revert` and the `storagetest` contract.
+- **Contract VM:** `internal/vm/` (opcodes, gas costs, error sentinels, `Execute`/`ValidateCode`; from ADR-0014 on these are consensus rules) and the limits in `internal/domain/contract.go`.
 - **Keys and signatures:** `pkg/wallet/` (Ed25519, addressing, keystore).
 - **Schema:** any change to the persisted or hashed shape of `Block`, `Transaction` or UTXO, and any ADR-level change.
 
