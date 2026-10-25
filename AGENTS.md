@@ -23,6 +23,7 @@ blockchain-with-go/
 │   │   └── pow/       # Proof of Work adapter
 │   ├── domain/        # Domain models (Block, Transaction, rules) — no internal dependencies
 │   ├── mempool/       # mempool.Pool: admitted transactions, fee-rate selection (ADR-0012); depends only on domain
+│   ├── p2p/           # Hello, handshake checks, peer book and persisted peer addresses (ADR-0013); depends only on domain
 │   ├── server/        # HTTP adapter: server.Server (DI), handlers, DTOs and error mapping
 │   ├── storage/       # BlockRepository port
 │   │   ├── bolt/      # bbolt disk adapter
@@ -50,6 +51,7 @@ A story is **Risk: core** when it changes any of the areas below. Core stories n
 - **Chain write path and concurrency:** `internal/chain/service.go` (`Mine`, append, any lock or semaphore, future reorg and sync) and `internal/mempool/` (pool lock, admission and eviction order).
 - **Storage guarantees:** `internal/storage/` contracts and adapters (`memory`, `bolt`), including atomicity of `Append`/`Apply`/`Revert` and the `storagetest` contract.
 - **Contract VM:** `internal/vm/` (opcodes, gas costs, error sentinels, `Execute`/`ValidateCode`; from ADR-0014 on these are consensus rules) and the limits in `internal/domain/contract.go`.
+- **Peer-to-peer:** `internal/p2p/` (handshake checks, peer book lock and limits, dialer loop; ADR-0013).
 - **Keys and signatures:** `pkg/wallet/` (Ed25519, addressing, keystore).
 - **Schema:** any change to the persisted or hashed shape of `Block`, `Transaction` or UTXO, and any ADR-level change.
 
