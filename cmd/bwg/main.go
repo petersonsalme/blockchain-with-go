@@ -36,6 +36,7 @@ func execute(ctx context.Context, logger *slog.Logger, args []string, stdout io.
 	root := newRootCmdWith(logger)
 	root.SetArgs(args)
 	root.SetOut(stdout)
+	root.SetErr(stdout)
 	return root.ExecuteContext(ctx)
 }
 
