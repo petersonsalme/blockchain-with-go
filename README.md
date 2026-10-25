@@ -409,6 +409,38 @@ data: {"index":1,"hash":"...",...}
 
 A client that stays more than 16 events behind is disconnected (reconnect to resume; missed events are not replayed). The stream ends when the node shuts down. Other methods answer `405` with `Allow: GET, HEAD`; the rate limiter applies as on every other route. Events of blocks that arrive by other means than the local mining endpoints are out of scope.
 
+### POST /p2p/hello and GET /p2p/peers
+
+Peer-to-peer over HTTP ([ADR-0013](docs/adr/0013-p2p-over-http.md)). A node whose `Config.P2P` is unset answers `404` with `code: "p2p_disabled"` on both routes.
+
+`POST /p2p/hello` is the handshake. The body is the caller's hello and must hold exactly these fields (an unknown field is rejected); the answer is the local hello with the same fields.
+
+```
+curl -X POST localhost:8080/p2p/hello -d '{"version":1,"node_id":"<32 hex>","genesis_hash":"<64 hex>","height":7,"tip_hash":"<64 hex>","listen_addr":"http://10.0.0.2:8080"}'
+```
+
+| Status | `code` | Cause |
+|---|---|---|
+| `200` | | Accepted: the caller is now an inbound peer. |
+| `400` | `invalid_hello` | Invalid JSON, unknown field or malformed hello. |
+| `404` | `p2p_disabled` | The node has no peer-to-peer layer. |
+| `409` | `incompatible_version` | Different protocol version. |
+| `409` | `genesis_mismatch` | Different genesis block. |
+| `409` | `self_connection` | The caller is this node. |
+| `413` | `request_too_large` | Body over the limit, as on the other POST routes. |
+| `503` | `peer_limit` | The inbound peer limit is reached. |
+
+A refused hello leaves the peer list unchanged.
+
+`GET /p2p/peers` answers `200` with the connected peers and the known addresses; empty lists are `[]`, and `last_seen` is RFC 3339 UTC.
+
+```json
+{"peers": [{"node_id": "<32 hex>", "addr": "http://10.0.0.2:8080", "height": 7, "tip_hash": "<64 hex>", "inbound": true, "last_seen": "2026-10-25T12:00:00Z"}],
+ "addrs": ["http://10.0.0.2:8080"]}
+```
+
+Other methods answer `405` with `Allow: POST` and `Allow: GET, HEAD`; the rate limiter, the body limit, the log and the metrics apply as on every other route.
+
 ### GET /metrics
 
 Prometheus text exposition (format 0.0.4, `Content-Type: text/plain; version=0.0.4; charset=utf-8`), written by hand without a client library ([ADR-0010](docs/adr/0010-prometheus-metrics.md)). Other methods answer `405` with `Allow: GET, HEAD`; the rate limiter applies as on every other route.

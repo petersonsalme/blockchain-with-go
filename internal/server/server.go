@@ -13,6 +13,7 @@ import (
 
 	"github.com/petersonsalme/blockchain-with-go/internal/chain"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
+	"github.com/petersonsalme/blockchain-with-go/internal/p2p"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
 )
@@ -46,6 +47,13 @@ type Chain interface {
 	MinePending(ctx context.Context) (*domain.Block, error)
 }
 
+// Peers is the peer-to-peer port behind POST /p2p/hello and GET /p2p/peers (ADR-0013); *p2p.Node satisfies it.
+type Peers interface {
+	Accept(p2p.Hello) (p2p.Hello, error)
+	Peers() []p2p.PeerInfo
+	Addrs() []string
+}
+
 // Config holds the Server settings.
 type Config struct {
 	// MiningTimeout bounds one mining request; non-positive means DefaultMiningTimeout.
@@ -56,6 +64,8 @@ type Config struct {
 	Logger *slog.Logger
 	// Now returns the current time; nil means time.Now.
 	Now func() time.Time
+	// P2P serves the /p2p routes; nil makes them answer 404 p2p_disabled.
+	P2P Peers
 }
 
 // Server is the HTTP adapter over a Chain.
@@ -67,6 +77,7 @@ type Server struct {
 	now           func() time.Time
 	metrics       *metrics
 	events        *hub
+	p2p           Peers
 }
 
 // ErrNilService is returned by NewServer when svc is nil.
@@ -93,7 +104,7 @@ func NewServer(svc Chain, cfg Config) (*Server, error) {
 	if now == nil {
 		now = time.Now
 	}
-	return &Server{chain: svc, miningTimeout: timeout, limiter: limiter, logger: logger, now: now, metrics: newMetrics(), events: newHub()}, nil
+	return &Server{chain: svc, miningTimeout: timeout, limiter: limiter, logger: logger, now: now, metrics: newMetrics(), events: newHub(), p2p: cfg.P2P}, nil
 }
 
 // ParseMiningTimeout reads a MINING_TIMEOUT value: a Go duration or integer seconds.
@@ -137,6 +148,8 @@ func (s *Server) routes() []route {
 		{"GET /health", s.handleHealth},
 		{"GET /metrics", s.handleMetrics},
 		{"GET /events", s.handleEvents},
+		{"POST /p2p/hello", s.handleP2PHello},
+		{"GET /p2p/peers", s.handleP2PPeers},
 		{"POST /legacy/bpm", s.handleLegacyBPM},
 	}
 }
@@ -162,6 +175,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/health", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/metrics", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/events", methodNotAllowed("GET, HEAD"))
+	mux.Handle("/p2p/hello", methodNotAllowed("POST"))
+	mux.Handle("/p2p/peers", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/legacy/bpm", methodNotAllowed("POST"))
 	var h http.Handler = mux
 	if s.limiter != nil {
@@ -483,18 +498,26 @@ func (s *Server) handleSubmitTx(w http.ResponseWriter, r *http.Request) {
 func decodeJSONBody(w http.ResponseWriter, r *http.Request, v any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes())
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			respondWithJSON(w, http.StatusRequestEntityTooLarge, errorResponse{
-				Error:   "request body exceeds the maximum size",
-				Code:    requestTooLargeCode,
-				Details: map[string]any{"max": tooLarge.Limit},
-			})
+		if respondIfTooLarge(w, err) {
 			return false
 		}
 		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid request body"})
 		return false
 	}
+	return true
+}
+
+// respondIfTooLarge answers 413 and reports true when err is the body size limit being hit.
+func respondIfTooLarge(w http.ResponseWriter, err error) bool {
+	var tooLarge *http.MaxBytesError
+	if !errors.As(err, &tooLarge) {
+		return false
+	}
+	respondWithJSON(w, http.StatusRequestEntityTooLarge, errorResponse{
+		Error:   "request body exceeds the maximum size",
+		Code:    requestTooLargeCode,
+		Details: map[string]any{"max": tooLarge.Limit},
+	})
 	return true
 }
 

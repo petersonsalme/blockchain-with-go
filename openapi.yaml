@@ -399,6 +399,77 @@ paths:
                 $ref: "#/components/schemas/mempoolResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
+  /p2p/hello:
+    post:
+      operationId: p2pHello
+      summary: Peer handshake
+      description: A peer sends its hello; the node checks it (ADR-0013), registers the sender as an inbound peer and answers its own hello. The body must hold exactly the hello fields; an unknown field is rejected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/hello"
+      responses:
+        "200":
+          description: Handshake accepted; the body is the local hello.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/hello"
+        "400":
+          description: Invalid JSON, unknown field or malformed hello (`invalid_hello`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "404":
+          description: The node has no peer-to-peer layer (`p2p_disabled`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "409":
+          description: Incompatible protocol version (`incompatible_version`), different genesis (`genesis_mismatch`) or the caller is this node (`self_connection`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "413":
+          description: Request body exceeds the maximum size (`request_too_large`; `details.max` is the limit).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          description: The inbound peer limit is reached (`peer_limit`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+  /p2p/peers:
+    get:
+      operationId: getP2PPeers
+      summary: List the connected peers and the known addresses
+      responses:
+        "200":
+          description: Connected peers and known peer addresses, in the order the peer book returns them.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/peersResponse"
+        "404":
+          description: The node has no peer-to-peer layer (`p2p_disabled`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 components:
   responses:
     BadRequest:
@@ -631,3 +702,53 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/transaction"
+    hello:
+      type: object
+      required: [version, node_id, genesis_hash, height, tip_hash, listen_addr]
+      properties:
+        version:
+          type: integer
+        node_id:
+          type: string
+          description: 32 lowercase hex characters.
+        genesis_hash:
+          type: string
+          description: 64 lowercase hex characters.
+        height:
+          type: integer
+          minimum: 0
+        tip_hash:
+          type: string
+          description: 64 lowercase hex characters.
+        listen_addr:
+          type: string
+          description: Base URL where the sender accepts peers, or empty.
+    peer:
+      type: object
+      required: [node_id, addr, height, tip_hash, inbound, last_seen]
+      properties:
+        node_id:
+          type: string
+        addr:
+          type: string
+        height:
+          type: integer
+        tip_hash:
+          type: string
+        inbound:
+          type: boolean
+        last_seen:
+          type: string
+          format: date-time
+    peersResponse:
+      type: object
+      required: [peers, addrs]
+      properties:
+        peers:
+          type: array
+          items:
+            $ref: "#/components/schemas/peer"
+        addrs:
+          type: array
+          items:
+            type: string
