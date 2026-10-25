@@ -138,9 +138,7 @@ func (r *Repository) ReplaceFrom(height int, blocks []*domain.Block) error {
 	r.splice(height, blocks)
 	// The indexes still describe the removed tail; mark them stale even when the chain length is unchanged.
 	r.idx.hasTip = false
-	if r.idx.snap != nil && r.idx.snap.Height >= height {
-		r.idx.snap = nil
-	}
+	r.idx.dropSnapshotFrom(height)
 	return nil
 }
 

@@ -146,6 +146,13 @@ func (ix *index) dropTxs(b *domain.Block, d domain.UTXODelta) {
 	}
 }
 
+// dropSnapshotFrom discards the snapshot when its height is >= height: it describes a dropped branch.
+func (ix *index) dropSnapshotFrom(height int) {
+	if ix.snap != nil && ix.snap.Height >= height {
+		ix.snap = nil
+	}
+}
+
 // applyDelta moves utxos and addrutxo together, like domain.UTXOSet.Apply.
 func (ix *index) applyDelta(d domain.UTXODelta) {
 	for op, o := range d.Spent {
@@ -253,8 +260,8 @@ func (r *Repository) Commit(b *domain.Block, d domain.UTXODelta) error {
 
 // rehash points byHash at the headers that replaced the bodies in [from, to).
 func (r *Repository) rehash(chain []*domain.Block, from, to int) {
-	for h := from; h < to; h++ {
-		r.byHash[chain[h].Hash] = chain[h]
+	for _, b := range chain[from:to] {
+		r.byHash[b.Hash] = b
 	}
 }
 
@@ -288,9 +295,7 @@ func (r *Repository) Reorg(height int, blocks []*domain.Block, deltas []domain.U
 			return err
 		}
 	}
-	if ix.snap != nil && ix.snap.Height >= height {
-		ix.snap = nil
-	}
+	ix.dropSnapshotFrom(height)
 	// The cap limit forces append to copy; the pruning below edits only this copy.
 	chain := append(r.blocks[:height:height], blocks...)
 	for i, b := range blocks {
@@ -360,9 +365,6 @@ func (r *Repository) Reindex() error {
 			return err
 		}
 	}
-	if n := len(r.blocks); n > 0 {
-		ix.tip, ix.hasTip = n-1, true
-	}
 	r.idx = ix
 	return nil
 }
@@ -416,8 +418,8 @@ func (r *Repository) ForkState(height int) (domain.UTXOSet, error) {
 		return nil, storage.ErrIndexStale
 	}
 	set := domain.UTXOSet(cloneOuts(r.idx.utxos))
-	for h := len(r.blocks) - 1; h >= height; h-- {
-		set.Revert(r.idx.undo[h])
+	for h := len(r.blocks); h > height; h-- {
+		set.Revert(r.idx.undo[h-1])
 	}
 	return set, nil
 }

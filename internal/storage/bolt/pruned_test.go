@@ -135,4 +135,33 @@ var _ = Describe("Bolt pruned database", func() {
 		Expect(repo.Close()).To(Succeed())
 		Expect(dumpBuckets(dbPath, allBucketNames...)).To(Equal(before))
 	})
+
+	It("refuses a pruned database with KeepBlocks 0 even when it predates addrutxo", func() {
+		populate(pruning, 14)
+		raw, err := bbolt.Open(dbPath, 0o600, nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(raw.Update(func(tx *bbolt.Tx) error { return tx.DeleteBucket([]byte("addrutxo")) })).To(Succeed())
+		Expect(raw.Close()).To(Succeed())
+
+		_, err = bolt.Open(dbPath)
+		Expect(err).To(MatchError(storage.ErrInvalidPruning))
+	})
+
+	It("removes every trace of a discarded snapshot", func() {
+		p := storage.Pruning{SnapshotInterval: 3}
+		blocks, deltas := storagetest.PrunedChain(8)
+		repo, err := bolt.OpenPruned(dbPath, p)
+		Expect(err).NotTo(HaveOccurred())
+		for i, b := range blocks {
+			Expect(repo.Commit(b, deltas[i])).To(Succeed())
+		}
+		Expect(repo.ReplaceFrom(6, blocks[6:7])).To(Succeed())
+		Expect(repo.Close()).To(Succeed())
+
+		dump := dumpBuckets(dbPath, "snapshot", "meta")
+		Expect(dump["snapshot"]).To(BeEmpty())
+		for _, kv := range dump["meta"] {
+			Expect(kv[0]).NotTo(HavePrefix("snapshot"))
+		}
+	})
 })

@@ -1219,7 +1219,7 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 		return alt
 	}
 
-	for _, p := range []storage.Pruning{{SnapshotInterval: 1}, {SnapshotInterval: 3}, {SnapshotInterval: 3, KeepBlocks: 2}, {SnapshotInterval: 5, KeepBlocks: 4}} {
+	for _, p := range []storage.Pruning{{SnapshotInterval: 1}, {SnapshotInterval: 3}, {SnapshotInterval: 3, KeepBlocks: 2}, {SnapshotInterval: 5, KeepBlocks: 4}, {SnapshotInterval: 1, KeepBlocks: 1}} {
 		Describe(fmt.Sprintf("with N=%d K=%d", p.SnapshotInterval, p.KeepBlocks), func() {
 			It("stores the snapshot the rule gives after every Commit", func() {
 				repo := newRepo(p)
@@ -1349,6 +1349,17 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 			checkAgainst(repo, w, addrs, p)
 		})
 
+		It("accepts a ReplaceFrom at prunedBelow and Reindex repairs the indexes", func() {
+			repo := newRepo(p)
+			w := prunedWorld(addrs, 12, "m", 10)
+			commit(repo, w, 0, 12)
+			alt := w.forkAt(10)
+			alt.extend(addrs, 2, "a", 200)
+			Expect(repo.ReplaceFrom(10, alt.blocks[10:])).To(Succeed())
+			Expect(repo.Reindex()).To(Succeed())
+			checkAgainst(repo, alt, addrs, p)
+		})
+
 		It("leaves everything as it was when a Reorg fails after it pruned", func() {
 			p := storage.Pruning{SnapshotInterval: 2, KeepBlocks: 1}
 			repo := newRepo(p)
@@ -1395,6 +1406,24 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 			_, err = repo.Snapshot()
 			Expect(err).To(MatchError(storage.ErrNotFound))
 			checkAgainst(repo, w, addrs, p)
+		})
+
+		It("drops the snapshot when a ReplaceFrom removes its block", func() {
+			repo := newRepo(p)
+			w := prunedWorld(addrs, 8, "m", 10)
+			commit(repo, w, 0, 8)
+			alt := w.forkAt(7)
+			alt.extend(addrs, 1, "a", 200)
+			Expect(repo.ReplaceFrom(7, alt.blocks[7:])).To(Succeed())
+			snap, err := repo.Snapshot()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(snap.Height).To(Equal(6))
+
+			alt = w.forkAt(6)
+			alt.extend(addrs, 2, "b", 300)
+			Expect(repo.ReplaceFrom(6, alt.blocks[6:])).To(Succeed())
+			_, err = repo.Snapshot()
+			Expect(err).To(MatchError(storage.ErrNotFound))
 		})
 
 		It("keeps the snapshot when a Reorg that would drop it is rejected", func() {
