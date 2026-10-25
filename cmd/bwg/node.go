@@ -291,7 +291,13 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		return err
 	}
 
+	peers, err := newP2PNode(svc, os.Getenv(dataDirEnvVar), logger)
+	if err != nil {
+		return err
+	}
+
 	srv, err := server.NewServer(svc, server.Config{
+		P2P:           peers,
 		MiningTimeout: server.ParseMiningTimeout(os.Getenv(server.MiningTimeoutEnvVar)),
 		RateLimit:     server.ParseRateLimit(os.Getenv(server.RateLimitEnvVar)),
 		Logger:        logger,
@@ -299,6 +305,9 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+
+	stopDialer := startDialer(ctx, peers)
+	defer stopDialer()
 
 	addr := ":" + os.Getenv("PORT")
 	httpSrv := srv.HTTPServer(ctx, addr)

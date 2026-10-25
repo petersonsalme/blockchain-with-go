@@ -388,11 +388,11 @@ var _ = Describe("Service persisted indexes", func() {
 					Expect(ids(again)).To(Equal(ids(owner)))
 				})
 
-				It("survives a restart without scanning the chain", func() {
+				It("survives a restart reading the chain only for the contract replay", func() {
 					reopened := &indexSpy{IndexedRepository: repo}
 					again, err := NewService(reopened, eng)
 					Expect(err).NotTo(HaveOccurred())
-					Expect(reopened.all.Load()).To(BeZero())
+					Expect(reopened.all.Load()).To(Equal(int32(1)), "only the contract replay reads the chain")
 					got, err := again.TransactionsByAddress(f.owner.Address())
 					Expect(err).NotTo(HaveOccurred())
 					Expect(ids(got)).To(Equal([]string{genesisTx.ID, tx0.ID, shared.ID, onlyA.ID}))

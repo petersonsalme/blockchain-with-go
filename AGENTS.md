@@ -23,7 +23,7 @@ blockchain-with-go/
 │   │   └── pow/       # Proof of Work adapter
 │   ├── domain/        # Domain models (Block, Transaction, rules) — no internal dependencies
 │   ├── mempool/       # mempool.Pool: admitted transactions, fee-rate selection (ADR-0012); depends only on domain
-│   ├── p2p/           # Hello, handshake checks, peer book and persisted peer addresses (ADR-0013); depends only on domain
+│   ├── p2p/           # Hello, handshake checks, peer book, persisted peer addresses and the dialer loop (ADR-0013); depends only on domain
 │   ├── server/        # HTTP adapter: server.Server (DI), handlers, DTOs and error mapping
 │   ├── storage/       # BlockRepository port
 │   │   ├── bolt/      # bbolt disk adapter
@@ -40,7 +40,7 @@ blockchain-with-go/
 
 - Dependencies point inward: `cmd/bwg` → `server`/`chain`/adapters → `domain`. `internal/domain` never imports `storage`, `chain`, `server`, `net/http` or `os/signal`; `internal/chain` does not import `server` or `net/http`.
 - No global state: `internal/server` and `internal/chain` only have `const` and `errors.New` sentinels at package level. Dependencies (repository, consensus, block generator) are injected through constructors (`chain.NewService(repo, consensus, opts...)`, `server.NewServer(svc, cfg)`).
-- Composition root in `cmd/bwg` (the only binary; `bwg node` runs the node); it is the only place that triggers configuration reading (`PORT`, `MINING_TIMEOUT` and `DATA_DIR` directly; `CONSENSUS` (`pow`|`poa`) picks the engine, `POW_DIFFICULTY`, `POW_RETARGET_INTERVAL`, `TARGET_BLOCK_TIME` and `MINING_WORKERS` are read via `pow.NewProofOfWorkFromEnv`, `POA_VALIDATORS`/`POA_KEYSTORE`/`POA_KEYSTORE_PASSWORD` are parsed in `cmd/bwg`; `GENESIS_ALLOCATIONS`, genesis outputs as `address:amount[,...]`, parsed in `cmd/bwg` and ignored when the repository is not empty; `MINER_ADDRESS`, the address that receives the coinbase of every mined block, validated by `wallet.ValidateAddress` at startup and blank for no coinbase); the one exception is `MAX_BLOCK_BYTES`, read on demand by `domain.MaxBlockBytes()` in `internal/domain/rules.go` (falls back to `DefaultMaxBlockBytes`, 1 MiB, when unset or not a positive integer).
+- Composition root in `cmd/bwg` (the only binary; `bwg node` runs the node); it is the only place that triggers configuration reading (`PORT`, `MINING_TIMEOUT` and `DATA_DIR` directly; `CONSENSUS` (`pow`|`poa`) picks the engine, `POW_DIFFICULTY`, `POW_RETARGET_INTERVAL`, `TARGET_BLOCK_TIME` and `MINING_WORKERS` are read via `pow.NewProofOfWorkFromEnv`, `POA_VALIDATORS`/`POA_KEYSTORE`/`POA_KEYSTORE_PASSWORD` are parsed in `cmd/bwg`; `GENESIS_ALLOCATIONS`, genesis outputs as `address:amount[,...]`, parsed in `cmd/bwg` and ignored when the repository is not empty; `MINER_ADDRESS`, the address that receives the coinbase of every mined block, validated by `wallet.ValidateAddress` at startup and blank for no coinbase); the peer-to-peer variables `SEED_PEERS`, `P2P_LISTEN_ADDR`, `MAX_INBOUND_PEERS`, `MAX_OUTBOUND_PEERS` and `PEER_INTERVAL` are parsed in `cmd/bwg/p2p.go` (`DATA_DIR/peers.json` holds the known peer addresses); the one exception is `MAX_BLOCK_BYTES`, read on demand by `domain.MaxBlockBytes()` in `internal/domain/rules.go` (falls back to `DefaultMaxBlockBytes`, 1 MiB, when unset or not a positive integer).
 
 ## Core Areas (Risk: core)
 

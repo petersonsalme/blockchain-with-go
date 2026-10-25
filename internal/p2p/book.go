@@ -172,3 +172,6 @@ func (b *Book) Expire(before time.Time) int {
 	}
 	return n
 }
+
+// MaxOutbound returns the effective limit of outbound peers.
+func (b *Book) MaxOutbound() int { return b.limits.MaxOutbound }
