@@ -55,7 +55,8 @@ type Transaction struct {
 - **Signature per input**: every input is signed with Ed25519 (`domain.SignInput`) over the raw 32-byte digest of `CalculateHash()`, so one signature commits to all inputs and outputs. `PublicKey` is 64 lowercase hex characters (non-weak key), `Signature` is 128.
 - **Double spend**: an output can be spent once; spending it twice, in one block or across blocks, is rejected (`double_spend`, `input_missing_or_spent`).
 - **TransactionsHash**: SHA-256 over each transaction's hash and its input signatures, binding them to the block header.
-- **Genesis**: the genesis block of an empty chain carries one transaction without inputs that creates the outputs listed in `GENESIS_ALLOCATIONS`; that is the only source of coins for now (no coinbase yet).
+- **Genesis**: the genesis block of an empty chain carries one transaction without inputs that creates the outputs listed in `GENESIS_ALLOCATIONS`; besides the coinbase below, it is the only source of coins.
+- **Coinbase**: with `MINER_ADDRESS` set, every block the node mines starts with one transaction without inputs that pays `Subsidy(height) + fees` to that address. `domain.InitialSubsidy` is 5,000,000,000 base units and halves every `domain.HalvingInterval` (210,000) blocks; both are consensus constants, not configuration (ADR-0015). Validation accepts a coinbase only at position 0 of a non-genesis block, paying at most `Subsidy(height)` plus the fees of the block (`coinbase_too_large`). Without `MINER_ADDRESS` blocks carry no coinbase.
 
 ### Proof of Authority
 
@@ -140,6 +141,7 @@ The application can be configured via environment variables (e.g., in a `.env` f
 | `POA_KEYSTORE_PASSWORD` | Password that unlocks `POA_KEYSTORE`; required with `CONSENSUS=poa` | empty |
 | `MINING_TIMEOUT` | Maximum duration allowed for mining a block (e.g., `10s`, `500ms`, or integer seconds) | `10s` |
 | `GENESIS_ALLOCATIONS` | Genesis outputs as `address:amount[,address:amount...]`. Each address must be a valid wallet address and each amount an integer from 1 to 2^64−1; an invalid item stops the node at startup. Whitespace around each item and around `:` is ignored. Only used when the chain is empty (the genesis is created); ignored otherwise | empty (genesis without transactions) |
+| `MINER_ADDRESS` | Wallet address that receives the coinbase (`Subsidy(height) + fees`) of every block this node mines. Blank or only spaces adds no coinbase; an invalid address stops the node at startup, naming the variable | empty (no coinbase) |
 | `DATA_DIR` | Directory for persistent disk storage (stores `chain.db`). When empty, the in-memory repository is used | empty (in-memory storage) |
 | `MAX_BLOCK_BYTES` | Maximum JSON-serialized block size in bytes (positive integer; invalid values fall back to the default) | `1048576` |
 | `RATE_LIMIT` | Maximum requests per minute per IP (positive integer; empty, invalid, or non-positive disables rate limiting) | disabled (`0`) |
