@@ -3,6 +3,7 @@ package storagetest
 import (
 	"fmt"
 	"math"
+	"sort"
 	"sync"
 	"time"
 
@@ -1000,4 +1001,544 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 func IndexedChains() (main, alt []*domain.Block, mainDeltas, altDeltas []domain.UTXODelta) {
 	fx := newIndexedFixture()
 	return fx.main.blocks, fx.alt.blocks, fx.main.deltas, fx.alt.deltas
+}
+
+// step mines one block on w: a transaction spending the smallest unspent
+// output that can be split, and, on even salts, a second one spending an
+// output the first just created.
+func (w *indexedWorld) step(addrs []string, salt int64, tag string) {
+	ops := make([]domain.OutPoint, 0, len(w.set))
+	for op, o := range w.set {
+		if o.Amount >= 2 {
+			ops = append(ops, op)
+		}
+	}
+	sort.Slice(ops, func(i, j int) bool {
+		if ops[i].TxID != ops[j].TxID {
+			return ops[i].TxID < ops[j].TxID
+		}
+		return ops[i].Index < ops[j].Index
+	})
+	Expect(ops).NotTo(BeEmpty())
+	in := w.set[ops[0]]
+	n := int64(len(addrs))
+	half := in.Amount / 2
+	t1 := indexedTx(salt, []domain.OutPoint{ops[0]},
+		domain.TxOut{Amount: half, Address: addrs[salt%n]}, domain.TxOut{Amount: in.Amount - half, Address: addrs[(salt+1)%n]})
+	txs := []domain.Transaction{t1}
+	if salt%2 == 0 && half >= 2 {
+		txs = append(txs, indexedTx(salt+500, []domain.OutPoint{spend(t1, 0)},
+			domain.TxOut{Amount: half / 2, Address: addrs[(salt+2)%n]}, domain.TxOut{Amount: half - half/2, Address: addrs[salt%n]}))
+	}
+	w.mine(tag, txs...)
+	last := w.blocks[len(w.blocks)-1]
+	last.MerkleRoot = "mr" + last.Hash
+}
+
+// prunedWorld returns a chain of n blocks over addrs: a genesis paying every address, then steps.
+func prunedWorld(addrs []string, n int, tag string, salt int64) *indexedWorld {
+	w := newIndexedWorld()
+	outs := make([]domain.TxOut, 0, 2*len(addrs))
+	for i := 0; i < 2*len(addrs); i++ {
+		outs = append(outs, domain.TxOut{Amount: 1_000_000_000, Address: addrs[i%len(addrs)]})
+	}
+	w.mine(tag, indexedTx(salt, nil, outs...))
+	w.blocks[0].MerkleRoot = "mr" + w.blocks[0].Hash
+	w.extend(addrs, n-1, tag, salt+1)
+	return w
+}
+
+func (w *indexedWorld) extend(addrs []string, n int, tag string, salt int64) {
+	for i := 0; i < n; i++ {
+		w.step(addrs, salt+int64(i), tag)
+	}
+}
+
+// prunedView is everything observable about a repository that pruning can touch.
+type prunedView struct {
+	hashes      []string
+	bodies      []int
+	snapshot    storage.Snapshot
+	snapshotErr error
+	prunedBelow int
+	byAddr      map[string][]storage.AddressUTXO
+	tipState    domain.UTXOSet
+	current     bool
+}
+
+func viewOf(repo storage.IndexedRepository, addrs []string) prunedView {
+	v := prunedView{byAddr: map[string][]storage.AddressUTXO{}}
+	all, err := repo.All()
+	Expect(err).NotTo(HaveOccurred())
+	for _, b := range all {
+		v.hashes = append(v.hashes, b.Hash)
+		v.bodies = append(v.bodies, len(b.Transactions))
+	}
+	v.snapshot, v.snapshotErr = repo.Snapshot()
+	v.prunedBelow, err = repo.PrunedBelow()
+	Expect(err).NotTo(HaveOccurred())
+	for _, a := range addrs {
+		v.byAddr[a], err = repo.UTXOsByAddress(a)
+		Expect(err).NotTo(HaveOccurred())
+	}
+	v.tipState, err = repo.ForkState(len(all))
+	Expect(err).NotTo(HaveOccurred())
+	v.current, err = repo.IndexCurrent()
+	Expect(err).NotTo(HaveOccurred())
+	return v
+}
+
+func expectedByAddr(set domain.UTXOSet, addr string) []storage.AddressUTXO {
+	out := []storage.AddressUTXO{}
+	for op, o := range set {
+		if o.Address == addr {
+			out = append(out, storage.AddressUTXO{OutPoint: op, Amount: o.Amount})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].OutPoint.TxID != out[j].OutPoint.TxID {
+			return out[i].OutPoint.TxID < out[j].OutPoint.TxID
+		}
+		return out[i].OutPoint.Index < out[j].OutPoint.Index
+	})
+	return out
+}
+
+// checkAgainst asserts that repo describes the chain of w: headers and bodies
+// around prunedBelow, the snapshot, the address index and every fork state.
+func checkAgainst(repo storage.IndexedRepository, w *indexedWorld, addrs []string, p storage.Pruning) {
+	chain := w.blocks
+	pb, err := repo.PrunedBelow()
+	Expect(err).NotTo(HaveOccurred())
+
+	snap, err := repo.Snapshot()
+	if err == nil {
+		Expect(snap.Height).To(BeNumerically("<", len(chain)))
+		set, berr := domain.BuildUTXOSet(chain[:snap.Height+1])
+		Expect(berr).NotTo(HaveOccurred())
+		Expect(snap.BlockHash).To(Equal(chain[snap.Height].Hash))
+		Expect(snap.UTXOs).To(Equal(set))
+		Expect(snap.Hash).To(Equal(storage.SnapshotHash(chain[snap.Height].Hash, set)))
+		if p.KeepBlocks > 0 {
+			Expect(pb).To(Equal(snap.Height + 1))
+		}
+	} else {
+		Expect(err).To(MatchError(storage.ErrNotFound))
+		Expect(pb).To(BeZero())
+	}
+	if p.KeepBlocks == 0 {
+		Expect(pb).To(BeZero())
+	}
+
+	same := func(got, want *domain.Block, h int) {
+		Expect(got.Hash).To(Equal(want.Hash))
+		Expect(got.MerkleRoot).To(Equal(want.MerkleRoot))
+		Expect(got.Index).To(Equal(want.Index))
+		Expect(got.PrevHash).To(Equal(want.PrevHash))
+		Expect(got.Transactions).NotTo(BeNil())
+		if h < pb {
+			Expect(got.Transactions).To(BeEmpty())
+			return
+		}
+		Expect(got.Transactions).To(HaveLen(len(want.Transactions)))
+		for i := range want.Transactions {
+			Expect(got.Transactions[i].CalculateHash()).To(Equal(want.Transactions[i].CalculateHash()))
+		}
+	}
+	all, err := repo.All()
+	Expect(err).NotTo(HaveOccurred())
+	Expect(all).To(HaveLen(len(chain)))
+	ranged, err := repo.Range(0, len(chain)+1)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(ranged).To(HaveLen(len(chain)))
+	for h, want := range chain {
+		same(all[h], want, h)
+		same(ranged[h], want, h)
+		byHeight, err := repo.ByHeight(h)
+		Expect(err).NotTo(HaveOccurred())
+		same(byHeight, want, h)
+		byHash, err := repo.ByHash(want.Hash)
+		Expect(err).NotTo(HaveOccurred())
+		same(byHash, want, h)
+		for _, tx := range want.Transactions {
+			got, err := repo.TxHeight(tx.CalculateHash())
+			if h < pb {
+				Expect(err).To(MatchError(storage.ErrNotFound))
+			} else {
+				Expect(err).NotTo(HaveOccurred())
+				Expect(got).To(Equal(h))
+			}
+		}
+	}
+
+	full, err := domain.BuildUTXOSet(chain)
+	Expect(err).NotTo(HaveOccurred())
+	for _, a := range addrs {
+		got, err := repo.UTXOsByAddress(a)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal(expectedByAddr(full, a)))
+	}
+	for h := 0; h <= len(chain); h++ {
+		got, err := repo.ForkState(h)
+		if h < pb {
+			Expect(err).To(MatchError(storage.ErrReorgTooDeep))
+			continue
+		}
+		Expect(err).NotTo(HaveOccurred())
+		want, err := domain.BuildUTXOSet(chain[:h])
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal(want))
+	}
+}
+
+// PrunedRepositoryContract registers Ginkgo specs for the snapshot, pruning,
+// address-UTXO and fork-state behaviour of an IndexedRepository built with a
+// storage.Pruning.
+func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepository) {
+	var addrs []string
+
+	BeforeEach(func() {
+		addrs = nil
+		for i := 0; i < 3; i++ {
+			w, err := wallet.New()
+			Expect(err).NotTo(HaveOccurred())
+			addrs = append(addrs, w.Address())
+		}
+	})
+
+	commit := func(repo storage.IndexedRepository, w *indexedWorld, from, to int) {
+		for i := from; i < to; i++ {
+			Expect(repo.Commit(w.blocks[i], w.deltas[i])).To(Succeed())
+		}
+	}
+	// reorg replaces the tail of w from height with n new blocks and returns the new world.
+	reorg := func(repo storage.IndexedRepository, w *indexedWorld, height, n int, tag string, salt int64) *indexedWorld {
+		alt := w.forkAt(height)
+		alt.extend(addrs, n, tag, salt)
+		Expect(repo.Reorg(height, alt.blocks[height:], alt.deltas[height:])).To(Succeed())
+		return alt
+	}
+
+	for _, p := range []storage.Pruning{{SnapshotInterval: 1}, {SnapshotInterval: 3}, {SnapshotInterval: 3, KeepBlocks: 2}, {SnapshotInterval: 5, KeepBlocks: 4}, {SnapshotInterval: 1, KeepBlocks: 1}} {
+		Describe(fmt.Sprintf("with N=%d K=%d", p.SnapshotInterval, p.KeepBlocks), func() {
+			It("stores the snapshot the rule gives after every Commit", func() {
+				repo := newRepo(p)
+				w := prunedWorld(addrs, 14, "m", 10)
+				lastS, has := 0, false
+				for t := range w.blocks {
+					Expect(repo.Commit(w.blocks[t], w.deltas[t])).To(Succeed())
+					if s := t - p.KeepBlocks; s >= 1 && s%p.SnapshotInterval == 0 {
+						lastS, has = s, true
+					}
+					snap, err := repo.Snapshot()
+					if !has {
+						Expect(err).To(MatchError(storage.ErrNotFound))
+						continue
+					}
+					Expect(err).NotTo(HaveOccurred())
+					set, err := domain.BuildUTXOSet(w.blocks[:lastS+1])
+					Expect(err).NotTo(HaveOccurred())
+					Expect(snap.Height).To(Equal(lastS))
+					Expect(snap.BlockHash).To(Equal(w.blocks[lastS].Hash))
+					Expect(snap.Hash).To(Equal(storage.SnapshotHash(w.blocks[lastS].Hash, set)))
+					Expect(snap.UTXOs).To(Equal(set))
+					pb, err := repo.PrunedBelow()
+					Expect(err).NotTo(HaveOccurred())
+					if p.KeepBlocks > 0 {
+						Expect(pb).To(Equal(lastS + 1))
+					} else {
+						Expect(pb).To(BeZero())
+					}
+				}
+				checkAgainst(repo, w, addrs, p)
+			})
+
+			It("hands out copies of the snapshot and fork state sets", func() {
+				repo := newRepo(p)
+				w := prunedWorld(addrs, 14, "m", 10)
+				commit(repo, w, 0, 14)
+				snap, err := repo.Snapshot()
+				Expect(err).NotTo(HaveOccurred())
+				for op := range snap.UTXOs {
+					delete(snap.UTXOs, op)
+					break
+				}
+				snap.UTXOs[domain.OutPoint{TxID: "forged", Index: 7}] = domain.TxOut{Amount: 1}
+				again, err := repo.Snapshot()
+				Expect(err).NotTo(HaveOccurred())
+				set, err := domain.BuildUTXOSet(w.blocks[:again.Height+1])
+				Expect(err).NotTo(HaveOccurred())
+				Expect(again.UTXOs).To(Equal(set))
+				Expect(again.Hash).To(Equal(storage.SnapshotHash(again.BlockHash, again.UTXOs)))
+
+				pb, err := repo.PrunedBelow()
+				Expect(err).NotTo(HaveOccurred())
+				fs, err := repo.ForkState(max(pb, 10))
+				Expect(err).NotTo(HaveOccurred())
+				for op := range fs {
+					delete(fs, op)
+					break
+				}
+				fs[domain.OutPoint{TxID: "forged", Index: 8}] = domain.TxOut{Amount: 1}
+				fs2, err := repo.ForkState(max(pb, 10))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(fs2).NotTo(HaveKey(domain.OutPoint{TxID: "forged", Index: 8}))
+				Expect(repo.Reindex()).To(Succeed())
+				checked, err := repo.Snapshot()
+				Expect(err).NotTo(HaveOccurred())
+				Expect(checked.UTXOs).To(Equal(set))
+			})
+
+			It("keeps the address index and fork states right across Commit and Reorg", func() {
+				repo := newRepo(p)
+				w := prunedWorld(addrs, 12, "m", 10)
+				commit(repo, w, 0, 12)
+				checkAgainst(repo, w, addrs, p)
+
+				pb, err := repo.PrunedBelow()
+				Expect(err).NotTo(HaveOccurred())
+				w = reorg(repo, w, max(pb, 6), 4, "a", 200)
+				checkAgainst(repo, w, addrs, p)
+
+				w.extend(addrs, 3, "a", 300)
+				commit(repo, w, len(w.blocks)-3, len(w.blocks))
+				checkAgainst(repo, w, addrs, p)
+
+				pb, err = repo.PrunedBelow()
+				Expect(err).NotTo(HaveOccurred())
+				w = reorg(repo, w, max(pb, 8), 2, "b", 400)
+				checkAgainst(repo, w, addrs, p)
+			})
+
+			It("reproduces the same state with Reindex", func() {
+				repo := newRepo(p)
+				w := prunedWorld(addrs, 14, "m", 10)
+				commit(repo, w, 0, 14)
+				pb, err := repo.PrunedBelow()
+				Expect(err).NotTo(HaveOccurred())
+				w = reorg(repo, w, max(pb, 9), 3, "a", 200)
+				before := viewOf(repo, addrs)
+
+				Expect(repo.Reindex()).To(Succeed())
+				Expect(viewOf(repo, addrs)).To(Equal(before))
+				checkAgainst(repo, w, addrs, p)
+				// The rebuilt undo data still lets a Reorg run.
+				pb, err = repo.PrunedBelow()
+				Expect(err).NotTo(HaveOccurred())
+				w = reorg(repo, w, max(pb, 9), 2, "c", 600)
+				checkAgainst(repo, w, addrs, p)
+			})
+		})
+	}
+
+	Describe("pruning with N=3 K=2", func() {
+		p := storage.Pruning{SnapshotInterval: 3, KeepBlocks: 2}
+
+		It("turns the bodies below the snapshot into headers", func() {
+			repo := newRepo(p)
+			w := prunedWorld(addrs, 12, "m", 10)
+			commit(repo, w, 0, 12)
+			pb, err := repo.PrunedBelow()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pb).To(Equal(10)) // the Commit of height 11 stores the snapshot of 9
+			snap, err := repo.Snapshot()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(snap.Height).To(Equal(9))
+			b0, err := repo.ByHeight(0)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(b0.Transactions).NotTo(BeNil())
+			Expect(b0.Transactions).To(BeEmpty())
+			Expect(b0.MerkleRoot).To(Equal(w.blocks[0].MerkleRoot))
+			b9, err := repo.ByHeight(9)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(b9.Transactions).To(BeEmpty())
+			b10, err := repo.ByHeight(10)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(b10.Transactions).NotTo(BeEmpty())
+			_, err = repo.TxHeight(w.blocks[3].Transactions[0].CalculateHash())
+			Expect(err).To(MatchError(storage.ErrNotFound))
+			ids, err := repo.TxsByAddress(addrs[0])
+			Expect(err).NotTo(HaveOccurred())
+			for _, id := range ids {
+				h, err := repo.TxHeight(id)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(h).To(BeNumerically(">=", 10))
+			}
+		})
+
+		It("refuses a Reorg, a ReplaceFrom and a ForkState below prunedBelow and changes nothing", func() {
+			repo := newRepo(p)
+			w := prunedWorld(addrs, 12, "m", 10)
+			commit(repo, w, 0, 12)
+			before := viewOf(repo, addrs)
+			for _, h := range []int{1, 9} {
+				alt := w.forkAt(h)
+				alt.extend(addrs, 2, "a", 200)
+				Expect(repo.Reorg(h, alt.blocks[h:], alt.deltas[h:])).To(MatchError(storage.ErrReorgTooDeep))
+				Expect(repo.ReplaceFrom(h, alt.blocks[h:])).To(MatchError(storage.ErrReorgTooDeep))
+				_, err := repo.ForkState(h)
+				Expect(err).To(MatchError(storage.ErrReorgTooDeep))
+			}
+			Expect(viewOf(repo, addrs)).To(Equal(before))
+			// The first retained height is still a valid fork.
+			w = reorg(repo, w, 10, 2, "a", 200)
+			checkAgainst(repo, w, addrs, p)
+		})
+
+		It("accepts a ReplaceFrom at prunedBelow and Reindex repairs the indexes", func() {
+			repo := newRepo(p)
+			w := prunedWorld(addrs, 12, "m", 10)
+			commit(repo, w, 0, 12)
+			alt := w.forkAt(10)
+			alt.extend(addrs, 2, "a", 200)
+			Expect(repo.ReplaceFrom(10, alt.blocks[10:])).To(Succeed())
+			Expect(repo.Reindex()).To(Succeed())
+			checkAgainst(repo, alt, addrs, p)
+		})
+
+		It("leaves everything as it was when a Reorg fails after it pruned", func() {
+			p := storage.Pruning{SnapshotInterval: 2, KeepBlocks: 1}
+			repo := newRepo(p)
+			w := prunedWorld(addrs, 11, "m", 10)
+			commit(repo, w, 0, 11)
+			pb, err := repo.PrunedBelow()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pb).To(Equal(9))
+			before := viewOf(repo, addrs)
+
+			// Blocks 9..11 store the snapshot of 10 and prune; block 12 is rejected.
+			alt := w.forkAt(9)
+			alt.extend(addrs, 3, "a", 200)
+			bad := &domain.Block{Index: 12, PrevHash: alt.blocks[11].Hash, Hash: "bad12"}
+			ghost := domain.OutPoint{TxID: "ghost", Index: 0}
+			badDelta := domain.UTXODelta{Spent: map[domain.OutPoint]domain.TxOut{ghost: {Amount: 1, Address: addrs[0]}}}
+			blocks := append(append([]*domain.Block{}, alt.blocks[9:]...), bad)
+			deltas := append(append([]domain.UTXODelta{}, alt.deltas[9:]...), badDelta)
+			Expect(repo.Reorg(9, blocks, deltas)).To(MatchError(storage.ErrUTXOConflict))
+			Expect(viewOf(repo, addrs)).To(Equal(before))
+			checkAgainst(repo, w, addrs, p)
+		})
+	})
+
+	Describe("snapshots without pruning", func() {
+		p := storage.Pruning{SnapshotInterval: 3}
+
+		It("drops the snapshot when a Reorg forks at or below it", func() {
+			repo := newRepo(p)
+			w := prunedWorld(addrs, 8, "m", 10)
+			commit(repo, w, 0, 8)
+			snap, err := repo.Snapshot()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(snap.Height).To(Equal(6))
+
+			// Forking above the snapshot keeps it.
+			w = reorg(repo, w, 7, 1, "a", 200)
+			kept, err := repo.Snapshot()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(kept).To(Equal(snap))
+
+			// Forking at 5 leaves a chain of 6 blocks, short of the next snapshot.
+			w = reorg(repo, w, 5, 1, "b", 300)
+			_, err = repo.Snapshot()
+			Expect(err).To(MatchError(storage.ErrNotFound))
+			checkAgainst(repo, w, addrs, p)
+		})
+
+		It("drops the snapshot when a ReplaceFrom removes its block", func() {
+			repo := newRepo(p)
+			w := prunedWorld(addrs, 8, "m", 10)
+			commit(repo, w, 0, 8)
+			alt := w.forkAt(7)
+			alt.extend(addrs, 1, "a", 200)
+			Expect(repo.ReplaceFrom(7, alt.blocks[7:])).To(Succeed())
+			snap, err := repo.Snapshot()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(snap.Height).To(Equal(6))
+
+			alt = w.forkAt(6)
+			alt.extend(addrs, 2, "b", 300)
+			Expect(repo.ReplaceFrom(6, alt.blocks[6:])).To(Succeed())
+			_, err = repo.Snapshot()
+			Expect(err).To(MatchError(storage.ErrNotFound))
+		})
+
+		It("keeps the snapshot when a Reorg that would drop it is rejected", func() {
+			repo := newRepo(storage.Pruning{SnapshotInterval: 2})
+			w := prunedWorld(addrs, 7, "m", 10)
+			commit(repo, w, 0, 7)
+			before := viewOf(repo, addrs)
+			Expect(before.snapshot.Height).To(Equal(6))
+
+			alt := w.forkAt(5)
+			alt.extend(addrs, 1, "a", 200)
+			bad := &domain.Block{Index: 6, PrevHash: alt.blocks[5].Hash, Hash: "bad6"}
+			ghost := domain.UTXODelta{Spent: map[domain.OutPoint]domain.TxOut{{TxID: "ghost"}: {Amount: 1, Address: addrs[0]}}}
+			Expect(repo.Reorg(5, []*domain.Block{alt.blocks[5], bad}, []domain.UTXODelta{alt.deltas[5], ghost})).To(MatchError(storage.ErrUTXOConflict))
+			Expect(viewOf(repo, addrs)).To(Equal(before))
+		})
+
+		It("leaves the snapshot alone when a Commit is rejected at a snapshot height", func() {
+			repo := newRepo(storage.Pruning{SnapshotInterval: 1})
+			w := prunedWorld(addrs, 4, "m", 10)
+			commit(repo, w, 0, 3)
+			before := viewOf(repo, addrs)
+			ghost := domain.UTXODelta{Spent: map[domain.OutPoint]domain.TxOut{{TxID: "ghost"}: {Amount: 1, Address: addrs[0]}}}
+			Expect(repo.Commit(w.blocks[3], ghost)).To(MatchError(storage.ErrUTXOConflict))
+			Expect(viewOf(repo, addrs)).To(Equal(before))
+		})
+	})
+
+	Describe("UTXOsByAddress and ForkState", func() {
+		It("returns an empty, non-nil slice for an address without outputs", func() {
+			repo := newRepo(storage.Pruning{})
+			got, err := repo.UTXOsByAddress("nobody")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got).NotTo(BeNil())
+			Expect(got).To(BeEmpty())
+		})
+
+		It("refuses a height outside the chain", func() {
+			repo := newRepo(storage.Pruning{})
+			w := prunedWorld(addrs, 3, "m", 10)
+			commit(repo, w, 0, 3)
+			for _, h := range []int{-1, 4} {
+				_, err := repo.ForkState(h)
+				Expect(err).To(MatchError(storage.ErrConflict))
+			}
+		})
+
+		It("returns a set the caller may edit", func() {
+			repo := newRepo(storage.Pruning{})
+			w := prunedWorld(addrs, 3, "m", 10)
+			commit(repo, w, 0, 3)
+			set, err := repo.ForkState(3)
+			Expect(err).NotTo(HaveOccurred())
+			for op := range set {
+				delete(set, op)
+			}
+			checkAgainst(repo, w, addrs, storage.Pruning{})
+		})
+
+		It("refuses ForkState on stale indexes", func() {
+			repo := newRepo(storage.Pruning{})
+			w := prunedWorld(addrs, 3, "m", 10)
+			commit(repo, w, 0, 2)
+			Expect(repo.Append(w.blocks[2])).To(Succeed())
+			_, err := repo.ForkState(1)
+			Expect(err).To(MatchError(storage.ErrIndexStale))
+		})
+	})
+}
+
+// PrunedChain returns a chain of n blocks (n >= 1) of real transactions with the
+// delta of each block, for adapter tests that need to drive Commit directly.
+func PrunedChain(n int) ([]*domain.Block, []domain.UTXODelta) {
+	addrs := make([]string, 3)
+	for i := range addrs {
+		w, err := wallet.New()
+		Expect(err).NotTo(HaveOccurred())
+		addrs[i] = w.Address()
+	}
+	w := prunedWorld(addrs, n, "m", 10)
+	return w.blocks, w.deltas
 }

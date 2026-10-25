@@ -18,13 +18,26 @@ type Repository struct {
 	blocks []*domain.Block
 	byHash map[string]*domain.Block
 	idx    index
+	// pruning is fixed at construction.
+	pruning storage.Pruning
 }
 
 var _ storage.BlockRepository = (*Repository)(nil)
 
-// New returns an empty Repository.
+// New returns an empty Repository that keeps the whole history and stores no snapshot.
 func New() *Repository {
 	return &Repository{byHash: map[string]*domain.Block{}, idx: newIndex()}
+}
+
+// NewPruned returns an empty Repository that snapshots and prunes as p says,
+// or storage.ErrInvalidPruning when p is invalid.
+func NewPruned(p storage.Pruning) (*Repository, error) {
+	if err := p.Validate(); err != nil {
+		return nil, err
+	}
+	r := New()
+	r.pruning = p
+	return r, nil
 }
 
 func (r *Repository) Last() (*domain.Block, error) {
@@ -118,10 +131,14 @@ func (r *Repository) ReplaceFrom(height int, blocks []*domain.Block) error {
 	if err := r.checkSplice(height, blocks); err != nil {
 		return err
 	}
+	if height < r.idx.prunedBelow {
+		return storage.ErrReorgTooDeep
+	}
 
 	r.splice(height, blocks)
 	// The indexes still describe the removed tail; mark them stale even when the chain length is unchanged.
 	r.idx.hasTip = false
+	r.idx.dropSnapshotFrom(height)
 	return nil
 }
 

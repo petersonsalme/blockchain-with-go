@@ -20,7 +20,12 @@ import (
 //	undo    height (8B BE)                     -> JSON delta of that block
 //	txs     txid                               -> height (8B BE)
 //	addrtx  address|height (8B BE)|pos (4B BE) -> txid
+//	addrutxo address|txid|index (4B BE)        -> amount (8B BE)
+//	snapshot txid|index (4B BE)                -> JSON TxOut, the UTXO set at meta.snapshotHeight
 //	meta    "indexedTip"                       -> height (8B BE) the indexes describe
+//	        "snapshotHeight"                   -> height (8B BE) of the snapshot
+//	        "snapshotHash"                     -> storage.SnapshotHash, hex
+//	        "prunedBelow"                      -> lowest height with a body (8B BE)
 var (
 	utxosBucket  = []byte("utxos")
 	undoBucket   = []byte("undo")
@@ -28,7 +33,13 @@ var (
 	addrtxBucket = []byte("addrtx")
 	metaBucket   = []byte("meta")
 
-	indexedTipKey = []byte("indexedTip")
+	addrutxoBucket = []byte("addrutxo")
+	snapshotBucket = []byte("snapshot")
+
+	indexedTipKey     = []byte("indexedTip")
+	snapshotHeightKey = []byte("snapshotHeight")
+	snapshotHashKey   = []byte("snapshotHash")
+	prunedBelowKey    = []byte("prunedBelow")
 )
 
 const addrSep = '|'
@@ -83,6 +94,25 @@ func utxoKey(op domain.OutPoint) []byte {
 	return binary.BigEndian.AppendUint32([]byte(op.TxID), op.Index)
 }
 
+func addrUTXOKey(addr string, op domain.OutPoint) []byte {
+	return binary.BigEndian.AppendUint32(append(append([]byte(addr), addrSep), op.TxID...), op.Index)
+}
+
+// outPointOf splits a utxos or snapshot key into txid and index.
+func outPointOf(k []byte) domain.OutPoint {
+	n := len(k) - 4
+	return domain.OutPoint{TxID: string(k[:n]), Index: binary.BigEndian.Uint32(k[n:])}
+}
+
+// metaInt reads an 8-byte big-endian meta value; a missing key is 0.
+func metaInt(tx *bbolt.Tx, key []byte) int {
+	v := tx.Bucket(metaBucket).Get(key)
+	if v == nil {
+		return 0
+	}
+	return int(binary.BigEndian.Uint64(v))
+}
+
 func addrKey(addr string, height, pos int) []byte {
 	key := append([]byte(addr), addrSep)
 	key = binary.BigEndian.AppendUint64(key, uint64(height))
@@ -130,14 +160,20 @@ func putOuts(tx *bbolt.Tx, outs map[domain.OutPoint]domain.TxOut) error {
 		if err := bucket.Put(utxoKey(op), data); err != nil {
 			return err
 		}
+		if err := tx.Bucket(addrutxoBucket).Put(addrUTXOKey(o.Address, op), binary.BigEndian.AppendUint64(nil, o.Amount)); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 func deleteOuts(tx *bbolt.Tx, outs map[domain.OutPoint]domain.TxOut) error {
 	bucket := tx.Bucket(utxosBucket)
-	for op := range outs {
+	for op, o := range outs {
 		if err := bucket.Delete(utxoKey(op)); err != nil {
+			return err
+		}
+		if err := tx.Bucket(addrutxoBucket).Delete(addrUTXOKey(o.Address, op)); err != nil {
 			return err
 		}
 	}
@@ -177,7 +213,7 @@ func writeIndex(tx *bbolt.Tx, b *domain.Block, d domain.UTXODelta) error {
 }
 
 // commit is the body of Commit; Reorg runs it once per new block.
-func commit(tx *bbolt.Tx, b *domain.Block, d domain.UTXODelta) error {
+func commit(tx *bbolt.Tx, p storage.Pruning, b *domain.Block, d domain.UTXODelta) error {
 	if !current(tx) {
 		return storage.ErrIndexStale
 	}
@@ -200,7 +236,127 @@ func commit(tx *bbolt.Tx, b *domain.Block, d domain.UTXODelta) error {
 	if err := putOuts(tx, d.Created); err != nil {
 		return err
 	}
-	return writeIndex(tx, b, d)
+	if err := writeIndex(tx, b, d); err != nil {
+		return err
+	}
+	return snapshotStep(tx, p, b.Index)
+}
+
+// readSet loads the stored UTXO set.
+func readSet(tx *bbolt.Tx) (domain.UTXOSet, error) {
+	set := domain.UTXOSet{}
+	err := tx.Bucket(utxosBucket).ForEach(func(k, v []byte) error {
+		var o domain.TxOut
+		if err := json.Unmarshal(v, &o); err != nil {
+			return err
+		}
+		set[outPointOf(k)] = o
+		return nil
+	})
+	return set, err
+}
+
+// snapshotStep stores the snapshot that the Commit of height t calls for and,
+// with p.KeepBlocks > 0, prunes the bodies up to it.
+func snapshotStep(tx *bbolt.Tx, p storage.Pruning, t int) error {
+	s, ok := p.SnapshotHeight(t)
+	prunedBelow := metaInt(tx, prunedBelowKey)
+	if !ok || s < prunedBelow {
+		return nil
+	}
+	set, err := readSet(tx)
+	if err != nil {
+		return err
+	}
+	for h := t; h > s; h-- {
+		d, err := decodeDelta(tx.Bucket(undoBucket).Get(heightKey(h)))
+		if err != nil {
+			return err
+		}
+		set.Revert(d)
+	}
+	var at domain.Block
+	if err := json.Unmarshal(tx.Bucket(blocksBucket).Get(heightKey(s)), &at); err != nil {
+		return err
+	}
+	if err := dropSnapshotFrom(tx, 0); err != nil {
+		return err
+	}
+	sb := tx.Bucket(snapshotBucket)
+	for op, o := range set {
+		data, err := json.Marshal(o)
+		if err != nil {
+			return err
+		}
+		if err := sb.Put(utxoKey(op), data); err != nil {
+			return err
+		}
+	}
+	meta := tx.Bucket(metaBucket)
+	if err := meta.Put(snapshotHeightKey, heightKey(s)); err != nil {
+		return err
+	}
+	if err := meta.Put(snapshotHashKey, []byte(storage.SnapshotHash(at.Hash, set))); err != nil {
+		return err
+	}
+	if p.KeepBlocks == 0 {
+		return nil
+	}
+	for h := prunedBelow; h <= s; h++ {
+		if err := pruneBlock(tx, h); err != nil {
+			return err
+		}
+	}
+	return meta.Put(prunedBelowKey, heightKey(s+1))
+}
+
+// pruneBlock replaces the block at h by its header and drops its undo data and index entries.
+func pruneBlock(tx *bbolt.Tx, h int) error {
+	var b domain.Block
+	if err := json.Unmarshal(tx.Bucket(blocksBucket).Get(heightKey(h)), &b); err != nil {
+		return err
+	}
+	d, err := decodeDelta(tx.Bucket(undoBucket).Get(heightKey(h)))
+	if err != nil {
+		return err
+	}
+	for _, t := range storage.IndexTxs(&b, d) {
+		if err := tx.Bucket(txsBucket).Delete([]byte(t.TxID)); err != nil {
+			return err
+		}
+		for _, a := range t.Addrs {
+			if err := tx.Bucket(addrtxBucket).Delete(addrKey(a, h, t.Pos)); err != nil {
+				return err
+			}
+		}
+	}
+	if err := tx.Bucket(undoBucket).Delete(heightKey(h)); err != nil {
+		return err
+	}
+	b.Transactions = []domain.Transaction{}
+	data, err := json.Marshal(&b)
+	if err != nil {
+		return err
+	}
+	return tx.Bucket(blocksBucket).Put(heightKey(h), data)
+}
+
+// dropSnapshotFrom discards the stored snapshot when its height is >= height.
+func dropSnapshotFrom(tx *bbolt.Tx, height int) error {
+	meta := tx.Bucket(metaBucket)
+	if meta.Get(snapshotHeightKey) == nil || metaInt(tx, snapshotHeightKey) < height {
+		return nil
+	}
+	if err := tx.DeleteBucket(snapshotBucket); err != nil {
+		return err
+	}
+	if _, err := tx.CreateBucket(snapshotBucket); err != nil {
+		return err
+	}
+	if err := meta.Delete(snapshotHeightKey); err != nil {
+		return err
+	}
+	return meta.Delete(snapshotHashKey)
 }
 
 // revert removes the stored block at height h, undoing its delta and index entries.
@@ -269,7 +425,7 @@ func (r *Repository) Commit(b *domain.Block, d domain.UTXODelta) error {
 	if b == nil {
 		return ErrNilBlock
 	}
-	return r.db.Update(func(tx *bbolt.Tx) error { return commit(tx, b, d) })
+	return r.db.Update(func(tx *bbolt.Tx) error { return commit(tx, r.pruning, b, d) })
 }
 
 // Reorg reverts the tail and commits the new blocks in one transaction.
@@ -287,6 +443,9 @@ func (r *Repository) Reorg(height int, blocks []*domain.Block, deltas []domain.U
 		if err := checkSplice(tx.Bucket(blocksBucket), height, blocks); err != nil {
 			return err
 		}
+		if height < metaInt(tx, prunedBelowKey) {
+			return storage.ErrReorgTooDeep
+		}
 		if !current(tx) {
 			return storage.ErrIndexStale
 		}
@@ -296,8 +455,11 @@ func (r *Repository) Reorg(height int, blocks []*domain.Block, deltas []domain.U
 				return err
 			}
 		}
+		if err := dropSnapshotFrom(tx, height); err != nil {
+			return err
+		}
 		for i, b := range blocks {
-			if err := commit(tx, b, deltas[i]); err != nil {
+			if err := commit(tx, r.pruning, b, deltas[i]); err != nil {
 				return err
 			}
 		}
@@ -340,7 +502,8 @@ func (r *Repository) IndexCurrent() (bool, error) {
 	return ok, err
 }
 
-// Reindex drops the five index buckets and rebuilds them from the blocks in one transaction.
+// Reindex drops the index buckets and rebuilds them from the blocks in one
+// transaction; a pruned database starts from its snapshot instead of the genesis.
 func (r *Repository) Reindex() error {
 	return r.db.Update(func(tx *bbolt.Tx) error {
 		for _, name := range indexBuckets {
@@ -351,9 +514,31 @@ func (r *Repository) Reindex() error {
 				return err
 			}
 		}
+		meta := tx.Bucket(metaBucket)
+		if err := meta.Delete(indexedTipKey); err != nil {
+			return err
+		}
 
 		set := domain.UTXOSet{}
-		return tx.Bucket(blocksBucket).ForEach(func(_, v []byte) error {
+		from := metaInt(tx, prunedBelowKey)
+		if from > 0 {
+			err := tx.Bucket(snapshotBucket).ForEach(func(k, v []byte) error {
+				var o domain.TxOut
+				if err := json.Unmarshal(v, &o); err != nil {
+					return err
+				}
+				set[outPointOf(k)] = o
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+			if err := putOuts(tx, set); err != nil {
+				return err
+			}
+		}
+		c := tx.Bucket(blocksBucket).Cursor()
+		for k, v := c.Seek(heightKey(from)); k != nil; k, v = c.Next() {
 			var b domain.Block
 			if err := json.Unmarshal(v, &b); err != nil {
 				return err
@@ -369,7 +554,94 @@ func (r *Repository) Reindex() error {
 			if err := putOuts(tx, d.Created); err != nil {
 				return err
 			}
-			return writeIndex(tx, &b, d)
+			if err := writeIndex(tx, &b, d); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// Snapshot returns the stored snapshot, or storage.ErrNotFound.
+func (r *Repository) Snapshot() (storage.Snapshot, error) {
+	var snap storage.Snapshot
+	err := r.db.View(func(tx *bbolt.Tx) error {
+		meta := tx.Bucket(metaBucket)
+		hash := meta.Get(snapshotHashKey)
+		if meta.Get(snapshotHeightKey) == nil || hash == nil {
+			return storage.ErrNotFound
+		}
+		snap.Height = metaInt(tx, snapshotHeightKey)
+		snap.Hash = string(hash)
+		var at domain.Block
+		if err := json.Unmarshal(tx.Bucket(blocksBucket).Get(heightKey(snap.Height)), &at); err != nil {
+			return err
+		}
+		snap.BlockHash = at.Hash
+		snap.UTXOs = domain.UTXOSet{}
+		return tx.Bucket(snapshotBucket).ForEach(func(k, v []byte) error {
+			var o domain.TxOut
+			if err := json.Unmarshal(v, &o); err != nil {
+				return err
+			}
+			snap.UTXOs[outPointOf(k)] = o
+			return nil
 		})
 	})
+	return snap, err
+}
+
+func (r *Repository) PrunedBelow() (int, error) {
+	var n int
+	err := r.db.View(func(tx *bbolt.Tx) error {
+		n = metaInt(tx, prunedBelowKey)
+		return nil
+	})
+	return n, err
+}
+
+func (r *Repository) UTXOsByAddress(addr string) ([]storage.AddressUTXO, error) {
+	out := []storage.AddressUTXO{}
+	prefix := append([]byte(addr), addrSep)
+	err := r.db.View(func(tx *bbolt.Tx) error {
+		c := tx.Bucket(addrutxoBucket).Cursor()
+		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
+			out = append(out, storage.AddressUTXO{OutPoint: outPointOf(k[len(prefix):]), Amount: binary.BigEndian.Uint64(v)})
+		}
+		return nil
+	})
+	return out, err
+}
+
+// ForkState reverts the stored undo data from the tip down to height on a copy of the UTXO set.
+func (r *Repository) ForkState(height int) (domain.UTXOSet, error) {
+	var set domain.UTXOSet
+	err := r.db.View(func(tx *bbolt.Tx) error {
+		n := 0
+		if k, _ := tx.Bucket(blocksBucket).Cursor().Last(); k != nil {
+			n = int(binary.BigEndian.Uint64(k)) + 1
+		}
+		if height < 0 || height > n {
+			return storage.ErrConflict
+		}
+		if height < metaInt(tx, prunedBelowKey) {
+			return storage.ErrReorgTooDeep
+		}
+		if !current(tx) {
+			return storage.ErrIndexStale
+		}
+		var err error
+		if set, err = readSet(tx); err != nil {
+			return err
+		}
+		for h := n - 1; h >= height; h-- {
+			d, err := decodeDelta(tx.Bucket(undoBucket).Get(heightKey(h)))
+			if err != nil {
+				return err
+			}
+			set.Revert(d)
+		}
+		return nil
+	})
+	return set, err
 }
