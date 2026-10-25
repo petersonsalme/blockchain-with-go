@@ -300,6 +300,13 @@ type ClientInterface interface {
 	// Corresponds with GET /blocks (the `GetBlocks` operationId).
 	GetBlocks(ctx context.Context, params *GetBlocksParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetEvents Stream node events (server-sent events)
+	//
+	// Long-lived `text/event-stream`. The node sends `event: block` with the mined block as one-line JSON (the body of the `201` of `POST /` or `POST /mine`) after each block it mines, and `event: tx` with the admitted transaction as one-line JSON after each `202` of `POST /tx`. A client that falls more than 16 events behind is disconnected; there is no replay of missed events.
+	//
+	// Corresponds with GET /events (the `GetEvents` operationId).
+	GetEvents(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetHealth Report the chain tip
 	//
 	// Corresponds with GET /health (the `GetHealth` operationId).
@@ -459,6 +466,23 @@ func (c *Client) GetBlock(ctx context.Context, ref string, reqEditors ...Request
 // Corresponds with GET /blocks (the `GetBlocks` operationId).
 func (c *Client) GetBlocks(ctx context.Context, params *GetBlocksParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetBlocksRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetEvents Stream node events (server-sent events)
+//
+// Long-lived `text/event-stream`. The node sends `event: block` with the mined block as one-line JSON (the body of the `201` of `POST /` or `POST /mine`) after each block it mines, and `event: tx` with the admitted transaction as one-line JSON after each `202` of `POST /tx`. A client that falls more than 16 events behind is disconnected; there is no replay of missed events.
+//
+// Corresponds with GET /events (the `GetEvents` operationId).
+func (c *Client) GetEvents(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetEventsRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -842,6 +866,33 @@ func NewGetBlocksRequest(server string, params *GetBlocksParams) (*http.Request,
 	return req, nil
 }
 
+// NewGetEventsRequest constructs an http.Request for the GetEvents method
+func NewGetEventsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/events")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetHealthRequest constructs an http.Request for the GetHealth method
 func NewGetHealthRequest(server string) (*http.Request, error) {
 	var err error
@@ -1183,6 +1234,15 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /blocks (the `GetBlocks` operationId).
 	GetBlocksWithResponse(ctx context.Context, params *GetBlocksParams, reqEditors ...RequestEditorFn) (*GetBlocksResponse, error)
+
+	// GetEventsWithResponse Stream node events (server-sent events)
+	//
+	// Long-lived `text/event-stream`. The node sends `event: block` with the mined block as one-line JSON (the body of the `201` of `POST /` or `POST /mine`) after each block it mines, and `event: tx` with the admitted transaction as one-line JSON after each `202` of `POST /tx`. A client that falls more than 16 events behind is disconnected; there is no replay of missed events.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /events (the `GetEvents` operationId).
+	GetEventsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetEventsResponse, error)
 
 	// GetHealthWithResponse Report the chain tip
 	//
@@ -1638,6 +1698,54 @@ func (r GetBlocksResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetBlocksResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// GetEventsResponse429Headers the declared response headers of an HTTP 429 response for GetEvents
+type GetEventsResponse429Headers struct {
+	RetryAfter int
+}
+
+type GetEventsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *RateLimited
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *GetEventsResponse429Headers
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r GetEventsResponse) GetJSON429() *RateLimited {
+	return r.JSON429
+}
+
+// GetBody returns the raw response body bytes
+func (r GetEventsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetEventsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetEventsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetEventsResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -2281,6 +2389,21 @@ func (c *ClientWithResponses) GetBlocksWithResponse(ctx context.Context, params 
 	return ParseGetBlocksResponse(rsp)
 }
 
+// GetEventsWithResponse Stream node events (server-sent events)
+//
+// Long-lived `text/event-stream`. The node sends `event: block` with the mined block as one-line JSON (the body of the `201` of `POST /` or `POST /mine`) after each block it mines, and `event: tx` with the admitted transaction as one-line JSON after each `202` of `POST /tx`. A client that falls more than 16 events behind is disconnected; there is no replay of missed events.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /events (the `GetEvents` operationId).
+func (c *ClientWithResponses) GetEventsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetEventsResponse, error) {
+	rsp, err := c.GetEvents(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetEventsResponse(rsp)
+}
+
 // GetHealthWithResponse Report the chain tip
 //
 // Returns a wrapper object for the known response body format(s).
@@ -2741,6 +2864,45 @@ func ParseGetBlocksResponse(rsp *http.Response) (*GetBlocksResponse, error) {
 	switch {
 	case rsp.StatusCode == 429:
 		var headers GetBlocksResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseGetEventsResponse parses an HTTP response from a GetEventsWithResponse call
+func ParseGetEventsResponse(rsp *http.Response) (*GetEventsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetEventsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest RateLimited
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers GetEventsResponse429Headers
 		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
 			var value int
 			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {

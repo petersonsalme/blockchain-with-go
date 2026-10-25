@@ -63,6 +63,9 @@ type contractCase struct {
 	serve func() (h http.Handler, target, body string)
 	// warmup requests are sent first and discarded, to spend rate-limit tokens.
 	warmup int
+	// cancelAfter, when positive, cancels the request context that long after it starts:
+	// a streaming handler ends then.
+	cancelAfter time.Duration
 	// specInvalid marks a request that the spec itself rejects (a 4xx for bad input).
 	specInvalid bool
 }
@@ -243,6 +246,9 @@ func contractCases() []contractCase {
 		{method: "POST", route: "/mine", status: 500, serve: mineWith(nil, errors.New("boom"))},
 		{method: "POST", route: "/mine", status: 504, serve: mineWith(nil, context.DeadlineExceeded)},
 
+		{method: "GET", route: "/events", status: 200, serve: plain("/events"), cancelAfter: 50 * time.Millisecond},
+		{method: "GET", route: "/events", status: 429, serve: limited("/events"), warmup: 1},
+
 		{method: "GET", route: "/mempool", status: 200, serve: plain("/mempool")},
 		{method: "GET", route: "/mempool", status: 429, serve: limited("/mempool"), warmup: 1},
 	}
@@ -319,13 +325,20 @@ var _ = Describe("OpenAPI contract", func() {
 
 				newReq := func() *http.Request {
 					req := httptest.NewRequest(c.method, target, strings.NewReader(body))
+					if c.cancelAfter > 0 {
+						ctx, cancel := context.WithTimeout(req.Context(), c.cancelAfter)
+						DeferCleanup(cancel)
+						req = req.WithContext(ctx)
+					}
 					if body != "" {
 						req.Header.Set("Content-Type", "application/json")
 					}
 					return req
 				}
-				for range c.warmup {
-					h.ServeHTTP(httptest.NewRecorder(), newReq())
+				for range c.warmup { // warmups only spend rate-limit tokens: a cancelled context keeps a stream from holding them open
+					ctx, cancel := context.WithCancel(context.Background())
+					cancel()
+					h.ServeHTTP(httptest.NewRecorder(), newReq().WithContext(ctx))
 				}
 
 				rec := httptest.NewRecorder()
@@ -354,12 +367,17 @@ var _ = Describe("OpenAPI contract", func() {
 				if c.route == "/metrics" && c.status == 200 {
 					wantType = metricsContentType
 				}
+				if c.route == "/events" && c.status == 200 {
+					wantType = "text/event-stream"
+				}
 				Expect(result.Header.Get("Content-Type")).To(Equal(wantType))
 				Expect(openapi3filter.ValidateResponse(context.Background(), &openapi3filter.ResponseValidationInput{
 					RequestValidationInput: input,
 					Status:                 result.StatusCode,
 					Header:                 result.Header,
 					Body:                   io.NopCloser(bytes.NewReader(respBody)),
+					// the validator cannot decode a text/event-stream body; status and headers are still checked
+					Options: &openapi3filter.Options{ExcludeResponseBody: c.route == "/events" && c.status == 200},
 				})).To(Succeed())
 			})
 		}

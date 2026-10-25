@@ -66,6 +66,7 @@ type Server struct {
 	logger        *slog.Logger
 	now           func() time.Time
 	metrics       *metrics
+	events        *hub
 }
 
 // ErrNilService is returned by NewServer when svc is nil.
@@ -92,7 +93,7 @@ func NewServer(svc Chain, cfg Config) (*Server, error) {
 	if now == nil {
 		now = time.Now
 	}
-	return &Server{chain: svc, miningTimeout: timeout, limiter: limiter, logger: logger, now: now, metrics: newMetrics()}, nil
+	return &Server{chain: svc, miningTimeout: timeout, limiter: limiter, logger: logger, now: now, metrics: newMetrics(), events: newHub()}, nil
 }
 
 // ParseMiningTimeout reads a MINING_TIMEOUT value: a Go duration or integer seconds.
@@ -135,6 +136,7 @@ func (s *Server) routes() []route {
 		{"GET /balance/{addr}", s.handleGetBalance},
 		{"GET /health", s.handleHealth},
 		{"GET /metrics", s.handleMetrics},
+		{"GET /events", s.handleEvents},
 		{"POST /legacy/bpm", s.handleLegacyBPM},
 	}
 }
@@ -159,6 +161,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/balance/{addr}", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/health", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/metrics", methodNotAllowed("GET, HEAD"))
+	mux.Handle("/events", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/legacy/bpm", methodNotAllowed("POST"))
 	var h http.Handler = mux
 	if s.limiter != nil {
@@ -432,6 +435,7 @@ func (s *Server) mineAndRespond(w http.ResponseWriter, r *http.Request, mine fun
 		return
 	}
 	s.metrics.observeMining(s.now().Sub(start))
+	s.events.publish(eventBlock, newBlock)
 
 	respondWithJSON(w, http.StatusCreated, newBlock)
 }
@@ -470,6 +474,7 @@ func (s *Server) handleSubmitTx(w http.ResponseWriter, r *http.Request) {
 		respondWithSubmitError(w, err)
 		return
 	}
+	s.events.publish(eventTx, tx)
 	respondWithJSON(w, http.StatusAccepted, submitResponse{ID: tx.ID})
 }
 

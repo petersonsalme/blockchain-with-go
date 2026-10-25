@@ -252,6 +252,27 @@ paths:
                 type: string
         "429":
           $ref: "#/components/responses/RateLimited"
+  /events:
+    get:
+      operationId: getEvents
+      summary: Stream node events (server-sent events)
+      description: >-
+        Long-lived `text/event-stream`. The node sends `event: block` with the mined block as
+        one-line JSON (the body of the `201` of `POST /` or `POST /mine`) after each block it
+        mines, and `event: tx` with the admitted transaction as one-line JSON after each
+        `202` of `POST /tx`. A client that falls more than 16 events behind is disconnected;
+        there is no replay of missed events.
+      responses:
+        "200":
+          description: >-
+            The stream is open. Each event is `event: block` or `event: tx`, then
+            `data: <JSON>`, then a blank line.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /legacy/bpm:
     post:
       operationId: legacyBpm
