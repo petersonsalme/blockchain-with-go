@@ -141,10 +141,11 @@ var _ = Describe("HD derivation", func() {
 		}
 	})
 
-	It("rejects the non-hardened path m/0", func() {
-		for _, path := range []string{"m/0", "m/0'/1"} {
+	It("rejects non-hardened segments", func() {
+		for _, path := range []string{"m/0", "m/0'/1", "m/10", "m/0'/12", "m/44'/501'/0'/10"} {
 			w, err := DeriveKey(make([]byte, 32), path)
 			Expect(errors.Is(err, ErrInvalidPath)).To(BeTrue(), "path %q", path)
+			Expect(err).To(MatchError(ContainSubstring("only hardened")), "path %q", path)
 			Expect(w).To(BeNil())
 		}
 	})
