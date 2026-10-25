@@ -455,3 +455,24 @@ func TestRunReleasesBoltLockWhenBootstrapFails(t *testing.T) {
 	}
 	_ = reopened.Close()
 }
+
+func TestFinish(t *testing.T) {
+	cases := []struct {
+		name   string
+		err    error
+		code   int
+		logged bool
+	}{
+		{"nil", nil, -1, false},
+		{"node error", nodeStopped{errors.New("boom")}, 1, true},
+		{"other command error", errors.New("bad flag"), 1, false},
+	}
+	for _, c := range cases {
+		var buf bytes.Buffer
+		code := -1
+		finish(c.err, slog.New(slog.NewJSONHandler(&buf, nil)), func(n int) { code = n })
+		if code != c.code || (buf.Len() > 0) != c.logged {
+			t.Errorf("%s: exit code %d, log %q; want code %d, logged %v", c.name, code, buf.String(), c.code, c.logged)
+		}
+	}
+}

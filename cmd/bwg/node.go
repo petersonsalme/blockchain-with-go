@@ -6,17 +6,14 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -30,15 +27,15 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/bolt"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/memory"
 	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
+	"github.com/spf13/cobra"
 )
 
-func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	err := execute(ctx, logger, os.Args[1:], os.Stdout)
-	stop() // os.Exit skips deferred calls
-	fatalIf(err, logger, os.Exit)
-}
+// nodeStopped marks an error returned by the node command, so main logs it as
+// "node stopped" instead of leaving it to cobra's text output.
+type nodeStopped struct{ err error }
+
+func (e nodeStopped) Error() string { return e.err.Error() }
+func (e nodeStopped) Unwrap() error { return e.err }
 
 // fatalIf logs err at error level and calls exit(1) unless err is nil.
 func fatalIf(err error, logger *slog.Logger, exit func(code int)) {
@@ -48,14 +45,33 @@ func fatalIf(err error, logger *slog.Logger, exit func(code int)) {
 	}
 }
 
-// execute runs the node, or, with -reindex, rebuilds the indexes of DATA_DIR and returns.
-func execute(ctx context.Context, logger *slog.Logger, args []string, stdout io.Writer) error {
-	flags := flag.NewFlagSet("node", flag.ContinueOnError)
-	reindex := flags.Bool("reindex", false, "rebuild the indexes of DATA_DIR/chain.db and exit")
-	if err := flags.Parse(args); err != nil {
-		return err
+// newNodeCmd builds `bwg node`: it runs the node, or, with --reindex, rebuilds
+// the indexes of DATA_DIR and returns. Configuration comes from the environment
+// and .env, never from flags.
+func newNodeCmd(logger *slog.Logger) *cobra.Command {
+	var reindex bool
+	cmd := &cobra.Command{
+		Use:          "node",
+		Short:        "Run the node (configured by environment and .env)",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		// main reports a node error as a JSON "node stopped" line, not as cobra text.
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := runNode(cmd.Context(), logger, reindex, cmd.OutOrStdout()); err != nil {
+				return nodeStopped{err}
+			}
+			return nil
+		},
 	}
-	if *reindex {
+	cmd.Flags().BoolVar(&reindex, "reindex", false, "rebuild the indexes of DATA_DIR/chain.db and exit")
+	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return nodeStopped{err} })
+	return cmd
+}
+
+// runNode runs the node, or, with reindex, rebuilds the indexes of DATA_DIR and returns.
+func runNode(ctx context.Context, logger *slog.Logger, reindex bool, stdout io.Writer) error {
+	if reindex {
 		return reindexData(stdout)
 	}
 	return bootstrap(ctx, logger)
@@ -69,7 +85,7 @@ func reindexData(stdout io.Writer) error {
 	}
 	dataDir := os.Getenv(dataDirEnvVar)
 	if strings.TrimSpace(dataDir) == "" {
-		return fmt.Errorf("%s: -reindex needs a DATA_DIR; the in-memory repository has no indexes to rebuild", dataDirEnvVar)
+		return fmt.Errorf("%s: --reindex needs a DATA_DIR; the in-memory repository has no indexes to rebuild", dataDirEnvVar)
 	}
 	repo, err := bolt.Open(filepath.Join(dataDir, "chain.db"))
 	if err != nil {

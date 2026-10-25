@@ -14,7 +14,7 @@ This is a personal learning project and a pilot for AI-agent tooling. Changes ma
 
 - [ ] `go test ./...` passes
 - [ ] `gofmt -s -l .` reports nothing
-- [ ] `go build -o /dev/null ./cmd/node` succeeds
+- [ ] `go build -o /dev/null ./cmd/bwg` succeeds
 - [ ] Dependencies still point inward (`domain` imports nothing internal; `chain` does not import `server` or `net/http`)
 - [ ] No global state added; dependencies are injected through constructors
 - [ ] README updated if behavior, API or configuration changed
