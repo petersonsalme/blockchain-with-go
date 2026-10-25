@@ -1,6 +1,6 @@
 # ADR-0011: Persisted indexes — UTXO set, address → transactions, txid → height
 
-Status: Accepted (board, 2026-10-22, ENG-28) — option B
+Status: Accepted (board, 2026-10-22, ENG-28) — option B. Superseded in part by ADR-0014
 
 ## Context
 - ENG-28 item 1 is **already delivered**: `BlockRepository.ByHeight`/`ByHash` exist; `memory` answers both from a slice/map (O(1)); `bolt` answers with one B+tree key lookup (`blocks` and `hashes` buckets, O(log n) pages, no chain scan). Strict O(1) is not possible on bbolt; the measurable criterion is "time independent of chain length" (benchmark at 1k vs 100k blocks).
