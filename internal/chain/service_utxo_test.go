@@ -66,11 +66,7 @@ var _ = Describe("Service UTXO rules", func() {
 				Expect(utxoSnapshot(repo)).To(Equal(snapshot))
 			}
 			expectRebuildMatches := func() {
-				all, err := repo.All()
-				Expect(err).NotTo(HaveOccurred())
-				built, err := domain.BuildUTXOSet(all)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(utxoSnapshot(repo)).To(Equal(built))
+				Expect(utxoSnapshot(repo)).To(Equal(replayRepo(repo)))
 			}
 
 			BeforeEach(func() {

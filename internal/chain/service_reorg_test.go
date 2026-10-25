@@ -643,7 +643,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 							defer wg.Done()
 							_, err := svc.ReplaceChain(ctx, cand)
 							if err != nil {
-								Expect(errors.Is(err, ErrInsufficientWork) || errors.Is(err, domain.ErrInputMissingOrSpent)).To(BeTrue(), "%v", err)
+								Expect(errors.Is(err, ErrInsufficientWork) || errors.Is(err, domain.ErrInputMissingOrSpent) || errors.Is(err, storage.ErrReorgTooDeep)).To(BeTrue(), "%v", err)
 							}
 						}()
 					}
@@ -667,7 +667,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 						Expect(blocks[i].PrevHash).To(Equal(blocks[i-1].Hash))
 						Expect(eng.Verify(blocks[:i], blocks[i])).To(Succeed())
 					}
-					Expect(utxoSnapshot(repo)).To(Equal(replay(blocks)))
+					Expect(utxoSnapshot(repo)).To(Equal(replayRepo(repo)))
 				})
 			})
 		})

@@ -1,7 +1,6 @@
 package chain
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -183,7 +182,8 @@ func verifyInputs(view domain.UTXOView, txs []domain.Transaction) error {
 	return nil
 }
 
-// Blocks returns a snapshot of the chain, genesis first.
+// Blocks returns a snapshot of the chain, genesis first. Blocks below the
+// pruned height come as headers, with no transactions.
 func (s *Service) Blocks() ([]*domain.Block, error) {
 	return s.repo.All()
 }
@@ -193,17 +193,40 @@ func (s *Service) Tip() (*domain.Block, error) {
 	return s.repo.Last()
 }
 
-// BlockByHeight returns the block with Index h, or storage.ErrNotFound.
+// BlockByHeight returns the block with Index h, storage.ErrNotFound when there
+// is none, or storage.ErrPruned when its body was pruned.
 func (s *Service) BlockByHeight(h int) (*domain.Block, error) {
-	return s.repo.ByHeight(h)
+	b, err := s.repo.ByHeight(h)
+	if err != nil {
+		return nil, err
+	}
+	return s.retained(b)
 }
 
-// BlockByHash returns the block with the given hash, or storage.ErrNotFound.
+// BlockByHash returns the block with the given hash, storage.ErrNotFound when
+// there is none, or storage.ErrPruned when its body was pruned.
 func (s *Service) BlockByHash(hash string) (*domain.Block, error) {
-	return s.repo.ByHash(hash)
+	b, err := s.repo.ByHash(hash)
+	if err != nil {
+		return nil, err
+	}
+	return s.retained(b)
 }
 
-// BlocksRange returns up to limit blocks starting at height from.
+// retained returns b, or storage.ErrPruned when the repository keeps only its header.
+func (s *Service) retained(b *domain.Block) (*domain.Block, error) {
+	below, err := s.repo.PrunedBelow()
+	if err != nil {
+		return nil, err
+	}
+	if b.Index < below {
+		return nil, storage.ErrPruned
+	}
+	return b, nil
+}
+
+// BlocksRange returns up to limit blocks starting at height from. Blocks below
+// the pruned height come as headers, with no transactions.
 func (s *Service) BlocksRange(from, limit int) ([]*domain.Block, error) {
 	return s.repo.Range(from, limit)
 }
@@ -356,42 +379,29 @@ func (s *Service) consistent(read func() error) error {
 }
 
 // Balance returns the unspent outputs owned by addr, sorted by (TxID, Index),
-// plus their sum. Every unspent output of addr was created by a transaction in
-// the address index, so it reads those transactions and keeps their outputs
-// that the persisted UTXO set still holds. The result is empty when the
-// repository cannot be read.
+// plus their sum, read from the repository's address index, which also covers
+// outputs created in pruned blocks. The result is empty when the repository
+// cannot be read.
 func (s *Service) Balance(addr string) (uint64, []UTXO) {
 	var (
 		balance uint64
 		utxos   []UTXO
 	)
 	err := s.consistent(func() error {
-		txs, err := s.addressTxs(addr)
 		balance, utxos = 0, make([]UTXO, 0)
+		owned, err := s.repo.UTXOsByAddress(addr)
 		if err != nil {
 			return err
 		}
-		for i := range txs {
-			txid := txs[i].CalculateHash()
-			for j := range txs[i].Outputs {
-				op := domain.OutPoint{TxID: txid, Index: uint32(j)}
-				if got, ok := s.repo.Lookup(op); ok && got.Address == addr {
-					balance += got.Amount
-					utxos = append(utxos, UTXO{TxID: op.TxID, Index: op.Index, Amount: got.Amount})
-				}
-			}
+		for _, u := range owned {
+			balance += u.Amount
+			utxos = append(utxos, UTXO{TxID: u.OutPoint.TxID, Index: u.OutPoint.Index, Amount: u.Amount})
 		}
 		return nil
 	})
 	if err != nil {
 		return 0, make([]UTXO, 0)
 	}
-	slices.SortFunc(utxos, func(a, b UTXO) int {
-		if c := strings.Compare(a.TxID, b.TxID); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.Index, b.Index)
-	})
 	return balance, utxos
 }
 
@@ -693,10 +703,11 @@ func (s *Service) ReplaceChain(ctx context.Context, candidate []*domain.Block) (
 	}
 
 	// forkState is the UTXO set at the fork, the base the candidate is checked
-	// against.
-	forkState, err := domain.BuildUTXOSet(local[:fork])
+	// against. A fork below the pruned history fails with storage.ErrReorgTooDeep
+	// before anything is written.
+	forkState, err := s.repo.ForkState(fork)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("chain: fork at height %d: %w", fork, err)
 	}
 
 	// The shared prefix is the local one, whatever else the candidate carries there.

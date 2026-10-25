@@ -23,6 +23,10 @@ type indexSpy struct {
 	storage.IndexedRepository
 	all     atomic.Int32
 	byTxErr error
+	// utxoErr fails UTXOsByAddress.
+	utxoErr error
+	// prunedErr fails PrunedBelow.
+	prunedErr error
 	// heightErrAfter fails TxHeight from its n-th call on (0 = never).
 	heightErrAfter int32
 	heights        atomic.Int32
@@ -38,6 +42,20 @@ type indexSpy struct {
 func (s *indexSpy) All() ([]*domain.Block, error) {
 	s.all.Add(1)
 	return s.IndexedRepository.All()
+}
+
+func (s *indexSpy) UTXOsByAddress(addr string) ([]storage.AddressUTXO, error) {
+	if s.utxoErr != nil {
+		return nil, s.utxoErr
+	}
+	return s.IndexedRepository.UTXOsByAddress(addr)
+}
+
+func (s *indexSpy) PrunedBelow() (int, error) {
+	if s.prunedErr != nil {
+		return 0, s.prunedErr
+	}
+	return s.IndexedRepository.PrunedBelow()
 }
 
 func (s *indexSpy) Last() (*domain.Block, error) {
@@ -169,6 +187,15 @@ var _ = Describe("Service persisted indexes", func() {
 					Expect(err).To(MatchError(storage.ErrNotFound))
 					_, err = svc.TxProof(onlyA.ID)
 					Expect(err).To(MatchError(ErrTxNotFound))
+				})
+
+				It("returns the error of reading the pruned height", func() {
+					boom := errors.New("boom")
+					spy.prunedErr = boom
+					_, err := svc.BlockByHeight(1)
+					Expect(err).To(MatchError(boom))
+					_, err = svc.BlockByHash(mustAll(repo)[1].Hash)
+					Expect(err).To(MatchError(boom))
 				})
 
 				It("returns the read error when the block of an indexed transaction cannot be read", func() {
@@ -335,7 +362,7 @@ var _ = Describe("Service persisted indexes", func() {
 				})
 
 				It("is empty when the repository cannot be read", func() {
-					spy.byTxErr = errors.New("boom")
+					spy.utxoErr = errors.New("boom")
 					got, utxos := svc.Balance(f.owner.Address())
 					Expect(got).To(BeZero())
 					Expect(utxos).NotTo(BeNil())
