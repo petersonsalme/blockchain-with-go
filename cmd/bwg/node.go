@@ -49,7 +49,10 @@ func fatalIf(err error, logger *slog.Logger, exit func(code int)) {
 // the indexes of DATA_DIR and returns. Configuration comes from the environment
 // and .env, never from flags.
 func newNodeCmd(logger *slog.Logger) *cobra.Command {
-	var reindex bool
+	var (
+		reindex                              bool
+		snapshotExport, snapshotImport, hash string
+	)
 	cmd := &cobra.Command{
 		Use:          "node",
 		Short:        "Run the node (configured by environment and .env)",
@@ -58,15 +61,39 @@ func newNodeCmd(logger *slog.Logger) *cobra.Command {
 		// main reports a node error as a JSON "node stopped" line, not as cobra text.
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := runNode(cmd.Context(), logger, reindex, cmd.OutOrStdout()); err != nil {
+			var err error
+			if snapshotExport != "" || snapshotImport != "" || hash != "" {
+				err = runSnapshot(cmd, reindex, snapshotExport, snapshotImport, hash)
+			} else {
+				err = runNode(cmd.Context(), logger, reindex, cmd.OutOrStdout())
+			}
+			if err != nil {
 				return nodeStopped{err}
 			}
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&reindex, "reindex", false, "rebuild the indexes of DATA_DIR/chain.db and exit")
+	cmd.Flags().StringVar(&snapshotExport, "snapshot-export", "", "write the snapshot stored in DATA_DIR/chain.db to FILE and exit")
+	cmd.Flags().StringVar(&snapshotImport, "snapshot-import", "", "restore an empty DATA_DIR/chain.db from the snapshot FILE and exit; needs --snapshot-hash")
+	cmd.Flags().StringVar(&hash, "snapshot-hash", "", "hash the --snapshot-import file must carry (hex)")
 	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return nodeStopped{err} })
 	return cmd
+}
+
+// runSnapshot runs --snapshot-export or --snapshot-import after loading .env when present.
+// The flags exclude each other and --reindex; none of them opens a port.
+func runSnapshot(cmd *cobra.Command, reindex bool, export, imp, hash string) error {
+	if (export != "") == (imp != "") || reindex || (hash != "" && imp == "") {
+		return errors.New("use exactly one of --snapshot-export or --snapshot-import (with --snapshot-hash), and not --reindex")
+	}
+	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if export != "" {
+		return exportSnapshot(export, cmd.OutOrStdout())
+	}
+	return importSnapshot(imp, hash, cmd.OutOrStdout())
 }
 
 // runNode runs the node, or, with reindex, rebuilds the indexes of DATA_DIR and returns.
@@ -259,14 +286,19 @@ const dataDirEnvVar = "DATA_DIR"
 
 // openRepository returns an in-memory repository when dataDir is empty, or opens
 // a bbolt repository at dataDir/chain.db, creating dataDir with 0o700 if needed.
-func openRepository(dataDir string) (storage.IndexedRepository, func() error, error) {
+// Either one snapshots and prunes as p says.
+func openRepository(dataDir string, p storage.Pruning) (storage.IndexedRepository, func() error, error) {
 	if strings.TrimSpace(dataDir) == "" {
-		return memory.New(), func() error { return nil }, nil
+		repo, err := memory.NewPruned(p)
+		if err != nil {
+			return nil, nil, err
+		}
+		return repo, func() error { return nil }, nil
 	}
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, nil, err
 	}
-	repo, err := bolt.Open(filepath.Join(dataDir, "chain.db"))
+	repo, err := bolt.OpenPruned(filepath.Join(dataDir, "chain.db"), p)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -275,7 +307,11 @@ func openRepository(dataDir string) (storage.IndexedRepository, func() error, er
 
 // run wires repository, consensus, service and server, then serves until ctx is done.
 func run(ctx context.Context, logger *slog.Logger) error {
-	repo, closeRepo, err := openRepository(os.Getenv(dataDirEnvVar))
+	pruning, err := parsePruning()
+	if err != nil {
+		return err
+	}
+	repo, closeRepo, err := openRepository(os.Getenv(dataDirEnvVar), pruning)
 	if err != nil {
 		return err
 	}

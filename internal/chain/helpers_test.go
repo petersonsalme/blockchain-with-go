@@ -24,16 +24,37 @@ const fundedOutputs = 12
 type backend struct {
 	name string
 	open func() storage.IndexedRepository
+	// pruned backends drop block bodies below PrunedBelow.
+	pruned bool
 }
 
 var backends = []backend{
-	{"memory", func() storage.IndexedRepository { return memory.New() }},
+	{"memory", func() storage.IndexedRepository { return memory.New() }, false},
 	{"bolt", func() storage.IndexedRepository {
 		r, err := bolt.Open(filepath.Join(GinkgoT().TempDir(), "chain.db"))
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(func() { _ = r.Close() })
 		return r
-	}},
+	}, false},
+}
+
+// prunedPolicy snapshots every 2 blocks and keeps the bodies of the last 3.
+var prunedPolicy = storage.Pruning{SnapshotInterval: 2, KeepBlocks: 3}
+
+func init() {
+	backends = append(backends,
+		backend{"memory-pruned", func() storage.IndexedRepository {
+			r, err := memory.NewPruned(prunedPolicy)
+			Expect(err).NotTo(HaveOccurred())
+			return r
+		}, true},
+		backend{"bolt-pruned", func() storage.IndexedRepository {
+			r, err := bolt.OpenPruned(filepath.Join(GinkgoT().TempDir(), "chain.db"), prunedPolicy)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func() { _ = r.Close() })
+			return r
+		}, true},
+	)
 }
 
 // newRepo opens an empty repository of the backend under test.
@@ -126,11 +147,17 @@ func hashes(chain []*domain.Block) []string {
 	return out
 }
 
-// utxoSnapshot is the UTXO set persisted by repo: the repository only answers
-// Lookup, so it asks for every output any stored block ever created.
+// utxoSnapshot is the UTXO set persisted by repo. A complete repository only
+// answers Lookup, so it asks for every output any stored block ever created; a
+// pruned one has lost those bodies and hands out its current set instead.
 func utxoSnapshot(repo storage.IndexedRepository) domain.UTXOSet {
 	blocks, err := repo.All()
 	Expect(err).NotTo(HaveOccurred())
+	if below, err := repo.PrunedBelow(); err == nil && below > 0 {
+		set, err := repo.ForkState(len(blocks))
+		Expect(err).NotTo(HaveOccurred())
+		return set
+	}
 	set := domain.UTXOSet{}
 	for _, b := range blocks {
 		for i := range b.Transactions {
@@ -142,6 +169,28 @@ func utxoSnapshot(repo storage.IndexedRepository) domain.UTXOSet {
 				}
 			}
 		}
+	}
+	return set
+}
+
+// replayRepo rebuilds the UTXO set from the chain repo holds: from genesis for
+// a complete repository, from its snapshot and the retained bodies after it for
+// a pruned one.
+func replayRepo(repo storage.IndexedRepository) domain.UTXOSet {
+	blocks := mustAll(repo)
+	below, err := repo.PrunedBelow()
+	Expect(err).NotTo(HaveOccurred())
+	if below == 0 {
+		return replay(blocks)
+	}
+	snap, err := repo.Snapshot()
+	Expect(err).NotTo(HaveOccurred())
+	Expect(snap.Height).To(Equal(below - 1))
+	set := snap.UTXOs
+	for _, b := range blocks[below:] {
+		delta, err := domain.BlockDelta(set, b, false)
+		Expect(err).NotTo(HaveOccurred())
+		set.Apply(delta)
 	}
 	return set
 }

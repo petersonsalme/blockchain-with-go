@@ -695,6 +695,187 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 		})
 	})
 
+	Describe("Restore", func() {
+		// headersOf returns n linked headers whose Hash is the CalculateHash of the fields they carry.
+		headersOf := func(n int) []*domain.Block {
+			out := make([]*domain.Block, n)
+			for i := range out {
+				b := &domain.Block{Index: i, Timestamp: time.Unix(1_700_000_000+int64(i), 0).UTC(), MerkleRoot: fmt.Sprintf("mr%d", i), Transactions: []domain.Transaction{}}
+				if i > 0 {
+					b.PrevHash = out[i-1].Hash
+				}
+				// The genesis of a real chain is never sealed: its Hash stays empty.
+				if i > 0 {
+					b.Hash = b.CalculateHash()
+				}
+				out[i] = b
+			}
+			return out
+		}
+		copySet := func(src domain.UTXOSet) domain.UTXOSet {
+			set := domain.UTXOSet{}
+			for op, o := range src {
+				set[op] = o
+			}
+			return set
+		}
+		expectEmpty := func(r storage.IndexedRepository) {
+			all, err := r.All()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(all).To(BeEmpty())
+			_, err = r.Snapshot()
+			Expect(err).To(MatchError(storage.ErrNotFound))
+			below, err := r.PrunedBelow()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(below).To(BeZero())
+			for _, op := range fx.outpoints {
+				_, ok := r.Lookup(op)
+				Expect(ok).To(BeFalse())
+			}
+			for _, a := range []string{fx.addrA, fx.addrB, fx.addrC} {
+				owned, err := r.UTXOsByAddress(a)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(owned).To(BeEmpty())
+			}
+		}
+
+		It("stores the headers, the UTXO set, the snapshot and the pruning marks", func() {
+			headers := headersOf(5)
+			set := copySet(fx.main.set)
+			Expect(repo.Restore(headers, set)).To(Succeed())
+
+			all, err := repo.All()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(all).To(HaveLen(5))
+			for i, b := range all {
+				Expect(b.Hash).To(Equal(headers[i].Hash))
+				Expect(b.PrevHash).To(Equal(headers[i].PrevHash))
+				Expect(b.MerkleRoot).To(Equal(headers[i].MerkleRoot))
+				Expect(b.Transactions).To(BeEmpty())
+				if i == 0 {
+					continue
+				}
+				byHash, err := repo.ByHash(headers[i].Hash)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(byHash.Index).To(Equal(i))
+			}
+			last, err := repo.Last()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(last.Hash).To(Equal(headers[4].Hash))
+
+			snap, err := repo.Snapshot()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(snap.Height).To(Equal(4))
+			Expect(snap.BlockHash).To(Equal(headers[4].Hash))
+			Expect(snap.Hash).To(Equal(storage.SnapshotHash(headers[4].Hash, set)))
+			Expect(snap.UTXOs).To(Equal(set))
+			below, err := repo.PrunedBelow()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(below).To(Equal(5))
+			current, err := repo.IndexCurrent()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(current).To(BeTrue())
+
+			for op, o := range set {
+				got, ok := repo.Lookup(op)
+				Expect(ok).To(BeTrue())
+				Expect(got).To(Equal(o))
+			}
+			for _, a := range []string{fx.addrA, fx.addrB, fx.addrC} {
+				owned, err := repo.UTXOsByAddress(a)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(owned).To(Equal(expectedByAddr(set, a)))
+			}
+			state, err := repo.ForkState(5)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(state).To(Equal(set))
+		})
+
+		It("copies its inputs", func() {
+			headers := headersOf(3)
+			set := copySet(fx.main.set)
+			want := len(set)
+			Expect(repo.Restore(headers, set)).To(Succeed())
+			headers[2].Hash = "changed"
+			for op := range set {
+				delete(set, op)
+			}
+			last, err := repo.Last()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(last.Hash).NotTo(Equal("changed"))
+			snap, err := repo.Snapshot()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(snap.UTXOs).To(HaveLen(want))
+		})
+
+		It("accepts the next Commit and keeps the indexes current", func() {
+			headers := headersOf(5)
+			set := copySet(fx.main.set)
+			Expect(repo.Restore(headers, set)).To(Succeed())
+
+			var op domain.OutPoint
+			for op = range set {
+				break
+			}
+			tx := indexedTx(99, []domain.OutPoint{op}, domain.TxOut{Amount: set[op].Amount, Address: fx.addrC})
+			next := &domain.Block{Index: 5, PrevHash: headers[4].Hash, Hash: "next", Transactions: []domain.Transaction{tx}}
+			d, err := domain.BlockDelta(set, next, false)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(repo.Commit(next, d)).To(Succeed())
+
+			_, ok := repo.Lookup(op)
+			Expect(ok).To(BeFalse())
+			_, ok = repo.Lookup(spend(tx, 0))
+			Expect(ok).To(BeTrue())
+			h, err := repo.TxHeight(tx.CalculateHash())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(h).To(Equal(5))
+		})
+
+		It("rejects a repository that already holds a block", func() {
+			Expect(repo.Append(&domain.Block{Index: 0, Hash: "h0"})).To(Succeed())
+			Expect(repo.Restore(headersOf(3), copySet(fx.main.set))).To(MatchError(storage.ErrConflict))
+			all, err := repo.All()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(all).To(HaveLen(1))
+			_, err = repo.Snapshot()
+			Expect(err).To(MatchError(storage.ErrNotFound))
+			for _, op := range fx.outpoints {
+				_, ok := repo.Lookup(op)
+				Expect(ok).To(BeFalse())
+			}
+		})
+
+		It("rejects a second Restore", func() {
+			Expect(repo.Restore(headersOf(3), copySet(fx.main.set))).To(Succeed())
+			Expect(repo.Restore(headersOf(4), copySet(fx.main.set))).To(MatchError(storage.ErrConflict))
+			all, err := repo.All()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(all).To(HaveLen(3))
+		})
+
+		DescribeTable("rejects bad headers and leaves the repository empty",
+			func(bad func([]*domain.Block) []*domain.Block) {
+				Expect(repo.Restore(bad(headersOf(4)), copySet(fx.main.set))).To(MatchError(storage.ErrConflict))
+				expectEmpty(repo)
+			},
+			Entry("no headers", func([]*domain.Block) []*domain.Block { return nil }),
+			Entry("a nil header", func(h []*domain.Block) []*domain.Block { h[2] = nil; return h }),
+			Entry("a wrong index", func(h []*domain.Block) []*domain.Block { h[2].Index = 7; return h }),
+			Entry("a broken PrevHash", func(h []*domain.Block) []*domain.Block { h[3].PrevHash = h[1].Hash; return h }),
+			Entry("a wrong hash", func(h []*domain.Block) []*domain.Block { h[3].Hash = "forged"; return h }),
+			Entry("a field changed after hashing", func(h []*domain.Block) []*domain.Block { h[3].Nonce++; return h }),
+			Entry("a wrong genesis hash", func(h []*domain.Block) []*domain.Block { h[0].Hash = "forged"; return h }),
+			Entry("a genesis changed after hashing", func(h []*domain.Block) []*domain.Block {
+				h[0].Hash = h[0].CalculateHash()
+				h[1].PrevHash = h[0].Hash
+				h[1].Hash = h[1].CalculateHash()
+				h[0].Nonce++
+				return h
+			}),
+		)
+	})
+
 	Describe("Commit", func() {
 		It("stores the blocks, the UTXO set and the indexes", func() {
 			commitAll(repo, fx.main.blocks, fx.main.deltas)

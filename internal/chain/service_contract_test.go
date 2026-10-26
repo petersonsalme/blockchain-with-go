@@ -68,6 +68,14 @@ func (p *poisonedAll) All() ([]*domain.Block, error) {
 	return p.IndexedRepository.All()
 }
 
+// ForkState follows the poisoned chain, so the fork base matches what All returns.
+func (p *poisonedAll) ForkState(height int) (domain.UTXOSet, error) {
+	if p.chain != nil {
+		return domain.BuildUTXOSet(p.chain[:height])
+	}
+	return p.IndexedRepository.ForkState(height)
+}
+
 var _ = Describe("Service contracts", func() {
 	ctx := context.Background()
 	missing := hex.EncodeToString(make([]byte, 32))
