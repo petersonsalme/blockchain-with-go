@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
+	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
 )
 
 // ErrInvalidSnapshot is returned by ReadSnapshotFile when the file is not
@@ -50,7 +51,9 @@ func WriteSnapshotFile(w io.Writer, headers []*domain.Block, s Snapshot) error {
 // ReadSnapshotFile reads what WriteSnapshotFile wrote. It returns
 // ErrInvalidSnapshot, and no data, when the JSON is invalid, height is not
 // len(headers)-1, blockHash is not the hash of the last header, or hash is not
-// SnapshotHash(blockHash, utxos).
+// SnapshotHash(blockHash, utxos), or a UTXO has an address that fails
+// wallet.ValidateAddress or a zero amount (the rules of domain.BlockDelta), so
+// SnapshotHash only ever sees valid addresses.
 func ReadSnapshotFile(r io.Reader) ([]*domain.Block, Snapshot, error) {
 	var f snapshotFile
 
@@ -73,6 +76,10 @@ func ReadSnapshotFile(r io.Reader) ([]*domain.Block, Snapshot, error) {
 
 	set := make(domain.UTXOSet, len(f.UTXOs))
 	for _, u := range f.UTXOs {
+		if u.Amount == 0 || wallet.ValidateAddress(u.Address) != nil {
+			return nil, Snapshot{}, fmt.Errorf("%w: utxo %s:%d has an invalid address or a zero amount", ErrInvalidSnapshot, u.TxID, u.Index)
+		}
+
 		set[domain.OutPoint{TxID: u.TxID, Index: u.Index}] = domain.TxOut{Amount: u.Amount, Address: u.Address}
 	}
 
