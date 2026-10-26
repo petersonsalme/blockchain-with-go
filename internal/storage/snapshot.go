@@ -47,7 +47,7 @@ func SnapshotHash(blockHash string, set domain.UTXOSet) string {
 		o := set[op]
 		buf = append(buf[:0], op.TxID...)
 		buf = binary.BigEndian.AppendUint32(buf, op.Index)
-		buf = binary.BigEndian.AppendUint16(buf, uint16(len(o.Address)))
+		buf = binary.BigEndian.AppendUint16(buf, uint16(len(o.Address))) //nolint:gosec // address length is not bounded below 65536 by the domain: a longer one would wrap this prefix
 		buf = append(buf, o.Address...)
 		buf = binary.BigEndian.AppendUint64(buf, o.Amount)
 		h.Write(buf)

@@ -76,14 +76,6 @@ linters:
       enable:
         - leading-whitespace
         - trailing-whitespace
-    gosec:
-      excludes:
-        # Reviewed: sizes are bounded by MaxBlockBytes and the paths come from operator config, not requests.
-        - G101
-        - G115
-        - G304
-        - G306
-        - G703
     revive:
       rules:
         - name: blank-imports
@@ -104,6 +96,22 @@ linters:
         - name: redefines-builtin-id
   exclusions:
     rules:
+      # G101: the matches are the names of environment variables, not credentials.
+      - path: cmd/bwg/node\.go
+        linters: [gosec]
+        text: "G101"
+      # G304/G306/G703: the CLI, the keystore and the peer book open paths given by the operator
+      # (flags, DATA_DIR, keystore location), never paths taken from a request. A snapshot file is public chain data.
+      - path: (cmd/bwg/(node|snapshot)|internal/p2p/persist|pkg/wallet/keystore)\.go
+        linters: [gosec]
+        text: "G(304|306|703)"
+      # G115: heights, sizes and VM jump targets are bounded (jump checks dest < len(code); block size is capped by MaxBlockBytes).
+      - path: internal/(storage/bolt/|mempool/mempool\.go|vm/vm\.go|domain/merkle\.go)
+        linters: [gosec]
+        text: "G115"
+      # The table entries are fixtures that set an environment variable, not test helpers.
+      - path: cmd/bwg/consensus_test\.go
+        linters: [thelper]
       # client.gen.go carries its own package comment and is not edited by hand.
       - path: client/
         linters: [godoclint]
@@ -116,7 +124,7 @@ linters:
         text: mapKey
       # Test fixtures use fixed seeds, local URLs and small constants.
       - path: _test\.go
-        linters: [gosec, unparam, forcetypeassert, thelper, errchkjson, nilnil, prealloc, gochecknoinits, goconst, containedctx]
+        linters: [gosec, unparam, forcetypeassert, errchkjson, nilnil, prealloc, gochecknoinits, goconst, containedctx]
       - path: internal/(storage/storagetest|consensus/consensustest)/
         linters: [prealloc, goconst, gocyclo, maintidx]
       - path: internal/server/contract_test\.go

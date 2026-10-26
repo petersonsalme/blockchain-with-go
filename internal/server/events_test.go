@@ -92,24 +92,24 @@ func (s *sseStream) next(d time.Duration) (sseEvent, bool) {
 
 const eventWait = 5 * time.Second
 
-func newEventsServer(t testing.TB) *Server {
-	t.Helper()
+func newEventsServer(tb testing.TB) *Server {
+	tb.Helper()
 
 	srv, err := NewServer(brokenChain{}, Config{})
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 
 	return srv
 }
 
-func waitSubscribers(t testing.TB, h *hub, want int) {
-	t.Helper()
+func waitSubscribers(tb testing.TB, h *hub, want int) {
+	tb.Helper()
 
 	deadline := time.Now().Add(eventWait)
 	for h.count() != want {
 		if time.Now().After(deadline) {
-			t.Fatalf("subscribers = %d, want %d", h.count(), want)
+			tb.Fatalf("subscribers = %d, want %d", h.count(), want)
 		}
 
 		time.Sleep(5 * time.Millisecond)
