@@ -476,6 +476,10 @@ data: {"index":1,"hash":"...",...}
 
 A client that stays more than 16 events behind is disconnected (reconnect to resume; missed events are not replayed). The stream ends when the node shuts down. Other methods answer `405` with `Allow: GET, HEAD`; the rate limiter applies as on every other route. Events of blocks that arrive by other means than the local mining endpoints are out of scope.
 
+### Web explorer (/explorer/)
+
+A read-only web page embedded in the binary (plain HTML, CSS and JavaScript, no build step, no CDN): open `http://localhost:8080/explorer/`. It lists the latest 20 blocks and adds each new one at the top through `GET /events`, and links blocks to transactions, transactions to addresses (balance and UTXOs) and inputs to the transaction they spend. Views use hash URLs: `#/`, `#/block/{ref}`, `#/tx/{id}`, `#/address/{addr}`. API errors (`400`, `404`, `410 block_pruned`) show as a message with their `code`. The page only sends `GET` requests to the same origin; the responses carry a strict `Content-Security-Policy` and `X-Content-Type-Options: nosniff`. It is not part of the JSON API: it is absent from `openapi.yaml`, and other methods answer `405` with `Allow: GET, HEAD`.
+
 ### POST /p2p/hello and GET /p2p/peers
 
 Peer-to-peer over HTTP ([ADR-0013](docs/adr/0013-p2p-over-http.md)). A node whose `Config.P2P` is unset answers `404` with `code: "p2p_disabled"` on both routes.

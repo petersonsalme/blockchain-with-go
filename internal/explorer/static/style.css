@@ -1,0 +1,19 @@
+:root { color-scheme: light dark; --muted: #6b7280; --line: #d1d5db; --accent: #2563eb; --bad: #b91c1c; }
+body { font-family: system-ui, sans-serif; margin: 0; line-height: 1.4; }
+header { display: flex; justify-content: space-between; align-items: center; padding: .75rem 1.25rem; border-bottom: 1px solid var(--line); }
+.brand { font-weight: 600; text-decoration: none; color: inherit; }
+.live { font-size: .8rem; color: var(--muted); }
+.live.on { color: #15803d; }
+main { padding: 1.25rem; max-width: 64rem; margin: 0 auto; }
+a { color: var(--accent); }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 500; font-size: .85rem; }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; }
+dt { color: var(--muted); }
+dd { margin: 0; }
+.mono { font-family: ui-monospace, monospace; word-break: break-all; }
+.error { border: 1px solid var(--bad); color: var(--bad); padding: .75rem 1rem; border-radius: .25rem; }
+.muted { color: var(--muted); }
+.fresh { animation: flash 1.5s ease-out; }
+@keyframes flash { from { background: rgba(37, 99, 235, .25); } to { background: transparent; } }
