@@ -53,7 +53,7 @@ func New(maxTxs int) *Pool {
 
 // Size is the serialized size of tx, the same encoding Block.Size measures.
 func Size(tx domain.Transaction) int {
-	b, _ := json.Marshal(tx) // Transaction holds only strings, integers and a time.Time: it cannot fail
+	b, _ := json.Marshal(tx) //nolint:errchkjson // Transaction holds only strings, integers and a time.Time: it cannot fail
 	return len(b)
 }
 

@@ -158,7 +158,7 @@ func (t *Transaction) CalculateHash() string {
 		}
 	}
 
-	data, _ := json.Marshal(payload)
+	data, _ := json.Marshal(payload) //nolint:errchkjson // the payload holds only strings and integers: it cannot fail
 	h := sha256.Sum256(data)
 
 	return hex.EncodeToString(h[:])

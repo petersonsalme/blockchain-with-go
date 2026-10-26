@@ -49,6 +49,7 @@ linters:
     - bodyclose
     - noctx
     - contextcheck
+    - errchkjson
   settings:
     nlreturn:
       # Same threshold as wsl_v5's branch-max-lines: a return in a block of up to 2 lines needs no blank line.
@@ -94,7 +95,7 @@ linters:
         text: mapKey
       # Test fixtures use fixed seeds, local URLs and small constants.
       - path: _test\.go
-        linters: [gosec, unparam, forcetypeassert, thelper]
+        linters: [gosec, unparam, forcetypeassert, thelper, errchkjson]
       - path: _test\.go
         linters: [revive]
         text: "(redefines-builtin-id|context-as-argument|empty-block)"
