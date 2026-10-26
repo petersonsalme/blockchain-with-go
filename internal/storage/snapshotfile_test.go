@@ -2,14 +2,23 @@ package storage_test
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
+	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
+)
+
+var (
+	addrBob   = wallet.AddressFromPublicKey(ed25519.PublicKey(bytes.Repeat([]byte{1}, ed25519.PublicKeySize)))
+	addrAlice = wallet.AddressFromPublicKey(ed25519.PublicKey(bytes.Repeat([]byte{2}, ed25519.PublicKeySize)))
+	addrCarol = wallet.AddressFromPublicKey(ed25519.PublicKey(bytes.Repeat([]byte{3}, ed25519.PublicKeySize)))
 )
 
 func fileFixture() ([]*domain.Block, storage.Snapshot) {
@@ -24,9 +33,9 @@ func fileFixture() ([]*domain.Block, storage.Snapshot) {
 	}
 
 	set := domain.UTXOSet{
-		{TxID: "bb", Index: 0}: {Amount: 7, Address: "bob"},
-		{TxID: "aa", Index: 1}: {Amount: 9, Address: "alice"},
-		{TxID: "aa", Index: 0}: {Amount: 5, Address: "carol"},
+		{TxID: "bb", Index: 0}: {Amount: 7, Address: addrBob},
+		{TxID: "aa", Index: 1}: {Amount: 9, Address: addrAlice},
+		{TxID: "aa", Index: 0}: {Amount: 5, Address: addrCarol},
 	}
 	last := headers[2].Hash
 
@@ -107,7 +116,7 @@ func TestSnapshotFileShapeAndOrder(t *testing.T) {
 		idx uint32
 		a   string
 		n   uint64
-	}{{"aa", 0, "carol", 5}, {"aa", 1, "alice", 9}, {"bb", 0, "bob", 7}}
+	}{{"aa", 0, addrCarol, 5}, {"aa", 1, addrAlice, 9}, {"bb", 0, addrBob, 7}}
 	if len(raw.UTXOs) != len(want) {
 		t.Fatalf("utxos = %v", raw.UTXOs)
 	}
@@ -140,12 +149,37 @@ func TestReadSnapshotFileRejects(t *testing.T) {
 		return out
 	}
 
+	// withUTXO rewrites the first utxo and re-signs the file hash, so only the
+	// utxo rule can reject it.
+	withUTXO := func(address string, amount uint64) []byte {
+		headers, snap := fileFixture()
+		snap.UTXOs = domain.UTXOSet{{TxID: "aa", Index: 0}: {Amount: amount, Address: address}}
+		snap.Hash = strings.Repeat("0", 64) // SnapshotHash panics on a 65536 byte address
+
+		if len(address) <= math.MaxUint16 {
+			snap.Hash = storage.SnapshotHash(snap.BlockHash, snap.UTXOs)
+		}
+
+		var buf bytes.Buffer
+
+		err := storage.WriteSnapshotFile(&buf, headers, snap)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		return buf.Bytes()
+	}
+
 	cases := map[string][]byte{
-		"invalid json": []byte("{not json"),
-		"empty":        nil,
-		"height":       mutate(func(m map[string]any) { m["height"] = 1 }),
-		"blockHash":    mutate(func(m map[string]any) { m["blockHash"] = strings.Repeat("0", 64) }),
-		"hash":         mutate(func(m map[string]any) { m["hash"] = strings.Repeat("0", 64) }),
+		"address 65536 bytes": withUTXO(strings.Repeat("a", 65536), 1),
+		"address too short":   withUTXO("bob", 1),
+		"bad checksum":        withUTXO(addrBob[:len(addrBob)-1]+"0", 1),
+		"zero amount":         withUTXO(addrBob, 0),
+		"invalid json":        []byte("{not json"),
+		"empty":               nil,
+		"height":              mutate(func(m map[string]any) { m["height"] = 1 }),
+		"blockHash":           mutate(func(m map[string]any) { m["blockHash"] = strings.Repeat("0", 64) }),
+		"hash":                mutate(func(m map[string]any) { m["hash"] = strings.Repeat("0", 64) }),
 		"amount": mutate(func(m map[string]any) {
 			m["utxos"].([]any)[0].(map[string]any)["amount"] = 6
 		}),

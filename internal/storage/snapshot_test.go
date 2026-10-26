@@ -1,6 +1,8 @@
 package storage_test
 
 import (
+	"math"
+	"strings"
 	"testing"
 
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
@@ -44,4 +46,22 @@ func TestSnapshotHashDependsOnEveryField(t *testing.T) {
 			t.Errorf("hash ignores %s", name)
 		}
 	}
+}
+
+func TestSnapshotHashAddressLengthBound(t *testing.T) {
+	hashOf := func(n int) string {
+		return storage.SnapshotHash("h", domain.UTXOSet{{TxID: "t"}: {Amount: 1, Address: strings.Repeat("a", n)}})
+	}
+
+	if hashOf(math.MaxUint16) == hashOf(math.MaxUint16-1) {
+		t.Fatal("65535 and 65534 byte addresses hash alike")
+	}
+
+	defer func() {
+		if recover() == nil {
+			t.Fatal("65536 byte address did not panic")
+		}
+	}()
+
+	hashOf(math.MaxUint16 + 1)
 }

@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
+	"math"
 	"slices"
 	"strings"
 
@@ -28,6 +30,11 @@ type AddressUTXO struct {
 // SnapshotHash is the hex SHA-256 over the 64-char block hash as ASCII, then
 // each entry of set sorted by (TxID, Index): TxID (ASCII), Index (4 B big-endian),
 // len(Address) (2 B big-endian), Address, Amount (8 B big-endian).
+//
+// Every address of set must be at most math.MaxUint16 bytes, or the 2-byte
+// prefix would wrap and two sets could hash alike: SnapshotHash panics
+// otherwise. Domain addresses (wallet.ValidateAddress) have 50 bytes and
+// ReadSnapshotFile rejects any other, so production paths never reach the panic.
 func SnapshotHash(blockHash string, set domain.UTXOSet) string {
 	ops := make([]domain.OutPoint, 0, len(set))
 	for op := range set {
@@ -47,7 +54,13 @@ func SnapshotHash(blockHash string, set domain.UTXOSet) string {
 		o := set[op]
 		buf = append(buf[:0], op.TxID...)
 		buf = binary.BigEndian.AppendUint32(buf, op.Index)
-		buf = binary.BigEndian.AppendUint16(buf, uint16(len(o.Address))) //nolint:gosec // address length is not bounded below 65536 by the domain: a longer one would wrap this prefix
+
+		addrLen := len(o.Address)
+		if addrLen > math.MaxUint16 {
+			panic(fmt.Sprintf("storage: address of %d bytes does not fit the 2-byte length prefix", addrLen))
+		}
+
+		buf = binary.BigEndian.AppendUint16(buf, uint16(addrLen))
 		buf = append(buf, o.Address...)
 		buf = binary.BigEndian.AppendUint64(buf, o.Amount)
 		h.Write(buf)
