@@ -61,18 +61,18 @@ Everything else (HTTP handlers and DTOs, logging, docs, README, CLI, build files
 
 1. **Validation and Tests:**
    - Run tests and type checking: `go test ./...`
-   - Standard Go formatting: `gofmt -s -w .` or `goimports`
+   - Go formatting (gofumpt + goimports): `golangci-lint fmt`; auto-fix style findings (wsl, nlreturn, godot): `golangci-lint run --fix ./...`
    - Build check: `go build -o /dev/null ./cmd/bwg`
    - Run the node locally: `go run ./cmd/bwg node`
    - Regenerate the client after editing `openapi.yaml`: `go generate ./client/...` (CI fails on `git diff --exit-code client/`)
    - CI quality gates (`.github/workflows/go-ci.yml`), local equivalents:
      - Tests with race detector and coverage profile: `go test -race -covermode=atomic -coverprofile=coverage.out ./...`
      - Coverage floor: `scripts/check-coverage.sh coverage.out 90.0` (fails when total statement coverage is below **90.0%**; excludes, by explicit import path, the contract suites `internal/consensus/consensustest` and `internal/storage/storagetest`, which only run from adapter tests, and the generated `client`, exercised by `internal/server/contract_test.go`). Reference measurement: 94,6% at `450f42e`, without the two contract suites.
-     - Lint: `golangci-lint run ./...` (golangci-lint v2.15.0, default linters)
+     - Lint: `golangci-lint run ./...` (golangci-lint v2.15.0; the linter set, formatters and exclusions live in `.golangci.yml`, every exclusion carries its reason; a new `//nolint` needs one too)
      - Vulnerabilities: `go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...`
    - Mutation testing (gremlins v0.6.0) — two supported forms:
      - Per package: `go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --timeout-coefficient 20 ./internal/<package>` (or `./pkg/wallet`)
-     - Per diff: `go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --timeout-coefficient 20 --diff <base>` (run at the root and **without** a package)
+     - Per diff: `go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --timeout-coefficient 20 -E 'storagetest|consensustest' --diff <base>` (run at the root and **without** a package; `-E` leaves out the shared contract suites, which are test code and have no coverage of their own)
      - **Execution rule:** never combine `--diff` with a package path (it produces a false green with every mutant marked `Skipped`). If `Skipped` equals the total, the result is invalid. Mutants with status `TIMED OUT` do **not** count as killed: gremlins did not classify them. Run `go clean -testcache` and repeat before accepting the result. With the test cache active, the coverage run takes milliseconds, the time limit becomes tiny and almost every mutant turns `TIMED OUT` (false green).
      - **Results are not recorded in the repository:** paste the gremlins output into the issue comment and the PR description. Do not create or update files in `docs/` to record it.
    - Mutation threshold: zero `LIVED` or `NOT COVERED` mutants on the lines changed by the diff. An equivalent mutant is only accepted if it is listed in the QA report with a one-line justification and the reviewer agrees. A surviving mutant remains blocking.

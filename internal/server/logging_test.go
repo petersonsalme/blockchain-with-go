@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -25,17 +26,24 @@ type logRecord struct {
 
 func decodeLog(t *testing.T, buf *bytes.Buffer) []logRecord {
 	t.Helper()
+
 	var out []logRecord
-	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+
+	for line := range strings.SplitSeq(strings.TrimSpace(buf.String()), "\n") {
 		if line == "" {
 			continue
 		}
+
 		var r logRecord
-		if err := json.Unmarshal([]byte(line), &r); err != nil {
+
+		err := json.Unmarshal([]byte(line), &r)
+		if err != nil {
 			t.Fatalf("log line %q is not JSON: %v", line, err)
 		}
+
 		out = append(out, r)
 	}
+
 	return out
 }
 
@@ -62,6 +70,7 @@ func TestRequestLogging(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
+
 			srv, err := NewServer(svc, Config{
 				Logger:    slog.New(slog.NewJSONHandler(&buf, nil)),
 				RateLimit: tc.rateLimit,
@@ -69,16 +78,19 @@ func TestRequestLogging(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			h := srv.Handler()
 
 			var rec *httptest.ResponseRecorder
+
 			serve := func() {
-				req := httptest.NewRequest(tc.method, tc.path, nil)
+				req := httptest.NewRequestWithContext(context.Background(), tc.method, tc.path, nil)
 				req.RemoteAddr = "192.0.2.1:1234"
 				rec = httptest.NewRecorder()
 				h.ServeHTTP(rec, req)
 			}
 			serve()
+
 			if tc.rateLimit > 0 {
 				buf.Reset()
 				serve() // the first request spends the only token
@@ -88,19 +100,24 @@ func TestRequestLogging(t *testing.T) {
 			if len(logs) != 1 {
 				t.Fatalf("got %d records, want exactly 1: %q", len(logs), buf.String())
 			}
+
 			got := logs[0]
 			if got.Level != "INFO" || got.Msg != "http request" {
 				t.Errorf("level/msg = %s/%q, want INFO/\"http request\"", got.Level, got.Msg)
 			}
+
 			if got.Method != tc.method {
 				t.Errorf("method = %q, want %q", got.Method, tc.method)
 			}
+
 			if got.Route != tc.wantRoute {
 				t.Errorf("route = %q, want %q", got.Route, tc.wantRoute)
 			}
+
 			if got.Status != tc.wantStatus || rec.Code != tc.wantStatus {
 				t.Errorf("logged status %d, client status %d, want %d", got.Status, rec.Code, tc.wantStatus)
 			}
+
 			if got.DurationMS == nil || *got.DurationMS < 0 {
 				t.Errorf("duration_ms = %v, want a value >= 0", got.DurationMS)
 			}
@@ -112,11 +129,13 @@ func TestRequestLoggingStatusRecorder(t *testing.T) {
 	serve := func(h http.HandlerFunc) logRecord {
 		var buf bytes.Buffer
 		logRequests(slog.New(slog.NewJSONHandler(&buf, nil)), h).
-			ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+			ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil))
+
 		logs := decodeLog(t, &buf)
 		if len(logs) != 1 {
 			t.Fatalf("got %d records, want 1", len(logs))
 		}
+
 		return logs[0]
 	}
 
@@ -162,8 +181,10 @@ func TestNilLoggerDiscards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	srv.Handler().ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health", nil))
+
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", rec.Code)
 	}

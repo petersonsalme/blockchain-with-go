@@ -36,7 +36,9 @@ var _ = Describe("Weak Ed25519 public keys on inputs", func() {
 		for i := range b {
 			b[i] = mid
 		}
+
 		b[0], b[31] = first, last
+
 		return hex.EncodeToString(b)
 	}
 
@@ -53,7 +55,6 @@ var _ = Describe("Weak Ed25519 public keys on inputs", func() {
 		"y=p-y8 sign 1": "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
 	}
 	for name, pub := range smallOrder {
-		pub := pub
 		It("rejects small-order key "+name, func() {
 			Expect(domain.VerifyInputSignature(weakTx(pub), 0, spent)).To(MatchError(domain.ErrInvalidPublicKey))
 		})
@@ -68,7 +69,6 @@ var _ = Describe("Weak Ed25519 public keys on inputs", func() {
 		"y=2^255-1 sign 1": hexLE(0xff, 0xff, 0xff),
 	}
 	for name, pub := range nonCanonical {
-		pub := pub
 		It("rejects non-canonical key "+name, func() {
 			Expect(domain.VerifyInputSignature(weakTx(pub), 0, spent)).To(MatchError(domain.ErrInvalidPublicKey))
 		})
@@ -96,8 +96,10 @@ var _ = Describe("Weak Ed25519 public keys on inputs", func() {
 			if err != nil {
 				return false
 			}
+
 			tx := weakTx("")
 			tx.Inputs[0].PublicKey, tx.Inputs[0].Signature = "", ""
+
 			return domain.SignInput(tx, 0, w) == nil &&
 				domain.VerifyInputSignature(tx, 0, domain.TxOut{Amount: 1, Address: w.Address()}) == nil
 		}
@@ -109,15 +111,18 @@ var _ = Describe("Weak Ed25519 public keys on inputs", func() {
 		for _, k := range smallOrder {
 			keys = append(keys, k)
 		}
+
 		for _, k := range nonCanonical {
 			keys = append(keys, k)
 		}
+
 		prop := func(i uint8, prev, addr string, amount uint64, ts int64, sig [64]byte) bool {
 			tx := &domain.Transaction{
 				Inputs:    []domain.TxIn{{PrevTxID: prev, PublicKey: keys[int(i)%len(keys)], Signature: hex.EncodeToString(sig[:])}},
 				Outputs:   []domain.TxOut{{Amount: amount, Address: addr}},
 				Timestamp: time.Unix(0, ts).UTC(),
 			}
+
 			return errors.Is(domain.VerifyInputSignature(tx, 0, spent), domain.ErrInvalidPublicKey)
 		}
 		Expect(quick.Check(prop, &quick.Config{MaxCount: 1000})).To(Succeed())

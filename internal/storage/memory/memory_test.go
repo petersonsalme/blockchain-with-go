@@ -21,10 +21,12 @@ var _ = Describe("Repository", func() {
 
 	It("rebuilds the exact index structures with Reindex", func() {
 		mainChain, altChain, mainDeltas, altDeltas := storagetest.IndexedChains()
+
 		repo := memory.New()
 		for i, b := range mainChain {
 			Expect(repo.Commit(b, mainDeltas[i])).To(Succeed())
 		}
+
 		Expect(repo.Reorg(2, altChain[2:], altDeltas[2:])).To(Succeed())
 		before := repo.IndexState()
 
@@ -38,9 +40,11 @@ var _ = Describe("Repository", func() {
 		d := mainDeltas[0]
 		Expect(repo.Commit(mainChain[0], d)).To(Succeed())
 		before := repo.IndexState()
+
 		for op := range d.Created {
 			delete(d.Created, op)
 		}
+
 		Expect(repo.IndexState()).To(Equal(before))
 	})
 
@@ -67,6 +71,7 @@ var _ = Describe("Repository with pruning", func() {
 	storagetest.PrunedRepositoryContract(func(p storage.Pruning) storage.IndexedRepository {
 		repo, err := memory.NewPruned(p)
 		Expect(err).NotTo(HaveOccurred())
+
 		return repo
 	})
 
@@ -79,12 +84,15 @@ var _ = Describe("Repository with pruning", func() {
 var _ = Describe("Repository pruned Reindex", func() {
 	It("reproduces the exact index structures from the snapshot", func() {
 		blocks, deltas := storagetest.PrunedChain(14)
+
 		for _, p := range []storage.Pruning{{SnapshotInterval: 3, KeepBlocks: 2}, {SnapshotInterval: 3}} {
 			repo, err := memory.NewPruned(p)
 			Expect(err).NotTo(HaveOccurred())
+
 			for i, b := range blocks {
 				Expect(repo.Commit(b, deltas[i])).To(Succeed())
 			}
+
 			before := repo.IndexState()
 			Expect(repo.Reindex()).To(Succeed())
 			Expect(repo.IndexState()).To(Equal(before))

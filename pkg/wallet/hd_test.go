@@ -161,6 +161,7 @@ var _ = Describe("HD derivation", func() {
 	It("FromMnemonic is deterministic and matches DeriveKey", func() {
 		data, err := os.ReadFile("testdata/bip39_vectors.json")
 		Expect(err).NotTo(HaveOccurred())
+
 		var vectors bip39Vectors
 		Expect(json.Unmarshal(data, &vectors)).To(Succeed())
 

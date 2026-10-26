@@ -16,9 +16,12 @@ type Wallet struct {
 // New generates a wallet using crypto/rand.
 func New() (*Wallet, error) {
 	seed := make([]byte, ed25519.SeedSize)
-	if _, err := rand.Read(seed); err != nil {
+
+	_, err := rand.Read(seed)
+	if err != nil {
 		return nil, fmt.Errorf("wallet: generating seed: %w", err)
 	}
+
 	return FromSeed(seed)
 }
 
@@ -27,12 +30,13 @@ func FromSeed(seed []byte) (*Wallet, error) {
 	if len(seed) != ed25519.SeedSize {
 		return nil, fmt.Errorf("wallet: seed must be %d bytes, got %d", ed25519.SeedSize, len(seed))
 	}
+
 	return &Wallet{priv: ed25519.NewKeyFromSeed(seed)}, nil
 }
 
 // PublicKey returns the wallet public key.
 func (w *Wallet) PublicKey() ed25519.PublicKey {
-	return w.priv.Public().(ed25519.PublicKey)
+	return w.priv.Public().(ed25519.PublicKey) //nolint:forcetypeassert // ed25519.PrivateKey.Public always returns an ed25519.PublicKey
 }
 
 // Address returns the checksummed address of the wallet.
@@ -51,5 +55,6 @@ func Verify(pub ed25519.PublicKey, msg, sig []byte) bool {
 	if len(pub) != ed25519.PublicKeySize {
 		return false
 	}
+
 	return ed25519.Verify(pub, msg, sig)
 }

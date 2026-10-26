@@ -54,27 +54,30 @@ var _ = Describe("Rate Limiting", func() {
 
 		It("allows up to N requests and returns 429 on N+1 within the same instant", func() {
 			const n = 5
-			var handlerCalls int64
+
+			var handlerCalls atomic.Int64
+
 			dummyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				atomic.AddInt64(&handlerCalls, 1)
+				handlerCalls.Add(1)
 				w.WriteHeader(http.StatusOK)
 			})
 
 			limiter := newRateLimiter(n, nowFunc)
 			wrapped := limiter.middleware(dummyHandler)
 
-			for i := 0; i < n; i++ {
-				req := httptest.NewRequest("GET", "/", nil)
+			for range n {
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
 				req.RemoteAddr = "192.168.1.100:1234"
 				rec := httptest.NewRecorder()
 				wrapped.ServeHTTP(rec, req)
 
 				Expect(rec.Code).To(Equal(http.StatusOK))
 			}
-			Expect(atomic.LoadInt64(&handlerCalls)).To(Equal(int64(n)))
+
+			Expect(handlerCalls.Load()).To(Equal(int64(n)))
 
 			// Request N+1 from same IP at same instant
-			req := httptest.NewRequest("GET", "/", nil)
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
 			req.RemoteAddr = "192.168.1.100:1234"
 			rec := httptest.NewRecorder()
 			wrapped.ServeHTTP(rec, req)
@@ -93,19 +96,20 @@ var _ = Describe("Rate Limiting", func() {
 			Expect(body["error"]).To(Equal("rate limit exceeded"))
 
 			// Handler must not be called when rejected
-			Expect(atomic.LoadInt64(&handlerCalls)).To(Equal(int64(n)))
+			Expect(handlerCalls.Load()).To(Equal(int64(n)))
 		})
 
 		It("recovers tokens after advancing clock by 60s/N", func() {
 			const n = 30 // refill rate: 30 / 60s = 1 token every 2s
+
 			limiter := newRateLimiter(n, nowFunc)
 			wrapped := limiter.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 			}))
 
 			// Exhaust all tokens
-			for i := 0; i < n; i++ {
-				req := httptest.NewRequest("GET", "/", nil)
+			for range n {
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
 				req.RemoteAddr = "10.0.0.1:1234"
 				rec := httptest.NewRecorder()
 				wrapped.ServeHTTP(rec, req)
@@ -113,7 +117,7 @@ var _ = Describe("Rate Limiting", func() {
 			}
 
 			// 31st request is rate limited
-			req := httptest.NewRequest("GET", "/", nil)
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
 			req.RemoteAddr = "10.0.0.1:1234"
 			rec := httptest.NewRecorder()
 			wrapped.ServeHTTP(rec, req)
@@ -124,7 +128,7 @@ var _ = Describe("Rate Limiting", func() {
 			currentTime = currentTime.Add(1 * time.Second)
 
 			// Still rate limited, but Retry-After is 1s
-			req = httptest.NewRequest("GET", "/", nil)
+			req = httptest.NewRequest(http.MethodGet, "/", nil)
 			req.RemoteAddr = "10.0.0.1:1234"
 			rec = httptest.NewRecorder()
 			wrapped.ServeHTTP(rec, req)
@@ -135,14 +139,14 @@ var _ = Describe("Rate Limiting", func() {
 			currentTime = currentTime.Add(1 * time.Second)
 
 			// Same IP receives normal response again
-			req = httptest.NewRequest("GET", "/", nil)
+			req = httptest.NewRequest(http.MethodGet, "/", nil)
 			req.RemoteAddr = "10.0.0.1:1234"
 			rec = httptest.NewRecorder()
 			wrapped.ServeHTTP(rec, req)
 			Expect(rec.Code).To(Equal(http.StatusOK))
 
 			// Next immediate request is rate limited again
-			req = httptest.NewRequest("GET", "/", nil)
+			req = httptest.NewRequest(http.MethodGet, "/", nil)
 			req.RemoteAddr = "10.0.0.1:1234"
 			rec = httptest.NewRecorder()
 			wrapped.ServeHTTP(rec, req)
@@ -151,14 +155,15 @@ var _ = Describe("Rate Limiting", func() {
 
 		It("rounds Retry-After up to the next full second for non-integer wait times", func() {
 			const n = 7 // refill rate: 7 / 60s
+
 			limiter := newRateLimiter(n, nowFunc)
 			wrapped := limiter.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 			}))
 
 			// Exhaust all 7 tokens at t=0
-			for i := 0; i < n; i++ {
-				req := httptest.NewRequest("GET", "/", nil)
+			for range n {
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
 				req.RemoteAddr = "10.0.0.7:1234"
 				rec := httptest.NewRecorder()
 				wrapped.ServeHTTP(rec, req)
@@ -169,7 +174,7 @@ var _ = Describe("Rate Limiting", func() {
 			// missing = 1.0 token, refillRate = 7/60 tokens/s
 			// wait time = 1.0 / (7/60) = 60/7 ≈ 8.5714s
 			// Ceil must round up to 9s (Floor would give 8s)
-			req := httptest.NewRequest("GET", "/", nil)
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
 			req.RemoteAddr = "10.0.0.7:1234"
 			rec := httptest.NewRecorder()
 			wrapped.ServeHTTP(rec, req)
@@ -183,7 +188,7 @@ var _ = Describe("Rate Limiting", func() {
 			// Ceil must round up to 1s (Floor would give 0s, violating >= 1)
 			currentTime = currentTime.Add(8 * time.Second)
 
-			req = httptest.NewRequest("GET", "/", nil)
+			req = httptest.NewRequest(http.MethodGet, "/", nil)
 			req.RemoteAddr = "10.0.0.7:1234"
 			rec = httptest.NewRecorder()
 			wrapped.ServeHTTP(rec, req)
@@ -193,18 +198,20 @@ var _ = Describe("Rate Limiting", func() {
 
 		It("caps accumulated tokens at maxTokens after prolonged idle periods", func() {
 			const n = 10
+
 			limiter := newRateLimiter(n, nowFunc)
 			wrapped := limiter.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 			}))
 
 			// Send 2 requests spaced by 1s to ensure an existing bucket with lastCheck is active
-			for i := 0; i < 2; i++ {
-				req := httptest.NewRequest("GET", "/", nil)
+			for range 2 {
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
 				req.RemoteAddr = "10.0.0.5:1234"
 				rec := httptest.NewRecorder()
 				wrapped.ServeHTTP(rec, req)
 				Expect(rec.Code).To(Equal(http.StatusOK))
+
 				currentTime = currentTime.Add(1 * time.Second)
 			}
 
@@ -214,11 +221,13 @@ var _ = Describe("Rate Limiting", func() {
 
 			// Fire 30 requests at the same instant from the same IP
 			okCount, limitedCount := 0, 0
-			for i := 0; i < 30; i++ {
-				req := httptest.NewRequest("GET", "/", nil)
+
+			for range 30 {
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
 				req.RemoteAddr = "10.0.0.5:1234"
 				rec := httptest.NewRecorder()
 				wrapped.ServeHTTP(rec, req)
+
 				switch rec.Code {
 				case http.StatusOK:
 					okCount++
@@ -234,27 +243,29 @@ var _ = Describe("Rate Limiting", func() {
 
 		It("does not affect another IP when one IP is exhausted", func() {
 			const n = 2
+
 			limiter := newRateLimiter(n, nowFunc)
 			wrapped := limiter.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 			}))
 
 			// Exhaust IP A
-			for i := 0; i < n; i++ {
-				req := httptest.NewRequest("GET", "/", nil)
+			for range n {
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
 				req.RemoteAddr = "192.168.1.1:1000"
 				rec := httptest.NewRecorder()
 				wrapped.ServeHTTP(rec, req)
 				Expect(rec.Code).To(Equal(http.StatusOK))
 			}
-			reqA := httptest.NewRequest("GET", "/", nil)
+
+			reqA := httptest.NewRequest(http.MethodGet, "/", nil)
 			reqA.RemoteAddr = "192.168.1.1:1000"
 			recA := httptest.NewRecorder()
 			wrapped.ServeHTTP(recA, reqA)
 			Expect(recA.Code).To(Equal(http.StatusTooManyRequests))
 
 			// IP B is still allowed
-			reqB := httptest.NewRequest("GET", "/", nil)
+			reqB := httptest.NewRequest(http.MethodGet, "/", nil)
 			reqB.RemoteAddr = "192.168.1.2:1000"
 			recB := httptest.NewRecorder()
 			wrapped.ServeHTTP(recB, reqB)
@@ -271,8 +282,9 @@ var _ = Describe("Rate Limiting", func() {
 			Expect(sActive.limiter).NotTo(BeNil())
 
 			handler := srv.Handler()
-			for i := 0; i < 150; i++ {
-				req := httptest.NewRequest("GET", "/health", nil)
+
+			for range 150 {
+				req := httptest.NewRequest(http.MethodGet, "/health", nil)
 				req.RemoteAddr = "127.0.0.1:5000"
 				rec := httptest.NewRecorder()
 				handler.ServeHTTP(rec, req)
@@ -282,22 +294,25 @@ var _ = Describe("Rate Limiting", func() {
 
 		It("ignores X-Forwarded-For and relies only on RemoteAddr", func() {
 			const n = 1
+
 			limiter := newRateLimiter(n, nowFunc)
 			wrapped := limiter.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 			}))
 
-			req1 := httptest.NewRequest("GET", "/", nil)
+			req1 := httptest.NewRequest(http.MethodGet, "/", nil)
 			req1.RemoteAddr = "1.1.1.1:1234"
 			req1.Header.Set("X-Forwarded-For", "2.2.2.2")
+
 			rec1 := httptest.NewRecorder()
 			wrapped.ServeHTTP(rec1, req1)
 			Expect(rec1.Code).To(Equal(http.StatusOK))
 
 			// Same RemoteAddr but different X-Forwarded-For must be blocked
-			req2 := httptest.NewRequest("GET", "/", nil)
+			req2 := httptest.NewRequest(http.MethodGet, "/", nil)
 			req2.RemoteAddr = "1.1.1.1:1234"
 			req2.Header.Set("X-Forwarded-For", "3.3.3.3")
+
 			rec2 := httptest.NewRecorder()
 			wrapped.ServeHTTP(rec2, req2)
 			Expect(rec2.Code).To(Equal(http.StatusTooManyRequests))
@@ -305,12 +320,13 @@ var _ = Describe("Rate Limiting", func() {
 
 		It("handles RemoteAddr without a port correctly", func() {
 			const n = 1
+
 			limiter := newRateLimiter(n, nowFunc)
 			wrapped := limiter.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 			}))
 
-			req1 := httptest.NewRequest("GET", "/", nil)
+			req1 := httptest.NewRequest(http.MethodGet, "/", nil)
 			req1.RemoteAddr = "10.20.30.40"
 			rec1 := httptest.NewRecorder()
 			wrapped.ServeHTTP(rec1, req1)
@@ -322,14 +338,14 @@ var _ = Describe("Rate Limiting", func() {
 			Expect(limiter.buckets).To(HaveLen(1))
 			limiter.mu.Unlock()
 
-			req2 := httptest.NewRequest("GET", "/", nil)
+			req2 := httptest.NewRequest(http.MethodGet, "/", nil)
 			req2.RemoteAddr = "10.20.30.40"
 			rec2 := httptest.NewRecorder()
 			wrapped.ServeHTTP(rec2, req2)
 			Expect(rec2.Code).To(Equal(http.StatusTooManyRequests))
 
 			// A different port-less address has its own bucket
-			req3 := httptest.NewRequest("GET", "/", nil)
+			req3 := httptest.NewRequest(http.MethodGet, "/", nil)
 			req3.RemoteAddr = "10.20.30.41"
 			rec3 := httptest.NewRecorder()
 			wrapped.ServeHTTP(rec3, req3)
@@ -338,54 +354,64 @@ var _ = Describe("Rate Limiting", func() {
 
 		It("does not refill or penalize a bucket when the clock goes back", func() {
 			const n = 60 // refill rate: 1 token/sec
+
 			limiter := newRateLimiter(n, nowFunc)
 			wrapped := limiter.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 			}))
 			send := func(addr string) int {
-				req := httptest.NewRequest("GET", "/", nil)
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
 				req.RemoteAddr = addr
 				rec := httptest.NewRecorder()
 				wrapped.ServeHTTP(rec, req)
+
 				return rec.Code
 			}
 
 			t0 := currentTime
+
 			Expect(send("10.9.9.9:1")).To(Equal(http.StatusOK)) // 59 tokens left at t0
 
 			// The clock goes 10s back: no refill and no token loss from the negative elapsed time
 			currentTime = t0.Add(-10 * time.Second)
-			for i := 0; i < n-1; i++ {
+
+			for range n - 1 {
 				Expect(send("10.9.9.9:1")).To(Equal(http.StatusOK))
 			}
+
 			Expect(send("10.9.9.9:1")).To(Equal(http.StatusTooManyRequests))
 		})
 
 		It("handles 50 concurrent requests from same IP with N=10 and frozen clock", func() {
-			const n = 10
-			const concurrent = 50
+			const (
+				n          = 10
+				concurrent = 50
+			)
+
 			limiter := newRateLimiter(n, nowFunc)
 			wrapped := limiter.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 			}))
 
 			codes := make(chan int, concurrent)
+
 			var wg sync.WaitGroup
-			for i := 0; i < concurrent; i++ {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					req := httptest.NewRequest("GET", "/", nil)
+			for range concurrent {
+				wg.Go(func() {
+					req := httptest.NewRequest(http.MethodGet, "/", nil)
 					req.RemoteAddr = "172.16.0.1:4000"
 					rec := httptest.NewRecorder()
 					wrapped.ServeHTTP(rec, req)
+
 					codes <- rec.Code
-				}()
+				})
 			}
+
 			wg.Wait()
 			close(codes)
 
 			okCount, limitedCount := 0, 0
+
 			for code := range codes {
 				switch code {
 				case http.StatusOK:
@@ -401,6 +427,7 @@ var _ = Describe("Rate Limiting", func() {
 
 		It("respects invariant: non-429 responses <= burst + floor(T * N / 60s)", func() {
 			const n = 12 // 12 req/min => 1 token every 5 seconds
+
 			limiter := newRateLimiter(n, nowFunc)
 			wrapped := limiter.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
@@ -408,16 +435,18 @@ var _ = Describe("Rate Limiting", func() {
 
 			allowedTotal := 0
 			// Advance in small steps over 60 seconds
-			for step := 0; step < 60; step++ {
-				for r := 0; r < 2; r++ {
-					req := httptest.NewRequest("GET", "/", nil)
+			for range 60 {
+				for range 2 {
+					req := httptest.NewRequest(http.MethodGet, "/", nil)
 					req.RemoteAddr = "192.168.50.1:1234"
 					rec := httptest.NewRecorder()
 					wrapped.ServeHTTP(rec, req)
+
 					if rec.Code == http.StatusOK {
 						allowedTotal++
 					}
 				}
+
 				currentTime = currentTime.Add(1 * time.Second)
 			}
 
@@ -428,13 +457,14 @@ var _ = Describe("Rate Limiting", func() {
 
 		It("lazily evicts idle buckets that are full, but keeps active buckets", func() {
 			const n = 10
+
 			limiter := newRateLimiter(n, nowFunc)
 			wrapped := limiter.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 			}))
 
 			// Request from IP A
-			reqA := httptest.NewRequest("GET", "/", nil)
+			reqA := httptest.NewRequest(http.MethodGet, "/", nil)
 			reqA.RemoteAddr = "1.2.3.4:1234"
 			recA := httptest.NewRecorder()
 			wrapped.ServeHTTP(recA, reqA)
@@ -448,7 +478,7 @@ var _ = Describe("Rate Limiting", func() {
 			currentTime = currentTime.Add(1 * time.Second)
 
 			// Request from IP B
-			reqB := httptest.NewRequest("GET", "/", nil)
+			reqB := httptest.NewRequest(http.MethodGet, "/", nil)
 			reqB.RemoteAddr = "5.6.7.8:1234"
 			recB := httptest.NewRecorder()
 			wrapped.ServeHTTP(recB, reqB)
@@ -463,7 +493,7 @@ var _ = Describe("Rate Limiting", func() {
 			currentTime = currentTime.Add(60 * time.Second)
 
 			// Request from IP C: triggers lazy eviction under mutex
-			reqC := httptest.NewRequest("GET", "/", nil)
+			reqC := httptest.NewRequest(http.MethodGet, "/", nil)
 			reqC.RemoteAddr = "9.9.9.9:1234"
 			recC := httptest.NewRecorder()
 			wrapped.ServeHTTP(recC, reqC)
@@ -480,15 +510,17 @@ var _ = Describe("Rate Limiting", func() {
 
 		It("evicts a bucket at the exact boundary when refilled tokens reach max tokens", func() {
 			const n = 120 // refill rate: 2 tokens/sec
+
 			limiter := newRateLimiter(n, nowFunc)
 			wrapped := limiter.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 			}))
 			send := func(addr string) int {
-				req := httptest.NewRequest("GET", "/", nil)
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
 				req.RemoteAddr = addr
 				rec := httptest.NewRecorder()
 				wrapped.ServeHTTP(rec, req)
+
 				return rec.Code
 			}
 
@@ -499,12 +531,14 @@ var _ = Describe("Rate Limiting", func() {
 			}
 			// W drains its bucket one second later
 			currentTime = t0.Add(1 * time.Second)
+
 			for range n {
 				send("22.33.44.55:1234")
 			}
 
 			// At t0+sweepInterval: X refilled 0 + 60*2 = 120 (maxTokens), W only 0 + 59*2 = 118
 			currentTime = t0.Add(sweepInterval)
+
 			send("55.66.77.88:1234")
 
 			limiter.mu.Lock()
@@ -516,22 +550,26 @@ var _ = Describe("Rate Limiting", func() {
 
 		It("does not sweep again before sweepInterval and sweeps exactly at it", func() {
 			const n = 60 // refill rate: 1 token/sec
+
 			limiter := newRateLimiter(n, nowFunc)
 			wrapped := limiter.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 			}))
 			send := func(addr string) int {
-				req := httptest.NewRequest("GET", "/", nil)
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
 				req.RemoteAddr = addr
 				rec := httptest.NewRecorder()
 				wrapped.ServeHTTP(rec, req)
+
 				return rec.Code
 			}
 
 			t0 := currentTime
+
 			send("1.1.1.1:1")
 			// A is full (59 + 1 = 60), but the sweep at t0 was the last one: A survives
 			currentTime = t0.Add(1 * time.Second)
+
 			send("2.2.2.2:1")
 
 			limiter.mu.Lock()
@@ -539,6 +577,7 @@ var _ = Describe("Rate Limiting", func() {
 			limiter.mu.Unlock()
 
 			currentTime = t0.Add(59 * time.Second)
+
 			send("3.3.3.3:1")
 
 			limiter.mu.Lock()
@@ -547,6 +586,7 @@ var _ = Describe("Rate Limiting", func() {
 
 			// Exactly sweepInterval after the last sweep: A is evicted
 			currentTime = t0.Add(sweepInterval)
+
 			send("4.4.4.4:1")
 
 			limiter.mu.Lock()
@@ -557,25 +597,31 @@ var _ = Describe("Rate Limiting", func() {
 
 		It("re-anchors the sweep when the clock goes back", func() {
 			const n = 60 // refill rate: 1 token/sec
+
 			limiter := newRateLimiter(n, nowFunc)
 			wrapped := limiter.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 			}))
 			send := func(addr string) int {
-				req := httptest.NewRequest("GET", "/", nil)
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
 				req.RemoteAddr = addr
 				rec := httptest.NewRecorder()
 				wrapped.ServeHTTP(rec, req)
+
 				return rec.Code
 			}
 
 			t0 := currentTime
+
 			send("1.1.1.1:1")
 			// The clock jumps 10 minutes back: the sweep runs again and lastSweep follows the clock
 			back := t0.Add(-10 * time.Minute)
 			currentTime = back
+
 			send("2.2.2.2:1")
+
 			currentTime = back.Add(sweepInterval)
+
 			send("3.3.3.3:1")
 
 			limiter.mu.Lock()
@@ -589,10 +635,12 @@ var _ = Describe("Rate Limiting", func() {
 
 func BenchmarkRateLimiterAllow10kIPs(b *testing.B) {
 	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+
 	l := newRateLimiter(60, func() time.Time { return now })
 	for i := range 10000 {
 		l.allow("10.0." + strconv.Itoa(i/256) + "." + strconv.Itoa(i%256) + ":1")
 	}
+
 	for b.Loop() {
 		l.allow("192.0.2.1:1")
 	}

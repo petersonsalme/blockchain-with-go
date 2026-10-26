@@ -2,6 +2,7 @@ package vm_test
 
 import (
 	"encoding/binary"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -23,23 +24,29 @@ func FuzzExecuteDeterministic(f *testing.F) {
 			args = append(args, binary.BigEndian.Uint64(rawArgs))
 			rawArgs = rawArgs[8:]
 		}
+
 		store := mapStorage{0: 7, 1: 9}
 		res1, err1 := vm.Execute(code, args, store, gas)
+
 		res2, err2 := vm.Execute(code, args, store, gas)
-		if err1 != err2 || !reflect.DeepEqual(res1, res2) {
+		if !errors.Is(err1, err2) || !reflect.DeepEqual(res1, res2) {
 			t.Fatalf("not deterministic: (%v, %v) vs (%v, %v)", res1, err1, res2, err2)
 		}
+
 		if res1.GasUsed > gas {
 			t.Fatalf("GasUsed %d above limit %d", res1.GasUsed, gas)
 		}
+
 		if err1 != nil && len(res1.Writes) != 0 {
 			t.Fatalf("error %v with writes %v", err1, res1.Writes)
 		}
+
 		if gas == 0 || gas > domain.MaxContractGas {
-			if err1 != vm.ErrInvalidGas {
+			if !errors.Is(err1, vm.ErrInvalidGas) {
 				t.Fatalf("gas %d: want ErrInvalidGas, got %v", gas, err1)
 			}
 		}
+
 		if !reflect.DeepEqual(store, mapStorage{0: 7, 1: 9}) {
 			t.Fatalf("storage mutated: %v", store)
 		}

@@ -40,9 +40,11 @@ func newHub() *hub { return &hub{subs: make(map[chan event]struct{})} }
 // subscribe registers a subscriber with a buffer of eventBufferSize.
 func (h *hub) subscribe() chan event {
 	ch := make(chan event, eventBufferSize)
+
 	h.mu.Lock()
 	h.subs[ch] = struct{}{}
 	h.mu.Unlock()
+
 	return ch
 }
 
@@ -50,6 +52,7 @@ func (h *hub) subscribe() chan event {
 func (h *hub) unsubscribe(ch chan event) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
 	if _, ok := h.subs[ch]; ok {
 		delete(h.subs, ch)
 		close(ch)
@@ -60,6 +63,7 @@ func (h *hub) unsubscribe(ch chan event) {
 func (h *hub) count() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
 	return len(h.subs)
 }
 
@@ -70,9 +74,12 @@ func (h *hub) publish(name string, v any) {
 	if err != nil { // domain types always marshal; nothing useful to send otherwise
 		return
 	}
+
 	ev := event{name: name, data: data}
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
 	for ch := range h.subs {
 		select {
 		case ch <- ev:
@@ -91,6 +98,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	header.Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
 	rc := http.NewResponseController(w)
+
 	if r.Method == http.MethodHead {
 		return
 	}
@@ -98,6 +106,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	// Subscribe before flushing the headers: a client that has them is already registered.
 	ch := s.events.subscribe()
 	defer s.events.unsubscribe(ch)
+
 	if flushEvent(rc, nil) != nil {
 		return
 	}
@@ -110,6 +119,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
+
 			err := flushEvent(rc, func() error {
 				_, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.name, ev.data)
 				return err
@@ -124,13 +134,17 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 // flushEvent renews the write deadline, runs write (if any) and flushes.
 // Writers without deadline support, such as httptest.ResponseRecorder, are served without one.
 func flushEvent(rc *http.ResponseController, write func() error) error {
-	if err := rc.SetWriteDeadline(time.Now().Add(eventWriteTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+	err := rc.SetWriteDeadline(time.Now().Add(eventWriteTimeout))
+	if err != nil && !errors.Is(err, http.ErrNotSupported) {
 		return err
 	}
+
 	if write != nil {
-		if err := write(); err != nil {
+		err := write()
+		if err != nil {
 			return err
 		}
 	}
+
 	return rc.Flush()
 }

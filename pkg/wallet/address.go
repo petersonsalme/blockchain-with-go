@@ -26,6 +26,7 @@ var (
 func checksum(payload []byte) []byte {
 	first := sha256.Sum256(payload)
 	second := sha256.Sum256(first[:])
+
 	return second[:checksumLen]
 }
 
@@ -33,6 +34,7 @@ func checksum(payload []byte) []byte {
 func AddressFromPublicKey(pub ed25519.PublicKey) string {
 	h := sha256.Sum256(pub)
 	payload := append([]byte{addressVersion}, h[:pubKeyHashLen]...)
+
 	return hex.EncodeToString(append(payload, checksum(payload)...))
 }
 
@@ -41,16 +43,20 @@ func ValidateAddress(addr string) error {
 	if len(addr) != addressStringLen {
 		return ErrInvalidAddressLength
 	}
+
 	raw, err := hex.DecodeString(addr)
 	if err != nil || hex.EncodeToString(raw) != addr {
 		return ErrInvalidAddressEncoding
 	}
+
 	if raw[0] != addressVersion {
 		return ErrInvalidAddressVersion
 	}
+
 	payload := raw[:addressByteLen-checksumLen]
 	if !bytes.Equal(checksum(payload), raw[addressByteLen-checksumLen:]) {
 		return ErrInvalidAddressChecksum
 	}
+
 	return nil
 }

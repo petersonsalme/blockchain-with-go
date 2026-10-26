@@ -36,12 +36,14 @@ var _ = Describe("Service mempool", func() {
 		for _, tx := range txs {
 			out = append(out, tx.ID)
 		}
+
 		return out
 	}
 	spendOp := func(i int, out uint64) domain.Transaction { return spend(f.owner, f.ops[i], out) }
 	chainLen := func() int {
 		all, err := repo.All()
 		Expect(err).NotTo(HaveOccurred())
+
 		return len(all)
 	}
 
@@ -75,6 +77,7 @@ var _ = Describe("Service mempool", func() {
 			multi.ID = multi.CalculateHash()
 			Expect(domain.SignInput(&multi, 0, f.owner)).To(Succeed())
 			Expect(domain.SignInput(&multi, 1, f.owner)).To(Succeed())
+
 			single := spendOp(2, 4) // fee 6
 			// multi has fee 8 over a larger size: it ranks below single, but a fee
 			// of 14 (outputs counted once) or a wrapped one would rank it first.
@@ -110,11 +113,13 @@ var _ = Describe("Service mempool", func() {
 			Entry("no outputs", func() (domain.Transaction, error) {
 				tx := spend(f.owner, f.ops[0], 9)
 				tx.Outputs = nil
+
 				return tx, domain.ErrInvalidOutput
 			}),
 			Entry("a signature from another key", func() (domain.Transaction, error) {
 				stranger, err := wallet.New()
 				Expect(err).NotTo(HaveOccurred())
+
 				return spend(stranger, f.ops[0], 9), domain.ErrInputOwnerMismatch
 			}),
 		)
@@ -138,7 +143,7 @@ var _ = Describe("Service mempool", func() {
 
 	Describe("MinePending", func() {
 		It("mines an empty block from an empty pool", func() {
-			blk, err := svc.MinePending(context.Background())
+			blk, err := minePending(svc)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(blk.Transactions).To(BeEmpty())
 			Expect(blk.Transactions).NotTo(BeNil())
@@ -149,11 +154,13 @@ var _ = Describe("Service mempool", func() {
 			for i, out := range []uint64{9, 3, 6} {
 				Expect(svc.Submit(spendOp(i, out))).To(Succeed())
 			}
+
 			order := ids(svc.Pending())
-			blk, err := svc.MinePending(context.Background())
+			blk, err := minePending(svc)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(ids(blk.Transactions)).To(Equal(order))
 			Expect(svc.Pending()).To(BeEmpty())
+
 			for _, tx := range blk.Transactions {
 				_, found := repo.Lookup(domain.OutPoint{TxID: tx.CalculateHash(), Index: 0})
 				Expect(found).To(BeTrue())
@@ -162,8 +169,10 @@ var _ = Describe("Service mempool", func() {
 
 		It("honours a cancelled context and leaves the pool alone", func() {
 			Expect(svc.Submit(spendOp(0, 9))).To(Succeed())
+
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
+
 			_, err := svc.MinePending(ctx)
 			Expect(err).To(MatchError(context.Canceled))
 			Expect(svc.Pending()).To(HaveLen(1))
@@ -177,7 +186,7 @@ var _ = Describe("Service mempool", func() {
 			_, err := dsvc.Mine(context.Background(), df.tx())
 			Expect(err).To(MatchError(ErrStateDiverged))
 			Expect(dsvc.Submit(spendOp(0, 9))).NotTo(Succeed())
-			_, err = dsvc.MinePending(context.Background())
+			_, err = minePending(dsvc)
 			Expect(err).To(MatchError(ErrStateDiverged))
 		})
 
@@ -189,7 +198,7 @@ var _ = Describe("Service mempool", func() {
 			Expect(rsvc.Submit(rf.tx()[0])).To(Succeed())
 			before := ids(rsvc.Pending())
 
-			_, err := rsvc.MinePending(context.Background())
+			_, err := minePending(rsvc)
 			Expect(err).To(MatchError(ErrInvalidBlock))
 			Expect(ids(rsvc.Pending())).To(Equal(before))
 
@@ -203,7 +212,8 @@ var _ = Describe("Service mempool", func() {
 			rsvc, rf := funded(rr, pow.NewProofOfWork(1), WithMempool(pool))
 			Expect(rsvc.Submit(rf.tx()[0])).To(Succeed())
 			rr.armed.Store(true)
-			_, err := rsvc.MinePending(context.Background())
+
+			_, err := minePending(rsvc)
 			Expect(err).To(MatchError("all failed"))
 			Expect(rsvc.Pending()).To(HaveLen(1))
 		})
@@ -213,6 +223,7 @@ var _ = Describe("Service mempool", func() {
 		It("drops from the pool a transaction a Mine block conflicts with", func() {
 			pooled := spendOp(0, 9)
 			Expect(svc.Submit(pooled)).To(Succeed())
+
 			survivor := spendOp(1, 9)
 			Expect(svc.Submit(survivor)).To(Succeed())
 
@@ -220,7 +231,7 @@ var _ = Describe("Service mempool", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(ids(svc.Pending())).To(Equal([]string{survivor.ID}))
 
-			blk, err := svc.MinePending(context.Background())
+			blk, err := minePending(svc)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(ids(blk.Transactions)).To(Equal([]string{survivor.ID}))
 		})
@@ -234,12 +245,14 @@ var _ = Describe("Service mempool", func() {
 		})
 
 		It("leaves no pool transaction spending outside the UTXO set", func() {
-			for i := 0; i < 6; i++ {
+			for i := range 6 {
 				Expect(svc.Submit(spendOp(i, uint64(9-i)))).To(Succeed())
 			}
+
 			_, err := svc.Mine(context.Background(), []domain.Transaction{spendOp(1, 5), spendOp(3, 5)})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(svc.Pending()).To(HaveLen(4))
+
 			for _, tx := range svc.Pending() {
 				for _, in := range tx.Inputs {
 					_, ok := repo.Lookup(domain.OutPoint{TxID: in.PrevTxID, Index: in.OutIndex})
@@ -257,10 +270,11 @@ var _ = Describe("Service mempool", func() {
 			Expect(err).NotTo(HaveOccurred())
 			// The late half of a Submit that validated before that Mine.
 			Expect(pool.Add(stale, 1)).To(Succeed())
+
 			good := spendOp(1, 9)
 			Expect(svc.Submit(good)).To(Succeed())
 
-			blk, err := svc.MinePending(context.Background())
+			blk, err := minePending(svc)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(ids(blk.Transactions)).To(Equal([]string{good.ID}))
 			Expect(svc.Pending()).To(BeEmpty())
@@ -270,14 +284,15 @@ var _ = Describe("Service mempool", func() {
 			forged := spendOp(0, 9)
 			forged.Outputs[0].Amount = 8 // signed over 9
 			Expect(pool.Add(forged, 2)).To(Succeed())
-			blk, err := svc.MinePending(context.Background())
+
+			blk, err := minePending(svc)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(blk.Transactions).To(BeEmpty())
 			Expect(svc.Pending()).To(BeEmpty())
 		})
 
 		It("never fails MinePending whatever the interleaving of Submit, Mine and MinePending", func() {
-			for round := 0; round < 25; round++ {
+			for range 25 {
 				rp := mempool.New(0)
 				rsvc, rf := funded(memory.New(), pow.NewProofOfWork(1), WithMempool(rp))
 				a, b := spend(rf.owner, rf.ops[0], 9), spend(rf.owner, rf.ops[0], 8)
@@ -285,19 +300,23 @@ var _ = Describe("Service mempool", func() {
 				Expect(rsvc.Submit(other)).To(Succeed())
 
 				var wg sync.WaitGroup
+
 				errs := make(chan error, 2)
+
 				wg.Add(3)
 				go func() { defer wg.Done(); _ = rsvc.Submit(a) }()
 				go func() { defer wg.Done(); _, _ = rsvc.Mine(context.Background(), []domain.Transaction{b}) }()
 				go func() {
 					defer wg.Done()
-					_, err := rsvc.MinePending(context.Background())
+
+					_, err := minePending(rsvc)
 					errs <- err
 				}()
+
 				wg.Wait()
 				Expect(<-errs).NotTo(HaveOccurred())
 
-				_, err := rsvc.MinePending(context.Background())
+				_, err := minePending(rsvc)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(rsvc.Pending()).To(BeEmpty())
 			}
@@ -312,6 +331,7 @@ var _ = Describe("Service mempool", func() {
 				Expect(err).NotTo(HaveOccurred())
 				c, err := poa.New([]ed25519.PublicKey{w.PublicKey()}, w)
 				Expect(err).NotTo(HaveOccurred())
+
 				return c
 			},
 		}
@@ -319,40 +339,48 @@ var _ = Describe("Service mempool", func() {
 			It("seals a block within MAX_BLOCK_BYTES for any pool content with "+name, func() {
 				c := mk()
 				base, bf := funded(memory.New(), c)
-				empty, err := base.MinePending(context.Background())
+				empty, err := minePending(base)
 				Expect(err).NotTo(HaveOccurred())
 				emptySize, err := empty.Size()
 				Expect(err).NotTo(HaveOccurred())
+
 				txSize := mempool.Size(bf.tx()[0])
 
 				included := 0
-				for k := 0; k <= 18; k++ {
+
+				for k := range 19 {
 					limit := emptySize + 8 + k*txSize/3
 					GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(limit))
+
 					psvc, pf := funded(memory.New(), c)
 					for i, out := range []uint64{9, 8, 7, 6, 5} {
 						Expect(psvc.Submit(spend(pf.owner, pf.ops[i], out))).To(Succeed())
 					}
+
 					order := ids(psvc.Pending())
 
-					blk, err := psvc.MinePending(context.Background())
+					blk, err := minePending(psvc)
 					Expect(err).NotTo(HaveOccurred(), "limit %d", limit)
 					Expect(domain.ValidateSize(blk, domain.MaxBlockBytes())).To(Succeed(), "limit %d", limit)
 
 					var want []string
+
 					in := map[string]bool{}
 					for _, id := range ids(blk.Transactions) {
 						in[id] = true
 					}
+
 					for _, id := range order {
 						if in[id] {
 							want = append(want, id)
 						}
 					}
+
 					Expect(ids(blk.Transactions)).To(Equal(append([]string{}, want...)))
 					Expect(psvc.Pending()).To(HaveLen(len(order) - len(blk.Transactions)))
 					included = max(included, len(blk.Transactions))
 				}
+
 				Expect(included).To(BeNumerically(">=", 3))
 			})
 		}
@@ -362,6 +390,7 @@ var _ = Describe("Service mempool", func() {
 				for i, out := range []uint64{9, 8, 7, 6, 5} {
 					Expect(svc.Submit(spendOp(i, out))).To(Succeed())
 				}
+
 				pending := svc.Pending()
 				// Mirrors the widest block the service reserves room for.
 				widest := func(txs []domain.Transaction) int {
@@ -373,12 +402,14 @@ var _ = Describe("Service mempool", func() {
 					}
 					n, err := b.Size()
 					Expect(err).NotTo(HaveOccurred())
+
 					return n
 				}
 				GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(widest(pending[:count])+slack))
 
-				blk, err := svc.MinePending(context.Background())
+				blk, err := minePending(svc)
 				Expect(err).NotTo(HaveOccurred())
+
 				if slack < 0 {
 					// A smaller transaction further down may still take the room left.
 					Expect(ids(blk.Transactions)).To(ContainElement(pending[0].ID))
@@ -386,6 +417,7 @@ var _ = Describe("Service mempool", func() {
 				} else {
 					Expect(ids(blk.Transactions)).To(Equal(ids(pending[:count])))
 				}
+
 				Expect(svc.Pending()).To(HaveLen(5 - len(blk.Transactions)))
 			},
 			Entry("two transactions", 2, 0),
@@ -404,9 +436,11 @@ var _ = Describe("Service mempool", func() {
 					Transactions: []domain.Transaction{}, MerkleRoot: zeros, Hash: zeros, PrevHash: zeros,
 					Nonce: math.MaxInt, Difficulty: math.MaxInt, Validator: zeros, Signature: strings.Repeat("0", 128),
 				}
+
 				return b.Size()
 			}()
 			Expect(err).NotTo(HaveOccurred())
+
 			stamp := time.Date(2000, 1, 1, 0, 0, 0, 123456789, time.UTC)
 			build := func(pad int) domain.Transaction {
 				tx := domain.Transaction{
@@ -417,6 +451,7 @@ var _ = Describe("Service mempool", func() {
 				tx.ID = tx.CalculateHash()
 				Expect(domain.SignInput(&tx, 0, f.owner)).To(Succeed())
 				tx.ID += strings.Repeat("x", pad)
+
 				return tx
 			}
 			cheap := build(0)
@@ -428,7 +463,7 @@ var _ = Describe("Service mempool", func() {
 			Expect(ids(svc.Pending())).To(Equal([]string{best.ID, cheap.ID}))
 			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(empty+mempool.Size(best)))
 
-			blk, err := svc.MinePending(context.Background())
+			blk, err := minePending(svc)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(ids(blk.Transactions)).To(Equal([]string{best.ID}))
 			Expect(ids(svc.Pending())).To(Equal([]string{cheap.ID}))
@@ -442,9 +477,11 @@ var _ = Describe("Service mempool", func() {
 					Transactions: []domain.Transaction{}, MerkleRoot: zeros, Hash: zeros, PrevHash: zeros,
 					Nonce: math.MaxInt, Difficulty: math.MaxInt, Validator: zeros, Signature: strings.Repeat("0", 128),
 				}
+
 				return b.Size()
 			}()
 			Expect(err).NotTo(HaveOccurred())
+
 			stamp := time.Date(2000, 1, 1, 0, 0, 0, 123456789, time.UTC)
 			build := func(op int, out uint64, pad int) domain.Transaction {
 				tx := domain.Transaction{
@@ -455,6 +492,7 @@ var _ = Describe("Service mempool", func() {
 				tx.ID = tx.CalculateHash()
 				Expect(domain.SignInput(&tx, 0, f.owner)).To(Succeed())
 				tx.ID += strings.Repeat("x", pad)
+
 				return tx
 			}
 			// Sizes s, s+1 and s: best and mid fill the room exactly, so their
@@ -463,13 +501,15 @@ var _ = Describe("Service mempool", func() {
 			best, mid, last := build(0, 4, 0), build(1, 8, 1), build(2, 9, 0)
 			Expect(mempool.Size(mid)).To(Equal(mempool.Size(best) + 1))
 			Expect(mempool.Size(last)).To(Equal(mempool.Size(best)))
+
 			for _, tx := range []domain.Transaction{best, mid, last} {
 				Expect(svc.Submit(tx)).To(Succeed())
 			}
+
 			Expect(ids(svc.Pending())).To(Equal([]string{best.ID, mid.ID, last.ID}))
 			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(empty+2*mempool.Size(best)+1))
 
-			blk, err := svc.MinePending(context.Background())
+			blk, err := minePending(svc)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(ids(blk.Transactions)).To(Equal([]string{best.ID, last.ID}))
 		})
@@ -477,10 +517,14 @@ var _ = Describe("Service mempool", func() {
 		It("fails instead of looping when even an empty block is too large", func() {
 			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "10")
 			Expect(svc.Submit(spendOp(0, 9))).To(Succeed())
+
 			done := make(chan error, 1)
+
 			go func() { _, err := svc.MinePending(context.Background()); done <- err }()
+
 			var err error
 			Eventually(done, 2*time.Second).Should(Receive(&err))
+
 			var verr *domain.ValidationError
 			Expect(errors.As(err, &verr)).To(BeTrue())
 			Expect(verr.Code).To(Equal(domain.CodeBlockTooLarge))
@@ -491,27 +535,36 @@ var _ = Describe("Service mempool", func() {
 	Describe("reads while a block is being mined", func() {
 		It("does not make Pending or Submit wait for Mine", func() {
 			entered, release := make(chan struct{}), make(chan struct{})
+
 			var once sync.Once
+
 			gate := func(ctx context.Context, c consensus.Consensus, h []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 				once.Do(func() { close(entered); <-release })
 				return GenerateBlockWithContext(ctx, c, h, txs)
 			}
 			gsvc, gf := funded(memory.New(), pow.NewProofOfWork(1), WithGenerator(gate))
 			done := make(chan struct{})
+
 			go func() {
 				defer GinkgoRecover()
 				defer close(done)
-				_, err := gsvc.MinePending(context.Background())
+
+				_, err := minePending(gsvc)
 				Expect(err).NotTo(HaveOccurred())
 			}()
+
 			Eventually(entered).Should(BeClosed())
 
 			read := make(chan int, 1)
+
 			go func() {
 				defer GinkgoRecover()
+
 				Expect(gsvc.Submit(gf.tx()[0])).To(Succeed())
+
 				read <- len(gsvc.Pending())
 			}()
+
 			Eventually(read, time.Second).Should(Receive(Equal(1)))
 			close(release)
 			Eventually(done).Should(BeClosed())

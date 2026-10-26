@@ -14,6 +14,7 @@ func nid(i int) string { return fmt.Sprintf("%032x", i) }
 func hAt(i int, listen string) Hello {
 	h := hello(nid(i))
 	h.ListenAddr = listen
+
 	return h
 }
 
@@ -32,14 +33,17 @@ func TestLimitsDefaults(t *testing.T) {
 	if b.limits != (Limits{16, 8, 1000}) {
 		t.Fatalf("defaults = %+v", b.limits)
 	}
+
 	b = NewBook(Limits{-1, -5, -2}, nil)
 	if b.limits != (Limits{16, 8, 1000}) {
 		t.Fatalf("negative = %+v", b.limits)
 	}
+
 	b = NewBook(Limits{1, 2, 3}, nil)
 	if b.limits != (Limits{1, 2, 3}) {
 		t.Fatalf("explicit = %+v", b.limits)
 	}
+
 	if b.now == nil || time.Since(b.now()) > time.Minute {
 		t.Fatal("nil clock must default to time.Now")
 	}
@@ -48,20 +52,27 @@ func TestLimitsDefaults(t *testing.T) {
 func TestBookInboundLimit(t *testing.T) {
 	b := NewBook(Limits{MaxInbound: 2, MaxOutbound: 1}, newClock().now)
 	for i := 1; i <= 2; i++ {
-		if err := b.Connect(hAt(i, ""), true); err != nil {
+		err := b.Connect(hAt(i, ""), true)
+		if err != nil {
 			t.Fatal(err)
 		}
 	}
+
 	before := b.Peers()
+
 	addrsBefore := b.Addrs()
-	if err := b.Connect(hAt(3, "http://c:1"), true); !errors.Is(err, ErrPeerLimit) {
+
+	err := b.Connect(hAt(3, "http://c:1"), true)
+	if !errors.Is(err, ErrPeerLimit) {
 		t.Fatalf("err = %v", err)
 	}
+
 	if !reflect.DeepEqual(before, b.Peers()) || !reflect.DeepEqual(addrsBefore, b.Addrs()) {
 		t.Fatal("book changed on refusal")
 	}
 	// the outbound slot is independent
-	if err := b.Connect(hAt(4, "http://d:1"), false); err != nil {
+	err = b.Connect(hAt(4, "http://d:1"), false)
+	if err != nil {
 		t.Fatal(err)
 	}
 }
@@ -70,58 +81,81 @@ func TestBookOutboundLimit(t *testing.T) {
 	b := NewBook(Limits{MaxInbound: 1, MaxOutbound: 2}, newClock().now)
 	_ = b.Connect(hAt(1, "http://a:1"), false)
 	_ = b.Connect(hAt(2, "http://b:1"), false)
+
 	before := b.Peers()
-	if err := b.Connect(hAt(3, "http://c:1"), false); !errors.Is(err, ErrPeerLimit) {
+
+	err := b.Connect(hAt(3, "http://c:1"), false)
+	if !errors.Is(err, ErrPeerLimit) {
 		t.Fatalf("err = %v", err)
 	}
+
 	if !reflect.DeepEqual(before, b.Peers()) {
 		t.Fatal("peers changed")
 	}
+
 	if got := b.Addrs(); !reflect.DeepEqual(got, []string{"http://a:1", "http://b:1"}) {
 		t.Fatalf("addrs = %v", got)
 	}
-	if err := b.Connect(hAt(5, ""), true); err != nil {
+
+	err = b.Connect(hAt(5, ""), true)
+	if err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestBookReconnectRefreshes(t *testing.T) {
 	c := newClock()
+
 	b := NewBook(Limits{MaxInbound: 1, MaxOutbound: 1}, c.now)
-	if err := b.Connect(hAt(1, "http://a:1"), true); err != nil {
+
+	err := b.Connect(hAt(1, "http://a:1"), true)
+	if err != nil {
 		t.Fatal(err)
 	}
+
 	c.add(time.Minute)
+
 	h := hAt(1, "http://a:1")
 	h.Height = 9
 	h.TipHash = idB + idB
 	// at the limit and even with the other direction: only refreshes
-	if err := b.Connect(h, false); err != nil {
+	err = b.Connect(h, false)
+	if err != nil {
 		t.Fatal(err)
 	}
+
 	ps := b.Peers()
 	if len(ps) != 1 || !ps[0].Inbound || ps[0].Height != 9 || ps[0].TipHash != h.TipHash || !ps[0].LastSeen.Equal(c.now()) || ps[0].Addr != "http://a:1" || ps[0].NodeID != nid(1) {
 		t.Fatalf("peers = %+v", ps)
 	}
-	if err := b.Connect(hAt(2, ""), true); !errors.Is(err, ErrPeerLimit) {
+
+	err = b.Connect(hAt(2, ""), true)
+	if !errors.Is(err, ErrPeerLimit) {
 		t.Fatalf("second inbound: %v", err)
 	}
 }
 
 func TestBookConnectAddsListenAddr(t *testing.T) {
 	b := NewBook(Limits{}, nil)
-	if err := b.Connect(hAt(1, "http://A:1/"), true); err != nil {
+
+	err := b.Connect(hAt(1, "http://A:1/"), true)
+	if err != nil {
 		t.Fatal(err)
 	}
+
 	if got := b.Addrs(); !reflect.DeepEqual(got, []string{"http://a:1"}) {
 		t.Fatalf("addrs = %v", got)
 	}
+
 	if got := b.Peers()[0].Addr; got != "http://a:1" {
 		t.Fatalf("addr = %q", got)
 	}
-	if err := b.Connect(hAt(2, "bad"), true); !errors.Is(err, ErrBadAddr) {
+
+	err = b.Connect(hAt(2, "bad"), true)
+	if !errors.Is(err, ErrBadAddr) {
 		t.Fatalf("err = %v", err)
 	}
+
 	if len(b.Peers()) != 1 {
 		t.Fatal("bad addr connected")
 	}
@@ -129,17 +163,21 @@ func TestBookConnectAddsListenAddr(t *testing.T) {
 
 func TestBookAddAddrs(t *testing.T) {
 	b := NewBook(Limits{MaxAddrs: 3}, nil)
+
 	n := b.AddAddrs("http://B:1", "bad", "http://b:1/", "http://a:1")
 	if n != 2 {
 		t.Fatalf("added = %d", n)
 	}
+
 	if n := b.AddAddrs("http://a:1", "http://c:1", "http://d:1"); n != 1 {
 		t.Fatalf("added = %d", n)
 	}
+
 	want := []string{"http://a:1", "http://b:1", "http://c:1"}
 	if got := b.Addrs(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("addrs = %v", got)
 	}
+
 	if n := b.AddAddrs(); n != 0 {
 		t.Fatal(n)
 	}
@@ -149,9 +187,11 @@ func TestBookAddAddrs(t *testing.T) {
 		t.Fatal("Addrs leaks internal state")
 	}
 	// a full book still lets a connected peer in, without its address
-	if err := b.Connect(hAt(1, "http://z:1"), true); err != nil {
+	err := b.Connect(hAt(1, "http://z:1"), true)
+	if err != nil {
 		t.Fatal(err)
 	}
+
 	if got := b.Addrs(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("addrs = %v", got)
 	}
@@ -167,15 +207,20 @@ func TestBookEmptyListsAreNotNil(t *testing.T) {
 func TestBookCandidates(t *testing.T) {
 	b := NewBook(Limits{}, nil)
 	b.AddAddrs("http://c:1", "http://a:1", "http://b:1")
+
 	_ = b.Connect(hAt(1, "http://b:1"), false)
 	if got := b.Candidates(); !reflect.DeepEqual(got, []string{"http://a:1", "http://c:1"}) {
 		t.Fatalf("candidates = %v", got)
 	}
+
 	b.Disconnect(nid(1))
+
 	if got := b.Candidates(); len(got) != 3 {
 		t.Fatalf("candidates = %v", got)
 	}
+
 	b.Disconnect("unknown")
+
 	if len(b.Addrs()) != 3 {
 		t.Fatal("disconnect dropped addresses")
 	}
@@ -186,6 +231,7 @@ func TestBookPeersSorted(t *testing.T) {
 	for _, i := range []int{3, 1, 2} {
 		_ = b.Connect(hAt(i, ""), true)
 	}
+
 	ps := b.Peers()
 	if len(ps) != 3 || ps[0].NodeID != nid(1) || ps[1].NodeID != nid(2) || ps[2].NodeID != nid(3) {
 		t.Fatalf("peers = %+v", ps)
@@ -196,16 +242,21 @@ func TestBookExpire(t *testing.T) {
 	c := newClock()
 	b := NewBook(Limits{}, c.now)
 	_ = b.Connect(hAt(1, "http://a:1"), true)
+
 	c.add(time.Minute)
+
 	_ = b.Connect(hAt(2, "http://b:1"), false)
+
 	cut := c.now()
 	if n := b.Expire(cut); n != 1 {
 		t.Fatalf("expired = %d", n)
 	}
+
 	ps := b.Peers()
 	if len(ps) != 1 || ps[0].NodeID != nid(2) {
 		t.Fatalf("peers = %+v", ps)
 	}
+
 	if len(b.Addrs()) != 2 {
 		t.Fatal("addresses lost")
 	}
@@ -213,33 +264,40 @@ func TestBookExpire(t *testing.T) {
 	if n := b.Expire(cut); n != 0 {
 		t.Fatalf("expired = %d", n)
 	}
+
 	if n := b.Expire(cut.Add(time.Nanosecond)); n != 1 {
 		t.Fatalf("expired = %d", n)
 	}
 	// slot freed
-	if err := b.Connect(hAt(1, ""), true); err != nil {
+	err := b.Connect(hAt(1, ""), true)
+	if err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestBookConcurrent(t *testing.T) {
 	b := NewBook(Limits{MaxInbound: 4, MaxOutbound: 3, MaxAddrs: 20}, nil)
+
 	var wg sync.WaitGroup
-	for g := 0; g < 8; g++ {
+	for g := range 8 {
 		wg.Add(1)
 		go func(g int) {
 			defer wg.Done()
-			for i := 0; i < 200; i++ {
+
+			for i := range 200 {
 				id := (g*7 + i) % 15
 				_ = b.Connect(hAt(id, fmt.Sprintf("http://h%d:1", id)), id%2 == 0)
 				b.AddAddrs(fmt.Sprintf("http://x%d:1", i))
 				b.Peers()
 				b.Candidates()
 				b.Expire(time.Unix(0, 0))
+
 				if i%3 == 0 {
 					b.Disconnect(nid(id))
 				}
+
 				var in, out int
+
 				for _, p := range b.Peers() {
 					if p.Inbound {
 						in++
@@ -247,6 +305,7 @@ func TestBookConcurrent(t *testing.T) {
 						out++
 					}
 				}
+
 				if in > 4 || out > 3 || len(b.Addrs()) > 20 {
 					t.Errorf("limits exceeded: %d %d %d", in, out, len(b.Addrs()))
 					return
@@ -254,5 +313,6 @@ func TestBookConcurrent(t *testing.T) {
 			}
 		}(g)
 	}
+
 	wg.Wait()
 }

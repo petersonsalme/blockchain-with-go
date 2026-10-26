@@ -21,30 +21,38 @@ func parsePath(path string) ([]uint32, error) {
 	if segs[0] != "m" {
 		return nil, fmt.Errorf("%w: path must start with 'm'", ErrInvalidPath)
 	}
+
 	if len(segs) == 1 {
 		return nil, nil
 	}
-	indices := make([]uint32, 0, len(segs)-1)
+
+	indices := make([]uint32, 0, len(segs))
 	for _, seg := range segs[1:] {
 		if seg == "" {
 			return nil, fmt.Errorf("%w: empty segment", ErrInvalidPath)
 		}
+
 		if !strings.HasSuffix(seg, "'") {
 			return nil, fmt.Errorf("%w: only hardened derivation is supported", ErrInvalidPath)
 		}
+
 		numStr := seg[:len(seg)-1]
+
 		n, err := strconv.ParseUint(numStr, 10, 31)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrInvalidPath, err)
+			return nil, fmt.Errorf("%w: %w", ErrInvalidPath, err)
 		}
+
 		indices = append(indices, uint32(n))
 	}
+
 	return indices, nil
 }
 
 func hmacSHA512(key, data []byte) []byte {
 	h := hmac.New(sha512.New, key)
 	_, _ = h.Write(data)
+
 	return h.Sum(nil)
 }
 
@@ -52,6 +60,7 @@ func deriveSLIP10(seed []byte, path string) (key, chainCode []byte, err error) {
 	if len(seed) < 16 || len(seed) > 64 {
 		return nil, nil, fmt.Errorf("wallet: seed must be 16 to 64 bytes, got %d", len(seed))
 	}
+
 	idx, err := parsePath(path)
 	if err != nil {
 		return nil, nil, err
@@ -68,6 +77,7 @@ func deriveSLIP10(seed []byte, path string) (key, chainCode []byte, err error) {
 		I = hmacSHA512(chainCode, data)
 		key, chainCode = I[:32], I[32:]
 	}
+
 	return key, chainCode, nil
 }
 
@@ -79,6 +89,7 @@ func DeriveKey(seed []byte, path string) (*Wallet, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return FromSeed(key)
 }
 
@@ -89,5 +100,6 @@ func FromMnemonic(mnemonic, passphrase, path string) (*Wallet, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return DeriveKey(seed, path)
 }

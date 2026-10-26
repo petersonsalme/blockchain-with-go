@@ -134,19 +134,12 @@ func (p *ProofOfWork) WithWorkers(n int) *ProofOfWork {
 	return p
 }
 
-func (p *ProofOfWork) workers() int {
-	if p.Workers < 1 {
-		return runtime.NumCPU()
-	}
-
-	return p.Workers
-}
-
 // WithRetarget enables retargeting every interval blocks towards target per
 // block, and returns p. An interval of 0 disables it.
 func (p *ProofOfWork) WithRetarget(interval int, target time.Duration) *ProofOfWork {
 	p.RetargetInterval = interval
 	p.TargetBlockTime = target
+
 	return p
 }
 
@@ -226,10 +219,18 @@ func (p *ProofOfWork) Verify(history []*domain.Block, b *domain.Block) error {
 	return nil
 }
 
+func (p *ProofOfWork) workers() int {
+	if p.Workers < 1 {
+		return runtime.NumCPU()
+	}
+
+	return p.Workers
+}
+
 // MineWithContext searches for a nonce whose hash satisfies the given difficulty
 // and stores the resulting nonce, difficulty and hash on the block. It checks
 // ctx.Err() in the nonce loop and aborts with the context error if canceled or timed out.
-func MineWithContext(ctx context.Context, b *domain.Block, difficulty int) error {
+func MineWithContext(ctx context.Context, b *domain.Block, difficulty int) error { //nolint:contextcheck // a nil context from callers that have none means no cancellation
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -239,7 +240,8 @@ func MineWithContext(ctx context.Context, b *domain.Block, difficulty int) error
 	b.Difficulty = difficulty
 
 	for b.Nonce = 0; ; b.Nonce++ {
-		if err := ctx.Err(); err != nil {
+		err := ctx.Err()
+		if err != nil {
 			return err
 		}
 
@@ -257,7 +259,7 @@ func MineWithContext(ctx context.Context, b *domain.Block, difficulty int) error
 // MineParallel returns only after all of them stopped. Any valid nonce is
 // accepted, so the one found may differ between runs when workers > 1. On
 // success it stores nonce, difficulty and hash on b; on error b is unchanged.
-func MineParallel(ctx context.Context, b *domain.Block, difficulty, workers int) error {
+func MineParallel(ctx context.Context, b *domain.Block, difficulty, workers int) error { //nolint:contextcheck // a nil context from callers that have none means no cancellation
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -271,7 +273,8 @@ func MineParallel(ctx context.Context, b *domain.Block, difficulty, workers int)
 	found := make(chan domain.Block, workers)
 
 	var wg sync.WaitGroup
-	for i := 0; i < workers; i++ {
+
+	for i := range workers {
 		c := *b
 		c.Difficulty = difficulty
 
@@ -283,7 +286,9 @@ func MineParallel(ctx context.Context, b *domain.Block, difficulty, workers int)
 				if hash := c.CalculateHash(); solvesDifficulty(hash, difficulty) {
 					c.Hash = hash
 					found <- c
+
 					cancel()
+
 					return
 				}
 			}
@@ -320,11 +325,13 @@ func solvesDifficulty(hash string, difficulty int) bool {
 	}
 
 	zeros := 0
+
 	for _, octet := range raw {
 		if octet != 0 {
 			zeros += bits.LeadingZeros8(octet)
 			break
 		}
+
 		zeros += 8
 	}
 

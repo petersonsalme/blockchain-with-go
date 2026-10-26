@@ -19,10 +19,10 @@ const prunedTip = 8
 
 var _ = Describe("Service on a pruned repository", func() {
 	for _, be := range backends {
-		be := be
 		if !be.pruned {
 			continue
 		}
+
 		Describe(be.name, func() {
 			var (
 				repo storage.IndexedRepository
@@ -38,11 +38,14 @@ var _ = Describe("Service on a pruned repository", func() {
 				repo = be.open()
 				svc, f = funded(repo, eng)
 				mined = nil
+
 				for range prunedTip {
 					b, err := svc.Mine(ctx, f.tx())
 					Expect(err).NotTo(HaveOccurred())
+
 					mined = append(mined, b)
 				}
+
 				below, err := repo.PrunedBelow()
 				Expect(err).NotTo(HaveOccurred())
 				Expect(below).To(Equal(5))
@@ -52,10 +55,12 @@ var _ = Describe("Service on a pruned repository", func() {
 				It("rejects a fork below the pruned history without writing or diverging", func() {
 					local := mustAll(repo)
 					before := utxoSnapshot(repo)
+
 					var txss [][]domain.Transaction
-					for j := 0; j < prunedTip; j++ {
+					for j := range prunedTip {
 						txss = append(txss, []domain.Transaction{spend(f.owner, f.ops[j], 8)})
 					}
+
 					cand := grow(eng, local[:3], txss...)
 
 					_, err := svc.ReplaceChain(ctx, cand)
@@ -64,16 +69,19 @@ var _ = Describe("Service on a pruned repository", func() {
 					Expect(errors.Is(err, ErrStateDiverged)).To(BeFalse())
 					Expect(hashes(mustAll(repo))).To(Equal(hashes(local)))
 					Expect(utxoSnapshot(repo)).To(Equal(before))
+
 					_, err = svc.Mine(ctx, f.tx())
 					Expect(err).NotTo(HaveOccurred())
 				})
 
 				It("reorgs a fork at the first retained height", func() {
 					local := mustAll(repo)
+
 					var txss [][]domain.Transaction
-					for j := 0; j < prunedTip-4+1; j++ {
+					for j := range prunedTip - 4 + 1 {
 						txss = append(txss, []domain.Transaction{spend(f.owner, f.ops[4+j], 8)})
 					}
+
 					cand := grow(eng, local[:5], txss...)
 
 					reorg, err := svc.ReplaceChain(ctx, cand)
@@ -81,6 +89,7 @@ var _ = Describe("Service on a pruned repository", func() {
 					Expect(err).NotTo(HaveOccurred())
 					Expect(reorg.ForkHeight).To(Equal(5))
 					Expect(reorg.Disconnected).To(HaveLen(4))
+
 					tip, err := svc.Tip()
 					Expect(err).NotTo(HaveOccurred())
 					Expect(tip.Hash).To(Equal(cand[len(cand)-1].Hash))
@@ -94,10 +103,12 @@ var _ = Describe("Service on a pruned repository", func() {
 					sum, utxos := svc.Balance(f.owner.Address())
 					Expect(sum).To(Equal(uint64(40)))
 					Expect(utxos).To(HaveLen(4))
+
 					for i := range utxos {
 						Expect(utxos[i].TxID).To(Equal(f.ops[prunedTip+i].TxID))
 						Expect(utxos[i].Index).To(Equal(f.ops[prunedTip+i].Index))
 					}
+
 					sum, utxos = svc.Balance(recipient().Address())
 					Expect(sum).To(Equal(uint64(9 * prunedTip)))
 					Expect(utxos).To(HaveLen(prunedTip))
@@ -107,12 +118,14 @@ var _ = Describe("Service on a pruned repository", func() {
 			Describe("block queries", func() {
 				It("answers ErrPruned for pruned heights and hashes", func() {
 					blocks := mustAll(repo)
+
 					for h := 1; h < 5; h++ {
 						_, err := svc.BlockByHeight(h)
 						Expect(err).To(MatchError(storage.ErrPruned))
 						_, err = svc.BlockByHash(blocks[h].Hash)
 						Expect(err).To(MatchError(storage.ErrPruned))
 					}
+
 					b, err := svc.BlockByHeight(5)
 					Expect(err).NotTo(HaveOccurred())
 					Expect(b.Transactions).NotTo(BeEmpty())
@@ -132,15 +145,19 @@ var _ = Describe("Service on a pruned repository", func() {
 					all, err := svc.Blocks()
 					Expect(err).NotTo(HaveOccurred())
 					Expect(all).To(HaveLen(prunedTip + 1))
+
 					part, err := svc.BlocksRange(3, 4)
 					Expect(err).NotTo(HaveOccurred())
 					Expect(part).To(HaveLen(4))
+
 					for _, b := range all[1:5] {
 						Expect(b.Transactions).To(BeEmpty())
 						Expect(b.Hash).NotTo(BeEmpty())
 					}
+
 					Expect(part[0].Transactions).To(BeEmpty())
 					Expect(part[2].Transactions).NotTo(BeEmpty())
+
 					tip, err := svc.Tip()
 					Expect(err).NotTo(HaveOccurred())
 					Expect(tip.Index).To(Equal(prunedTip))
@@ -161,12 +178,14 @@ var _ = Describe("Service on a pruned repository", func() {
 				It("keep serving a transaction of a retained block", func() {
 					b, err := svc.BlockByHeight(6)
 					Expect(err).NotTo(HaveOccurred())
+
 					id := b.Transactions[0].CalculateHash()
 					tx, hash, height, err := svc.Transaction(id)
 					Expect(err).NotTo(HaveOccurred())
 					Expect(tx.CalculateHash()).To(Equal(id))
 					Expect(hash).To(Equal(b.Hash))
 					Expect(height).To(Equal(6))
+
 					proof, err := svc.TxProof(id)
 					Expect(err).NotTo(HaveOccurred())
 					Expect(proof.BlockIndex).To(Equal(6))
@@ -177,10 +196,10 @@ var _ = Describe("Service on a pruned repository", func() {
 
 	// Mine plus ReplaceChain on a complete and on a pruned service end in the same state.
 	for _, be := range backends {
-		be := be
 		if !be.pruned {
 			continue
 		}
+
 		It("ends like a complete service after the same Mine and ReplaceChain ("+be.name+")", func() {
 			eng := pow.New(1)
 			ctx := context.Background()
@@ -199,6 +218,7 @@ var _ = Describe("Service on a pruned repository", func() {
 				_, err := full.Mine(ctx, f.tx())
 				Expect(err).NotTo(HaveOccurred())
 			}
+
 			_, err = pruned.ReplaceChain(ctx, mustAll(fullRepo))
 			Expect(err).NotTo(HaveOccurred())
 			below, err := prunedRepo.PrunedBelow()
@@ -207,10 +227,12 @@ var _ = Describe("Service on a pruned repository", func() {
 
 			// A heavier branch from the first retained height, on both.
 			local := mustAll(fullRepo)
+
 			var txss [][]domain.Transaction
-			for j := 0; j < prunedTip-below+2; j++ {
+			for j := range prunedTip - below + 2 {
 				txss = append(txss, []domain.Transaction{spend(f.owner, f.ops[below-1+j], 8)})
 			}
+
 			alt := grow(eng, local[:below], txss...)
 			_, err = full.ReplaceChain(ctx, alt)
 			Expect(err).NotTo(HaveOccurred())
@@ -223,6 +245,7 @@ var _ = Describe("Service on a pruned repository", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(prunedTipBlock.Hash).To(Equal(fullTip.Hash))
 			Expect(utxoSnapshot(prunedRepo)).To(Equal(utxoSnapshot(fullRepo)))
+
 			for _, addr := range []string{f.owner.Address(), recipient().Address()} {
 				wantSum, wantUTXOs := full.Balance(addr)
 				gotSum, gotUTXOs := pruned.Balance(addr)

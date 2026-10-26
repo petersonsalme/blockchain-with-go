@@ -72,7 +72,7 @@ func TestSolvesDifficultyRejectsMalformedHashes(t *testing.T) {
 }
 
 func TestSolvesDifficultyIsMonotonic(t *testing.T) {
-	for k := 0; k <= 256; k++ {
+	for k := range 257 {
 		hash := hashWithZeroBits(k)
 		for d := 1; d <= 258; d++ {
 			if solvesDifficulty(hash, d) && !solvesDifficulty(hash, d-1) {

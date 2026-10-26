@@ -20,10 +20,12 @@ func seededWallet(b byte) *wallet.Wallet {
 	for i := range seed {
 		seed[i] = b + byte(i)
 	}
+
 	w, err := wallet.FromSeed(seed)
 	if err != nil {
 		panic(err)
 	}
+
 	return w
 }
 
@@ -101,6 +103,7 @@ var _ = Describe("UTXO transaction", func() {
 			Expect(tx.Inputs[1].PublicKey).To(Equal(hex.EncodeToString(owner.PublicKey())))
 			sig, err := hex.DecodeString(tx.Inputs[1].Signature)
 			Expect(err).NotTo(HaveOccurred())
+
 			hash, _ := hex.DecodeString(tx.CalculateHash())
 			Expect(ed25519.Verify(owner.PublicKey(), hash, sig)).To(BeTrue())
 			Expect(tx.Inputs[0].Signature).To(BeEmpty())

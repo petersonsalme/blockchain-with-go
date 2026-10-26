@@ -16,6 +16,7 @@ var _ = Describe("Work", func() {
 		for d, want := range map[int]string{0: "1", 1: "2", 2: "4", 8: "256", 32: "4294967296", 256: new(big.Int).Lsh(big.NewInt(1), 256).String()} {
 			Expect(domain.BlockWork(&domain.Block{Difficulty: d}).String()).To(Equal(want), "difficulty "+strconv.Itoa(d))
 		}
+
 		Expect(domain.BlockWork(&domain.Block{Difficulty: -3}).Cmp(big.NewInt(1))).To(Equal(0))
 		Expect(domain.BlockWork(nil).Sign()).To(Equal(0))
 	})
@@ -37,11 +38,13 @@ var _ = Describe("Work", func() {
 var _ = Describe("DiffUTXO", func() {
 	randomSet := func(r *rand.Rand, pool []domain.OutPoint) domain.UTXOSet {
 		s := domain.UTXOSet{}
+
 		for _, op := range pool {
 			if r.Intn(2) == 0 {
 				s[op] = domain.TxOut{Amount: uint64(1 + r.Intn(3)), Address: "a" + strconv.Itoa(r.Intn(3))}
 			}
 		}
+
 		return s
 	}
 
@@ -66,12 +69,13 @@ var _ = Describe("DiffUTXO", func() {
 		Expect(d.Created).To(Equal(map[domain.OutPoint]domain.TxOut{fresh: to[fresh], moved: to[moved]}))
 	})
 
-	It("takes from to to when applied, over 300 random pairs of sets", func() {
+	It("takes the from-set to the to-set when applied, over 300 random pairs of sets", func() {
 		pool := make([]domain.OutPoint, 12)
 		for i := range pool {
 			pool[i] = domain.OutPoint{TxID: "tx" + strconv.Itoa(i/3), Index: uint32(i % 3)}
 		}
-		for seed := int64(0); seed < 300; seed++ {
+
+		for seed := range int64(300) {
 			r := rand.New(rand.NewSource(seed))
 			from, to := randomSet(r, pool), randomSet(r, pool)
 			fromBefore := clone(from)

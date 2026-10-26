@@ -71,18 +71,24 @@ func NewNode(c ChainView, b *Book, nodeID, listenAddr string, opts ...Option) (*
 	if !isHex(nodeID, 32) {
 		return nil, ErrBadHello
 	}
+
 	if listenAddr != "" {
 		a, err := NormalizeAddr(listenAddr)
 		if err != nil {
 			return nil, err
 		}
+
 		listenAddr = a
 	}
-	n := &Node{chain: c, book: b, nodeID: nodeID, listenAddr: listenAddr, version: ProtocolVersion,
-		client: newClient(), interval: 30 * time.Second, log: slog.New(slog.DiscardHandler), now: time.Now}
+
+	n := &Node{
+		chain: c, book: b, nodeID: nodeID, listenAddr: listenAddr, version: ProtocolVersion,
+		client: newClient(), interval: 30 * time.Second, log: slog.New(slog.DiscardHandler), now: time.Now,
+	}
 	for _, o := range opts {
 		o(n)
 	}
+
 	return n, nil
 }
 
@@ -100,10 +106,12 @@ func (n *Node) Hello() (Hello, error) {
 	if err != nil {
 		return Hello{}, err
 	}
+
 	tip, err := n.chain.Tip()
 	if err != nil {
 		return Hello{}, err
 	}
+
 	return Hello{
 		Version:     n.version,
 		NodeID:      n.nodeID,
@@ -121,6 +129,7 @@ func blockHash(b *domain.Block) string {
 	if b.Hash == "" {
 		return b.CalculateHash()
 	}
+
 	return b.Hash
 }
 
@@ -131,12 +140,17 @@ func (n *Node) Accept(remote Hello) (Hello, error) {
 	if err != nil {
 		return Hello{}, err
 	}
-	if err := Check(local, remote); err != nil {
+
+	err = Check(local, remote)
+	if err != nil {
 		return Hello{}, err
 	}
-	if err := n.book.Connect(remote, true); err != nil {
+
+	err = n.book.Connect(remote, true)
+	if err != nil {
 		return Hello{}, err
 	}
+
 	return local, nil
 }
 

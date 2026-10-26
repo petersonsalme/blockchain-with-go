@@ -33,6 +33,7 @@ var _ = Describe("Wallet", func() {
 		It("is deterministic with a fixed address vector", func() {
 			w1, err := FromSeed(fixedSeed)
 			Expect(err).NotTo(HaveOccurred())
+
 			w2, _ := FromSeed(fixedSeed)
 			Expect(w1.Address()).To(Equal(w2.Address()))
 			Expect(w1.Address()).To(HaveLen(50))
@@ -58,6 +59,7 @@ var _ = Describe("Wallet", func() {
 		It("tests public key size boundaries for Verify (len-1, len, len+1)", func() {
 			w, err := New()
 			Expect(err).NotTo(HaveOccurred())
+
 			msg := []byte("boundary test message")
 			sig := w.Sign(msg)
 
@@ -80,6 +82,7 @@ var _ = Describe("Wallet", func() {
 
 var _ = Describe("ValidateAddress", func() {
 	var addr string
+
 	BeforeEach(func() {
 		w, _ := FromSeed(fixedSeed)
 		addr = w.Address()
@@ -93,16 +96,19 @@ var _ = Describe("ValidateAddress", func() {
 			} else {
 				b[i] = '0'
 			}
+
 			Expect(ValidateAddress(string(b))).To(HaveOccurred(), "index %d", i)
 		}
 	})
 
 	It("reports a checksum error for a changed hash char", func() {
 		b := []byte(addr)
+
 		b[10] = map[byte]byte{'0': '1'}[b[10]]
 		if b[10] == 0 {
 			b[10] = '0'
 		}
+
 		Expect(ValidateAddress(string(b))).To(MatchError(ErrInvalidAddressChecksum))
 	})
 
@@ -128,6 +134,7 @@ var _ = Describe("ValidateAddress", func() {
 				upper[i] = c - 32
 			}
 		}
+
 		Expect(string(upper)).NotTo(Equal(addr))
 		Expect(ValidateAddress(string(upper))).To(MatchError(ErrInvalidAddressEncoding))
 	})

@@ -49,11 +49,13 @@ func isWeakPublicKey(pub []byte) bool {
 	if y[31] != 0x7f || y[0] < 0xed {
 		return false
 	}
+
 	for _, b := range y[1:31] {
 		if b != 0xff {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -140,6 +142,7 @@ func (t *Transaction) CalculateHash() string {
 	for i, in := range t.Inputs {
 		payload.Inputs[i] = utxoInPayload{PrevTxID: in.PrevTxID, OutIndex: in.OutIndex}
 	}
+
 	for i, out := range t.Outputs {
 		//nolint:staticcheck // S1016: explicit field copy pins the hashed payload shape
 		payload.Outputs[i] = utxoOutPayload{Amount: out.Amount, Address: out.Address}
@@ -155,8 +158,9 @@ func (t *Transaction) CalculateHash() string {
 		}
 	}
 
-	data, _ := json.Marshal(payload)
+	data, _ := json.Marshal(payload) //nolint:errchkjson // the payload holds only strings and integers: it cannot fail
 	h := sha256.Sum256(data)
+
 	return hex.EncodeToString(h[:])
 }
 
@@ -165,9 +169,11 @@ func SignInput(tx *Transaction, i int, w *wallet.Wallet) error {
 	if tx == nil {
 		return errors.New("transaction is nil")
 	}
+
 	if w == nil {
 		return errors.New("wallet is nil")
 	}
+
 	if i < 0 || i >= len(tx.Inputs) {
 		return ErrInputIndex
 	}
@@ -175,6 +181,7 @@ func SignInput(tx *Transaction, i int, w *wallet.Wallet) error {
 	hashBytes, _ := hex.DecodeString(tx.CalculateHash())
 	tx.Inputs[i].PublicKey = hex.EncodeToString(w.PublicKey())
 	tx.Inputs[i].Signature = hex.EncodeToString(w.Sign(hashBytes))
+
 	return nil
 }
 
@@ -184,9 +191,11 @@ func VerifyInputSignature(tx *Transaction, i int, spent TxOut) error {
 	if tx == nil {
 		return errors.New("transaction is nil")
 	}
+
 	if i < 0 || i >= len(tx.Inputs) {
 		return ErrInputIndex
 	}
+
 	in := tx.Inputs[i]
 
 	if in.Signature == "" || in.PublicKey == "" {
@@ -196,6 +205,7 @@ func VerifyInputSignature(tx *Transaction, i int, spent TxOut) error {
 	if len(in.PublicKey) != 64 {
 		return ErrInvalidPublicKey
 	}
+
 	rawPub, err := hex.DecodeString(in.PublicKey)
 	if err != nil || hex.EncodeToString(rawPub) != in.PublicKey || isWeakPublicKey(rawPub) {
 		return ErrInvalidPublicKey
@@ -204,6 +214,7 @@ func VerifyInputSignature(tx *Transaction, i int, spent TxOut) error {
 	if len(in.Signature) != 128 {
 		return ErrInvalidSignature
 	}
+
 	rawSig, err := hex.DecodeString(in.Signature)
 	if err != nil || hex.EncodeToString(rawSig) != in.Signature {
 		return ErrInvalidSignature

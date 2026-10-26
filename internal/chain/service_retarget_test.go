@@ -20,6 +20,7 @@ import (
 // allFailingRepo fails All once armed.
 type allFailingRepo struct {
 	storage.IndexedRepository
+
 	armed atomic.Bool
 }
 
@@ -27,12 +28,14 @@ func (r *allFailingRepo) All() ([]*domain.Block, error) {
 	if r.armed.Load() {
 		return nil, errors.New("all failed")
 	}
+
 	return r.IndexedRepository.All()
 }
 
 // snapshotRepo fails Last, or returns an empty All, once armed.
 type snapshotRepo struct {
 	storage.IndexedRepository
+
 	failLast, emptyAll atomic.Bool
 }
 
@@ -40,6 +43,7 @@ func (r *snapshotRepo) Last() (*domain.Block, error) {
 	if r.failLast.Load() {
 		return nil, errors.New("last failed")
 	}
+
 	return r.IndexedRepository.Last()
 }
 
@@ -47,6 +51,7 @@ func (r *snapshotRepo) All() ([]*domain.Block, error) {
 	if r.emptyAll.Load() {
 		return nil, nil
 	}
+
 	return r.IndexedRepository.All()
 }
 
@@ -59,18 +64,20 @@ var _ = Describe("Service difficulty retargeting", func() {
 		eng := pow.New(1).WithRetarget(2, time.Hour)
 		svc, f := funded(repo, eng)
 
-		for i := 0; i < 4; i++ {
+		for range 4 {
 			_, err := svc.Mine(context.Background(), f.tx())
 			Expect(err).NotTo(HaveOccurred())
 		}
 
 		all, _ := repo.All()
 		Expect(all).To(HaveLen(5))
+
 		var got []int
 		for i := 1; i < len(all); i++ {
 			got = append(got, all[i].Difficulty)
 			Expect(eng.Verify(all[:i], all[i])).To(Succeed())
 		}
+
 		Expect(got).To(Equal([]int{1, 1, 1, 2}))
 	})
 
@@ -80,6 +87,7 @@ var _ = Describe("Service difficulty retargeting", func() {
 			b, err := GenerateBlockWithContext(ctx, c, history, txs)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(pow.MineWithContext(ctx, b, b.Difficulty+1)).To(Succeed())
+
 			return b, nil
 		}))
 		before, utxos := svc.Balance(f.owner.Address())
@@ -90,6 +98,7 @@ var _ = Describe("Service difficulty retargeting", func() {
 
 		all, _ := repo.All()
 		Expect(all).To(HaveLen(1))
+
 		after, utxosAfter := svc.Balance(f.owner.Address())
 		Expect(after).To(Equal(before))
 		Expect(utxosAfter).To(Equal(utxos))
@@ -97,7 +106,9 @@ var _ = Describe("Service difficulty retargeting", func() {
 
 	It("passes the whole chain, genesis first, to the generator", func() {
 		eng := pow.New(1)
+
 		var seen []*domain.Block
+
 		svc, f := funded(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 			seen = history
 			return GenerateBlockWithContext(ctx, c, history, txs)
@@ -126,7 +137,9 @@ var _ = Describe("Service difficulty retargeting", func() {
 		svc, f := funded(wrapped, pow.New(1))
 		before, err := repo.All()
 		Expect(err).NotTo(HaveOccurred())
+
 		parent := before[len(before)-1]
+
 		wrapped.failLast.Store(true)
 
 		blk, err := svc.Mine(context.Background(), f.tx())

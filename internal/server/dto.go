@@ -103,6 +103,7 @@ func (r txRequest) transaction() domain.Transaction {
 	if c := r.Contract; c != nil {
 		tx.Contract = &domain.ContractOp{Kind: c.Kind, Code: c.Code, Target: c.Target, Args: c.Args, GasLimit: c.GasLimit}
 	}
+
 	return tx
 }
 
@@ -118,5 +119,6 @@ func newContractResponse(id string, code []byte, storage map[uint64]uint64) cont
 	if storage == nil {
 		storage = map[uint64]uint64{}
 	}
+
 	return contractResponse{ID: id, Code: hex.EncodeToString(code), Storage: storage}
 }

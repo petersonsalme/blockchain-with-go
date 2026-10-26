@@ -48,6 +48,7 @@ var _ = Describe("ContractOp", func() {
 			tx domain.Transaction
 			w  = seededWallet(1)
 		)
+
 		BeforeEach(func() {
 			tx = domain.Transaction{
 				Inputs:    []domain.TxIn{{PrevTxID: "aa", OutIndex: 0}},

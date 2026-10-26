@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"maps"
 	"math"
 	"math/rand"
 	"time"
@@ -21,6 +22,7 @@ func newTx(n int, ins []domain.OutPoint, outs ...domain.TxOut) domain.Transactio
 	for _, in := range ins {
 		tx.Inputs = append(tx.Inputs, domain.TxIn{PrevTxID: in.TxID, OutIndex: in.Index})
 	}
+
 	return tx
 }
 
@@ -34,9 +36,8 @@ func blockOf(index int, txs ...domain.Transaction) *domain.Block {
 
 func clone(s domain.UTXOSet) domain.UTXOSet {
 	c := domain.UTXOSet{}
-	for k, v := range s {
-		c[k] = v
-	}
+	maps.Copy(c, s)
+
 	return c
 }
 
@@ -54,9 +55,12 @@ var _ = Describe("UTXO rules", func() {
 		bob = seededWallet(100).Address()
 		genesisTx = newTx(0, nil, domain.TxOut{Amount: 100, Address: alice}, domain.TxOut{Amount: 50, Address: bob})
 		genesis = blockOf(0, genesisTx)
+
 		var err error
+
 		set, err = domain.BuildUTXOSet([]*domain.Block{genesis})
 		Expect(err).NotTo(HaveOccurred())
+
 		g0 = outpoint(genesisTx, 0)
 	})
 
@@ -139,6 +143,7 @@ var _ = Describe("UTXO rules", func() {
 			d, err := domain.BlockDelta(set, blockOf(1, tx), false)
 			Expect(err).NotTo(HaveOccurred())
 			set.Apply(d)
+
 			again := newTx(2, []domain.OutPoint{g0}, domain.TxOut{Amount: 100, Address: bob})
 			_, err = domain.BlockDelta(set, blockOf(2, again), false)
 			Expect(err).To(MatchError(domain.ErrInputMissingOrSpent))
@@ -192,6 +197,7 @@ var _ = Describe("UTXO rules", func() {
 			zero := newTx(1, []domain.OutPoint{g0}, domain.TxOut{Amount: 0, Address: bob})
 			_, err := domain.BlockDelta(set, blockOf(1, zero), false)
 			Expect(err).To(MatchError(domain.ErrInvalidOutput))
+
 			bad := newTx(1, []domain.OutPoint{g0}, domain.TxOut{Amount: 1, Address: "bob"})
 			_, err = domain.BlockDelta(set, blockOf(1, bad), false)
 			Expect(err).To(MatchError(domain.ErrInvalidOutput))
@@ -247,6 +253,7 @@ var _ = Describe("UTXO rules", func() {
 			_, err := domain.BlockDelta(set, blockOf(1, ok), false)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(set).To(Equal(before))
+
 			bad := newTx(2, []domain.OutPoint{g0}, domain.TxOut{Amount: 1000, Address: bob})
 			_, err = domain.BlockDelta(set, blockOf(1, ok, bad), false)
 			Expect(err).To(HaveOccurred())
@@ -257,9 +264,11 @@ var _ = Describe("UTXO rules", func() {
 	Describe("UTXOSet", func() {
 		It("is a UTXOView", func() {
 			var v domain.UTXOView = set
+
 			out, ok := v.Lookup(g0)
 			Expect(ok).To(BeTrue())
 			Expect(out).To(Equal(domain.TxOut{Amount: 100, Address: alice}))
+
 			_, ok = v.Lookup(domain.OutPoint{TxID: "zz"})
 			Expect(ok).To(BeFalse())
 		})
@@ -268,6 +277,7 @@ var _ = Describe("UTXO rules", func() {
 			tx := newTx(1, []domain.OutPoint{g0}, domain.TxOut{Amount: 60, Address: bob})
 			d, err := domain.BlockDelta(set, blockOf(1, tx), false)
 			Expect(err).NotTo(HaveOccurred())
+
 			before := clone(set)
 
 			set.Apply(d)
@@ -296,8 +306,11 @@ var _ = Describe("UTXO rules", func() {
 		})
 
 		It("returns an error, without panicking, for a nil first block", func() {
-			var s domain.UTXOSet
-			var err error
+			var (
+				s   domain.UTXOSet
+				err error
+			)
+
 			Expect(func() { s, err = domain.BuildUTXOSet([]*domain.Block{nil}) }).NotTo(Panic())
 			Expect(err).To(HaveOccurred())
 			Expect(s).To(BeNil())
@@ -345,50 +358,66 @@ var _ = Describe("UTXO rules", func() {
 			as := addrs()
 			n := 0
 			next := func() int { n++; return n }
+
 			var gtxs []domain.Transaction
-			for i := 0; i < 1+r.Intn(3); i++ {
+			for range 1 + r.Intn(3) {
 				gtxs = append(gtxs, newTx(next(), nil, domain.TxOut{Amount: uint64(1 + r.Intn(1000)), Address: as[r.Intn(3)]}))
 			}
+
 			blocks := []*domain.Block{blockOf(0, gtxs...)}
 			cur, err := domain.BuildUTXOSet(blocks)
 			Expect(err).NotTo(HaveOccurred())
+
 			for b := 1; b <= 6; b++ {
 				view := clone(cur)
+
 				var txs []domain.Transaction
-				for t := 0; t < 1+r.Intn(3); t++ {
-					var ops []domain.OutPoint
-					var sum uint64
+
+				for range 1 + r.Intn(3) {
+					var (
+						ops []domain.OutPoint
+						sum uint64
+					)
+
 					for op, out := range view {
 						if len(ops) < 1+r.Intn(3) {
 							ops = append(ops, op)
 							sum += out.Amount
+
 							delete(view, op)
 						}
 					}
+
 					if len(ops) == 0 {
 						break
 					}
+
 					outs := []domain.TxOut{{Amount: 1 + uint64(r.Intn(int(sum))), Address: as[r.Intn(3)]}}
 					if rest := sum - outs[0].Amount; rest > 0 && r.Intn(2) == 0 {
 						outs = append(outs, domain.TxOut{Amount: 1 + uint64(r.Intn(int(rest))), Address: as[r.Intn(3)]})
 					}
+
 					tx := newTx(next(), ops, outs...)
+
 					txs = append(txs, tx)
 					for i, o := range outs {
 						view[outpoint(tx, uint32(i))] = o
 					}
 				}
+
 				blk := blockOf(b, txs...)
 				d, err := domain.BlockDelta(cur, blk, false)
 				Expect(err).NotTo(HaveOccurred())
 				cur.Apply(d)
+
 				blocks = append(blocks, blk)
 			}
+
 			return blocks
 		}
 
 		It("holds for 200 random chains", func() {
-			for seed := int64(0); seed < 200; seed++ {
+			for seed := range int64(200) {
 				r := rand.New(rand.NewSource(seed))
 				blocks := randomChain(r)
 
@@ -401,6 +430,7 @@ var _ = Describe("UTXO rules", func() {
 
 				inc := domain.UTXOSet{}
 				spentOnce := map[domain.OutPoint]bool{}
+
 				for _, b := range blocks {
 					before := clone(inc)
 					d, err := domain.BlockDelta(inc, b, b.Index == 0)
@@ -418,28 +448,33 @@ var _ = Describe("UTXO rules", func() {
 					// each outpoint is spent at most once; sum(in) >= sum(out).
 					for _, tx := range b.Transactions {
 						var in, out uint64
+
 						for _, i := range tx.Inputs {
 							op := domain.OutPoint{TxID: i.PrevTxID, Index: i.OutIndex}
 							Expect(spentOnce[op]).To(BeFalse())
 							spentOnce[op] = true
 						}
+
 						for _, o := range tx.Outputs {
 							out += o.Amount
 						}
+
 						if b.Index != 0 {
 							for _, i := range tx.Inputs {
 								in += lookupAmount(blocks, i.PrevTxID, i.OutIndex)
 							}
+
 							Expect(in).To(BeNumerically(">=", out))
 						}
 					}
 				}
+
 				Expect(inc).To(Equal(built))
 			}
 		})
 
 		It("leaves the view identical whether BlockDelta fails or succeeds", func() {
-			for seed := int64(0); seed < 200; seed++ {
+			for seed := range int64(200) {
 				r := rand.New(rand.NewSource(seed))
 				blocks := randomChain(r)
 				view, err := domain.BuildUTXOSet(blocks[:len(blocks)-1])
@@ -447,6 +482,7 @@ var _ = Describe("UTXO rules", func() {
 
 				// Corrupt the last block: duplicate a transaction or drop its outputs.
 				last := *blocks[len(blocks)-1]
+
 				last.Transactions = append([]domain.Transaction(nil), last.Transactions...)
 				if len(last.Transactions) > 0 {
 					if r.Intn(2) == 0 {
@@ -455,6 +491,7 @@ var _ = Describe("UTXO rules", func() {
 						last.Transactions[0].Outputs = nil
 					}
 				}
+
 				before := clone(view)
 				_, _ = domain.BlockDelta(view, &last, false)
 				Expect(view).To(Equal(before))
@@ -474,5 +511,6 @@ func lookupAmount(blocks []*domain.Block, txid string, idx uint32) uint64 {
 			}
 		}
 	}
+
 	return 0
 }

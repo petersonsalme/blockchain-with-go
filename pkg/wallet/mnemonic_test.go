@@ -27,6 +27,7 @@ var _ = Describe("Mnemonic", func() {
 
 	It("matches the official BIP-39 vectors", func() {
 		Expect(vectors.English).To(HaveLen(24))
+
 		for _, v := range vectors.English {
 			entropy, err := hex.DecodeString(v[0])
 			Expect(err).NotTo(HaveOccurred())
@@ -140,6 +141,7 @@ var _ = Describe("Mnemonic", func() {
 
 	It("derives the official BIP-39 seeds", func() {
 		Expect(vectors.English).To(HaveLen(24))
+
 		for _, v := range vectors.English {
 			seed, err := MnemonicToSeed(v[1], "TREZOR")
 			Expect(err).NotTo(HaveOccurred())

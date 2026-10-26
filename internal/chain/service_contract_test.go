@@ -44,6 +44,7 @@ func withContract(w *wallet.Wallet, op domain.OutPoint, out uint64, cop *domain.
 	}
 	tx.ID = tx.CalculateHash()
 	Expect(domain.SignInput(&tx, 0, w)).To(Succeed())
+
 	return tx
 }
 
@@ -58,6 +59,7 @@ func callOp(target string, gas uint64) *domain.ContractOp {
 // poisonedAll makes All return a fixed chain once set.
 type poisonedAll struct {
 	storage.IndexedRepository
+
 	chain []*domain.Block
 }
 
@@ -65,6 +67,7 @@ func (p *poisonedAll) All() ([]*domain.Block, error) {
 	if p.chain != nil {
 		return p.chain, nil
 	}
+
 	return p.IndexedRepository.All()
 }
 
@@ -73,6 +76,7 @@ func (p *poisonedAll) ForkState(height int) (domain.UTXOSet, error) {
 	if p.chain != nil {
 		return domain.BuildUTXOSet(p.chain[:height])
 	}
+
 	return p.IndexedRepository.ForkState(height)
 }
 
@@ -81,7 +85,6 @@ var _ = Describe("Service contracts", func() {
 	missing := hex.EncodeToString(make([]byte, 32))
 
 	for _, be := range backends {
-		be := be
 		Describe(be.name, func() {
 			var (
 				repo storage.IndexedRepository
@@ -89,15 +92,18 @@ var _ = Describe("Service contracts", func() {
 				svc  *Service
 				f    *funding
 			)
+
 			next := func() domain.OutPoint {
 				op := f.ops[f.next]
 				f.next++
+
 				return op
 			}
 			deploy := func(code []byte) string {
 				tx := withContract(f.owner, next(), 9, deployOp(code))
 				_, err := svc.Mine(ctx, []domain.Transaction{tx})
 				Expect(err).NotTo(HaveOccurred())
+
 				return tx.CalculateHash()
 			}
 			call := func(id string, gas uint64) domain.Transaction {
@@ -106,11 +112,13 @@ var _ = Describe("Service contracts", func() {
 			counter := func(id string) uint64 {
 				_, st, ok := svc.Contract(id)
 				Expect(ok).To(BeTrue())
+
 				return st[0]
 			}
 			chainHashes := func() []string {
 				all, err := repo.All()
 				Expect(err).NotTo(HaveOccurred())
+
 				return hashes(all)
 			}
 
@@ -161,6 +169,7 @@ var _ = Describe("Service contracts", func() {
 
 					again, err := NewService(repo, pow.NewProofOfWork(1))
 					Expect(err).NotTo(HaveOccurred())
+
 					_, st, ok := again.Contract(id)
 					Expect(ok).To(BeTrue())
 					Expect(st).To(Equal(map[uint64]uint64{0: 1}))
@@ -181,6 +190,7 @@ var _ = Describe("Service contracts", func() {
 						_, err := svc.Mine(ctx, []domain.Transaction{call(id, 100)})
 						Expect(err).NotTo(HaveOccurred())
 					}
+
 					Expect(counter(id)).To(Equal(uint64(3)))
 				})
 
@@ -208,6 +218,7 @@ var _ = Describe("Service contracts", func() {
 						_, err := svc.Mine(ctx, []domain.Transaction{tc.tx})
 						Expect(err).To(MatchError(tc.err))
 					}
+
 					Expect(chainHashes()).To(Equal(before))
 					Expect(utxoSnapshot(repo)).To(Equal(utxos))
 					Expect(svc.Pending()).To(Equal(pending))
@@ -222,12 +233,14 @@ var _ = Describe("Service contracts", func() {
 					failing.commitErr = storage.ErrConflict
 					_, err := s.Mine(ctx, []domain.Transaction{dep})
 					Expect(err).To(MatchError(storage.ErrConflict))
+
 					_, _, ok := s.Contract(dep.CalculateHash())
 					Expect(ok).To(BeFalse())
 
 					failing.commitErr = errors.New("disk")
 					_, err = s.Mine(ctx, []domain.Transaction{dep})
 					Expect(err).To(MatchError(ErrStateDiverged))
+
 					_, _, ok = s.Contract(dep.CalculateHash())
 					Expect(ok).To(BeFalse())
 				})
@@ -300,6 +313,7 @@ var _ = Describe("Service contracts", func() {
 						_, err := svc.Mine(ctx, []domain.Transaction{call(id, 100)})
 						Expect(err).NotTo(HaveOccurred())
 					}
+
 					all := mustAll(repo)
 					base = all[:2]
 					cand = func(gas uint64) []*domain.Block {
@@ -309,12 +323,14 @@ var _ = Describe("Service contracts", func() {
 							[]domain.Transaction{spend(f.owner, next(), 9)},
 						)
 					}
+
 					return id, base, cand
 				}
 
 				It("takes the contract state of the winning branch", func() {
 					id, _, cand := fixture()
 					Expect(counter(id)).To(Equal(uint64(2)))
+
 					_, err := svc.ReplaceChain(ctx, cand(100))
 					Expect(err).NotTo(HaveOccurred())
 					Expect(counter(id)).To(Equal(uint64(1)))
@@ -348,6 +364,7 @@ var _ = Describe("Service contracts", func() {
 					failing.reorgErr = storage.ErrConflict
 					_, err = s.ReplaceChain(ctx, cand)
 					Expect(err).To(MatchError(storage.ErrConflict))
+
 					_, st, _ := s.Contract(id)
 					Expect(st).To(Equal(map[uint64]uint64{0: 1}))
 				})
@@ -358,6 +375,7 @@ var _ = Describe("Service contracts", func() {
 					p := &poisonedAll{IndexedRepository: repo}
 					s, err := NewService(p, c)
 					Expect(err).NotTo(HaveOccurred())
+
 					p.chain = poisoned
 					cand := grow(c, poisoned, []domain.Transaction{spend(f.owner, next(), 9)})
 					_, err = s.ReplaceChain(ctx, cand)
@@ -367,28 +385,33 @@ var _ = Describe("Service contracts", func() {
 
 			It("serves Submit and Contract while Mine runs", func() {
 				id := deploy(vm.CounterCode)
+
 				var wg sync.WaitGroup
+
 				stop := make(chan struct{})
+
 				for range 4 {
-					wg.Add(1)
-					go func() {
-						defer wg.Done()
+					wg.Go(func() {
 						defer GinkgoRecover()
+
 						for {
 							select {
 							case <-stop:
 								return
 							default:
 							}
+
 							_, _, _ = svc.Contract(id)
 							_ = svc.Submit(withContract(f.owner, f.ops[fundedOutputs-1], 9, callOp(id, 100)))
 						}
-					}()
+					})
 				}
+
 				for range 5 {
 					_, err := svc.Mine(ctx, []domain.Transaction{call(id, 100)})
 					Expect(err).NotTo(HaveOccurred())
 				}
+
 				close(stop)
 				wg.Wait()
 				Expect(counter(id)).To(Equal(uint64(5)))

@@ -34,6 +34,7 @@ func newP2PNode(c p2p.ChainView, dataDir string, logger *slog.Logger) (*p2p.Node
 	if err != nil {
 		return nil, err
 	}
+
 	book := p2p.NewBook(p2p.Limits{
 		MaxInbound:  parsePositiveInt(os.Getenv(maxInboundPeersEnvVar)),
 		MaxOutbound: parsePositiveInt(os.Getenv(maxOutboundPeersEnvVar)),
@@ -43,25 +44,32 @@ func newP2PNode(c p2p.ChainView, dataDir string, logger *slog.Logger) (*p2p.Node
 		p2p.WithInterval(parsePeerInterval(os.Getenv(peerIntervalEnvVar))),
 		p2p.WithLogger(logger),
 	}
+
 	if strings.TrimSpace(dataDir) != "" {
 		path := filepath.Join(dataDir, peersFileName)
+
 		saved, err := p2p.LoadAddrs(path)
 		if err != nil {
 			return nil, fmt.Errorf("%s: cannot load %q: %w", dataDirEnvVar, path, err)
 		}
+
 		book.AddAddrs(saved...)
+
 		opts = append(opts, p2p.WithAddrFile(path))
 	}
+
 	book.AddAddrs(seeds...)
 
 	id, err := p2p.NewNodeID()
 	if err != nil {
 		return nil, err
 	}
+
 	node, err := p2p.NewNode(c, book, id, strings.TrimSpace(os.Getenv(p2pListenAddrEnvVar)), opts...)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", p2pListenAddrEnvVar, err)
 	}
+
 	return node, nil
 }
 
@@ -71,15 +79,20 @@ func parseSeedPeers(raw string) ([]string, error) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, nil
 	}
+
 	var seeds []string
-	for _, item := range strings.Split(raw, ",") {
+
+	for item := range strings.SplitSeq(raw, ",") {
 		item = strings.TrimSpace(item)
+
 		addr, err := p2p.NormalizeAddr(item)
 		if err != nil {
 			return nil, fmt.Errorf("%s: invalid item %q: want http(s)://host:port", seedPeersEnvVar, item)
 		}
+
 		seeds = append(seeds, addr)
 	}
+
 	return seeds, nil
 }
 
@@ -89,6 +102,7 @@ func parsePositiveInt(raw string) int {
 	if err != nil || n <= 0 {
 		return 0
 	}
+
 	return n
 }
 
@@ -98,18 +112,20 @@ func parsePeerInterval(raw string) time.Duration {
 	if err != nil || d <= 0 {
 		return 0
 	}
+
 	return d
 }
 
 // startDialer runs the dialer of node until ctx is done or the returned stop is called; stop waits for it.
 func startDialer(ctx context.Context, node *p2p.Node) (stop func()) {
 	ctx, cancel := context.WithCancel(ctx)
+
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+
+	wg.Go(func() {
 		node.Run(ctx)
-	}()
+	})
+
 	return func() {
 		cancel()
 		wg.Wait()

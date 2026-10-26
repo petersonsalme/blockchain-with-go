@@ -41,20 +41,26 @@ func Check(local, remote Hello) error {
 	if remote.Height < 0 || !isHex(remote.NodeID, 32) || !isHex(remote.GenesisHash, 64) || !isHex(remote.TipHash, 64) {
 		return ErrBadHello
 	}
+
 	if remote.ListenAddr != "" {
-		if _, err := NormalizeAddr(remote.ListenAddr); err != nil {
+		_, err := NormalizeAddr(remote.ListenAddr)
+		if err != nil {
 			return ErrBadHello
 		}
 	}
+
 	if remote.Version != local.Version {
 		return ErrIncompatibleVersion
 	}
+
 	if remote.GenesisHash != local.GenesisHash {
 		return ErrGenesisMismatch
 	}
+
 	if remote.NodeID == local.NodeID {
 		return ErrSelf
 	}
+
 	return nil
 }
 
@@ -63,21 +69,26 @@ func isHex(s string, n int) bool {
 	if len(s) != n {
 		return false
 	}
-	for i := 0; i < len(s); i++ {
+
+	for i := range len(s) {
 		c := s[i]
 		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			return false
 		}
 	}
+
 	return true
 }
 
 // NewNodeID returns 16 random bytes as 32 lowercase hex characters.
 func NewNodeID() (string, error) {
 	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
+
+	_, err := rand.Read(b[:])
+	if err != nil {
 		return "", err
 	}
+
 	return hex.EncodeToString(b[:]), nil
 }
 
@@ -87,27 +98,33 @@ func NormalizeAddr(raw string) (string, error) {
 	if strings.ContainsAny(raw, "?#") {
 		return "", ErrBadAddr
 	}
+
 	u, err := url.Parse(raw)
 	if err != nil || u.User != nil || u.Opaque != "" || (u.Path != "" && u.Path != "/") {
 		return "", ErrBadAddr
 	}
+
 	scheme := strings.ToLower(u.Scheme)
 	if scheme != "http" && scheme != "https" {
 		return "", ErrBadAddr
 	}
+
 	host := strings.ToLower(u.Hostname())
 	if !validHost(host) {
 		return "", ErrBadAddr
 	}
+
 	for _, c := range u.Port() {
 		if c < '0' || c > '9' {
 			return "", ErrBadAddr
 		}
 	}
+
 	port, err := strconv.Atoi(u.Port())
 	if err != nil || port < 1 || port > 65535 {
 		return "", ErrBadAddr
 	}
+
 	return scheme + "://" + net.JoinHostPort(host, strconv.Itoa(port)), nil
 }
 
@@ -116,14 +133,17 @@ func validHost(h string) bool {
 	if h == "" {
 		return false
 	}
+
 	if strings.Contains(h, ":") {
 		return !strings.Contains(h, "%") && net.ParseIP(h) != nil
 	}
-	for i := 0; i < len(h); i++ {
+
+	for i := range len(h) {
 		c := h[i]
 		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' && c != '.' {
 			return false
 		}
 	}
+
 	return true
 }

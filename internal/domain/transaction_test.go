@@ -11,6 +11,7 @@ import (
 
 var _ = Describe("Transaction", func() {
 	var baseTx domain.Transaction
+
 	fixedTime := time.Date(2026, 10, 16, 20, 0, 0, 123456000, time.UTC)
 
 	BeforeEach(func() {

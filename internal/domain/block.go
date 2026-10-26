@@ -25,5 +25,6 @@ func (b *Block) CalculateHash() string {
 	h := sha256.New()
 	h.Write([]byte(record))
 	hashed := h.Sum(nil)
+
 	return hex.EncodeToString(hashed)
 }

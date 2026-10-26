@@ -80,6 +80,7 @@ func gasCost(op byte) (cost uint64, ok bool) {
 	case OpSSTORE:
 		return 20, true
 	}
+
 	return 0, false
 }
 
@@ -95,24 +96,30 @@ func opcodeOffsets(code []byte) ([]bool, error) {
 	if len(code) == 0 || len(code) > domain.MaxContractCodeBytes {
 		return nil, ErrInvalidCode
 	}
+
 	starts := make([]bool, len(code))
+
 	skip := 0 // bytes of a PUSH8 immediate still to pass
 	for pc, op := range code {
 		if skip > 0 {
 			skip--
 			continue
 		}
+
 		if _, ok := gasCost(op); !ok {
 			return nil, ErrInvalidCode
 		}
+
 		starts[pc] = true
 		if op == OpPUSH8 {
 			if pc+8 >= len(code) {
 				return nil, ErrInvalidCode
 			}
+
 			skip = 8
 		}
 	}
+
 	return starts, nil
 }
 
@@ -123,26 +130,33 @@ func Execute(code []byte, args []uint64, store Storage, gasLimit uint64) (Result
 	if gasLimit == 0 || gasLimit > domain.MaxContractGas {
 		return Result{}, ErrInvalidGas
 	}
+
 	starts, err := opcodeOffsets(code)
 	if err != nil {
 		return Result{}, err
 	}
+
 	m := machine{code: code, args: args, store: store, starts: starts, writes: map[uint64]uint64{}}
 	for m.pc < len(code) {
 		op := code[m.pc]
+
 		cost, _ := gasCost(op)
 		if m.used+cost > gasLimit {
 			return Result{GasUsed: m.used}, ErrOutOfGas
 		}
+
 		m.used += cost
+
 		done, err := m.step(op)
 		if err != nil {
 			return Result{GasUsed: m.used}, err
 		}
+
 		if done {
 			break
 		}
 	}
+
 	return Result{Writes: m.writes, GasUsed: m.used}, nil
 }
 
@@ -161,8 +175,10 @@ func (m *machine) pop() (uint64, error) {
 	if len(m.stack) == 0 {
 		return 0, ErrStackUnderflow
 	}
+
 	v := m.stack[len(m.stack)-1]
 	m.stack = m.stack[:len(m.stack)-1]
+
 	return v, nil
 }
 
@@ -170,7 +186,9 @@ func (m *machine) push(v uint64) error {
 	if len(m.stack) >= MaxStack {
 		return ErrStackOverflow
 	}
+
 	m.stack = append(m.stack, v)
+
 	return nil
 }
 
@@ -179,8 +197,10 @@ func (m *machine) pop2() (a, b uint64, err error) {
 	if len(m.stack) < 2 {
 		return 0, 0, ErrStackUnderflow
 	}
+
 	b, _ = m.pop()
 	a, _ = m.pop()
+
 	return a, b, nil
 }
 
@@ -189,6 +209,7 @@ func (m *machine) jump(dest uint64) (int, error) {
 	if dest >= uint64(len(m.code)) || !m.starts[dest] {
 		return 0, ErrBadJump
 	}
+
 	return int(dest), nil
 }
 
@@ -196,12 +217,14 @@ func (m *machine) load(key uint64) uint64 {
 	if v, ok := m.writes[key]; ok {
 		return v
 	}
+
 	return m.store.Load(key)
 }
 
 // step runs one instruction whose gas is already charged; done reports a halt.
 func (m *machine) step(op byte) (done bool, err error) {
 	next := m.pc + 1
+
 	switch op {
 	case OpSTOP:
 		return true, nil
@@ -216,71 +239,102 @@ func (m *machine) step(op byte) (done bool, err error) {
 		if len(m.stack) == 0 {
 			return false, ErrStackUnderflow
 		}
+
 		err = m.push(m.stack[len(m.stack)-1])
 	case OpSWAP:
 		if len(m.stack) < 2 {
 			return false, ErrStackUnderflow
 		}
+
 		n := len(m.stack)
 		m.stack[n-1], m.stack[n-2] = m.stack[n-2], m.stack[n-1]
 	case OpADD, OpSUB, OpMUL, OpLT, OpEQ:
 		var a, b uint64
-		if a, b, err = m.pop2(); err != nil {
+
+		a, b, err = m.pop2()
+		if err != nil {
 			return false, err
 		}
+
 		err = m.push(binaryOp(op, a, b))
 	case OpISZERO:
 		var v uint64
-		if v, err = m.pop(); err != nil {
+
+		v, err = m.pop()
+		if err != nil {
 			return false, err
 		}
+
 		err = m.push(boolWord(v == 0))
 	case OpJUMP:
 		var dest uint64
-		if dest, err = m.pop(); err != nil {
+
+		dest, err = m.pop()
+		if err != nil {
 			return false, err
 		}
+
 		next, err = m.jump(dest)
 	case OpJUMPI:
 		var dest, cond uint64
-		if dest, err = m.pop(); err != nil {
+
+		dest, err = m.pop()
+		if err != nil {
 			return false, err
 		}
-		if cond, err = m.pop(); err != nil {
+
+		cond, err = m.pop()
+		if err != nil {
 			return false, err
 		}
+
 		if cond != 0 {
 			next, err = m.jump(dest)
 		}
 	case OpSLOAD:
 		var key uint64
-		if key, err = m.pop(); err != nil {
+
+		key, err = m.pop()
+		if err != nil {
 			return false, err
 		}
+
 		err = m.push(m.load(key))
 	case OpSSTORE:
 		var key, val uint64
-		if key, err = m.pop(); err != nil {
+
+		key, err = m.pop()
+		if err != nil {
 			return false, err
 		}
-		if val, err = m.pop(); err != nil {
+
+		val, err = m.pop()
+		if err != nil {
 			return false, err
 		}
+
 		m.writes[key] = val
 	case OpARG:
 		var i uint64
-		if i, err = m.pop(); err != nil {
+
+		i, err = m.pop()
+		if err != nil {
 			return false, err
 		}
+
 		if i >= uint64(len(m.args)) {
 			return false, ErrArgIndex
 		}
+
 		err = m.push(m.args[i])
 	}
+
 	if err != nil {
 		return false, err
 	}
+
 	m.pc = next
+
 	return false, nil
 }
 
@@ -295,6 +349,7 @@ func binaryOp(op byte, a, b uint64) uint64 {
 	case OpLT:
 		return boolWord(a < b)
 	}
+
 	return boolWord(a == b) // OpEQ
 }
 
@@ -302,5 +357,6 @@ func boolWord(b bool) uint64 {
 	if b {
 		return 1
 	}
+
 	return 0
 }

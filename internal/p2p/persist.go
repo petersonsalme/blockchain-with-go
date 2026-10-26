@@ -14,13 +14,18 @@ func LoadAddrs(path string) ([]string, error) {
 	if errors.Is(err, fs.ErrNotExist) {
 		return []string{}, nil
 	}
+
 	if err != nil {
 		return nil, err
 	}
+
 	addrs := []string{}
-	if err := json.Unmarshal(raw, &addrs); err != nil {
+
+	err = json.Unmarshal(raw, &addrs)
+	if err != nil {
 		return nil, err
 	}
+
 	return addrs, nil
 }
 
@@ -30,29 +35,37 @@ func SaveAddrs(path string, addrs []string) error {
 	if addrs == nil {
 		addrs = []string{}
 	}
+
 	raw, err := json.Marshal(addrs)
 	if err != nil {
 		return err
 	}
+
 	f, err := os.CreateTemp(filepath.Dir(path), ".peers-*.tmp")
 	if err != nil {
 		return err
 	}
+
 	tmp := f.Name()
-	if err := writeAndClose(f, raw); err != nil {
+
+	err = writeAndClose(f, raw)
+	if err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+
+	err = os.Rename(tmp, path)
+	if err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}
+
 	return nil
 }
 
 type tmpFile interface {
-	Write([]byte) (int, error)
-	Chmod(os.FileMode) error
+	Write(p []byte) (int, error)
+	Chmod(mode os.FileMode) error
 	Sync() error
 	Close() error
 }
@@ -60,17 +73,23 @@ type tmpFile interface {
 // writeAndClose writes raw, sets mode 0o600 and syncs; the file is closed on
 // every path.
 func writeAndClose(f tmpFile, raw []byte) error {
-	if _, err := f.Write(raw); err != nil {
+	_, err := f.Write(raw)
+	if err != nil {
 		_ = f.Close()
 		return err
 	}
-	if err := f.Chmod(0o600); err != nil {
+
+	err = f.Chmod(0o600)
+	if err != nil {
 		_ = f.Close()
 		return err
 	}
-	if err := f.Sync(); err != nil {
+
+	err = f.Sync()
+	if err != nil {
 		_ = f.Close()
 		return err
 	}
+
 	return f.Close()
 }

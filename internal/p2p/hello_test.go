@@ -19,6 +19,7 @@ func hello(id string) Hello {
 
 func TestCheck(t *testing.T) {
 	local := hello(idA)
+
 	tests := []struct {
 		name string
 		mod  func(*Hello)
@@ -50,7 +51,9 @@ func TestCheck(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			remote := hello(idB)
 			tt.mod(&remote)
-			if err := Check(local, remote); !errors.Is(err, tt.want) {
+
+			err := Check(local, remote)
+			if !errors.Is(err, tt.want) {
 				t.Fatalf("Check = %v, want %v", err, tt.want)
 			}
 		})
@@ -73,10 +76,13 @@ func TestNormalizeAddr(t *testing.T) {
 		if err != nil || got != want {
 			t.Errorf("NormalizeAddr(%q) = %q, %v; want %q", in, got, err, want)
 		}
-		if again, err := NormalizeAddr(got); err != nil || again != got {
+
+		again, err := NormalizeAddr(got)
+		if err != nil || again != got {
 			t.Errorf("not idempotent for %q: %q, %v", got, again, err)
 		}
 	}
+
 	bad := []string{
 		"", "ftp://h:21", "h:8080", "//h:80", "http://h", "http://h:", "http://u@h:80", "http://u:p@h:80",
 		"http://h:80/x", "http://h:80/x/", "http://h:80?a=1", "http://h:80/?", "http://h:80#f", "http://h:80/#",
@@ -84,7 +90,8 @@ func TestNormalizeAddr(t *testing.T) {
 		"http://h%41:80", "http://[::1%25eth0]:80", "http://[zz]:80", "http://h_x:80", " http://h:80",
 	}
 	for _, in := range bad {
-		if got, err := NormalizeAddr(in); !errors.Is(err, ErrBadAddr) {
+		got, err := NormalizeAddr(in)
+		if !errors.Is(err, ErrBadAddr) {
 			t.Errorf("NormalizeAddr(%q) = %q, %v; want ErrBadAddr", in, got, err)
 		}
 	}
@@ -95,6 +102,7 @@ func TestNewNodeID(t *testing.T) {
 	if err != nil || !isHex(a, 32) {
 		t.Fatalf("NewNodeID = %q, %v", a, err)
 	}
+
 	b, _ := NewNodeID()
 	if a == b {
 		t.Fatal("ids repeat")

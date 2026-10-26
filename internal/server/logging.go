@@ -12,6 +12,7 @@ const unmatchedRoute = "unmatched"
 // statusRecorder remembers the status code a handler sent.
 type statusRecorder struct {
 	http.ResponseWriter
+
 	status      int
 	wroteHeader bool
 }
@@ -21,6 +22,7 @@ func (r *statusRecorder) WriteHeader(code int) {
 		r.status = code
 		r.wroteHeader = true
 	}
+
 	r.ResponseWriter.WriteHeader(code)
 }
 
@@ -37,6 +39,7 @@ func routeOf(r *http.Request) string {
 	if r.Pattern == "" {
 		return unmatchedRoute
 	}
+
 	return r.Pattern
 }
 

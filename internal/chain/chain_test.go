@@ -19,9 +19,11 @@ var _ = Describe("Blockchain", Ordered, func() {
 	pow := powpkg.NewProofOfWork(2)
 
 	Describe("GenerateBlock", func() {
-		var oldBlock *domain.Block
-		var newBlock *domain.Block
-		var sampleTxs []domain.Transaction
+		var (
+			oldBlock  *domain.Block
+			newBlock  *domain.Block
+			sampleTxs []domain.Transaction
+		)
 
 		BeforeAll(func() {
 			oldBlock = &domain.Block{
@@ -57,6 +59,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 
 		It("should return nil when generation fails due to size limit", func() {
 			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "50")
+
 			result := GenerateBlock(pow, []*domain.Block{oldBlock}, sampleTxs)
 			Expect(result).To(BeNil())
 		})
@@ -72,8 +75,10 @@ var _ = Describe("Blockchain", Ordered, func() {
 		})
 	})
 	Describe("GenerateBlockWithContext", func() {
-		var oldBlock *domain.Block
-		var sampleTxs []domain.Transaction
+		var (
+			oldBlock  *domain.Block
+			sampleTxs []domain.Transaction
+		)
 
 		BeforeAll(func() {
 			oldBlock = &domain.Block{
@@ -123,21 +128,27 @@ var _ = Describe("Blockchain", Ordered, func() {
 	Describe("GenerateBlockWithContext size limit", func() {
 		It("returns a ValidationError without mining when the candidate is too large", func() {
 			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "50")
+
 			slowPoW := powpkg.NewProofOfWork(60)
 
 			parent := genesisBlock()
 			done := make(chan struct{})
+
 			var (
 				block *domain.Block
 				err   error
 			)
+
 			go func() {
 				defer close(done)
+
 				block, err = GenerateBlockWithContext(context.Background(), slowPoW, []*domain.Block{parent}, []domain.Transaction{{Outputs: []domain.TxOut{{Amount: 1, Address: "b"}}}})
 			}()
+
 			Eventually(done, time.Second).Should(BeClosed())
 
 			Expect(block).To(BeNil())
+
 			var ve *domain.ValidationError
 			Expect(errors.As(err, &ve)).To(BeTrue())
 			Expect(ve.Code).To(Equal(domain.CodeBlockTooLarge))
@@ -153,7 +164,8 @@ var _ = Describe("Blockchain", Ordered, func() {
 			fullTimestampLen := timestampJSONLen(refTimestamp)
 
 			tested := false
-			for attempt := 0; attempt < 100; attempt++ {
+
+			for range 100 {
 				candidate := domain.Block{
 					Index:        parent.Index + 1,
 					Timestamp:    time.Now(),
@@ -166,20 +178,26 @@ var _ = Describe("Blockchain", Ordered, func() {
 					time.Sleep(50 * time.Microsecond)
 					continue
 				}
+
 				exactSize, err := candidate.Size()
 				Expect(err).NotTo(HaveOccurred())
 
 				// 1) Exactly 1 byte below required size: must reject candidate without mining
 				GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(exactSize-1))
+
 				miningAttempted := false
+
 				var capturedBlock domain.Block
+
 				spyConsensus.sealFn = func(ctx context.Context, b *domain.Block) error {
 					miningAttempted = true
 					capturedBlock = *b
+
 					return nil
 				}
 
 				block, err := GenerateBlockWithContext(context.Background(), spyConsensus, []*domain.Block{parent}, txs)
+
 				if miningAttempted {
 					// Check if timestamp in GenerateBlockWithContext had trailing zero (shorter JSON length)
 					if timestampJSONLen(capturedBlock.Timestamp) < fullTimestampLen {
@@ -191,6 +209,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 				}
 
 				Expect(block).To(BeNil())
+
 				var ve *domain.ValidationError
 				Expect(errors.As(err, &ve)).To(BeTrue())
 
@@ -206,14 +225,18 @@ var _ = Describe("Blockchain", Ordered, func() {
 
 				// 2) Exact size: must accept candidate and invoke consensus seal
 				GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(exactSize))
+
 				miningAttempted = false
 				block, err = GenerateBlockWithContext(context.Background(), spyConsensus, []*domain.Block{parent}, txs)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(block).NotTo(BeNil())
 				Expect(miningAttempted).To(BeTrue())
+
 				tested = true
+
 				break
 			}
+
 			Expect(tested).To(BeTrue())
 		})
 	})
@@ -228,6 +251,7 @@ func (m *mockConsensus) Seal(ctx context.Context, history []*domain.Block, b *do
 	if m.sealFn != nil {
 		return m.sealFn(ctx, b)
 	}
+
 	return nil
 }
 
@@ -235,6 +259,7 @@ func (m *mockConsensus) Verify(history []*domain.Block, block *domain.Block) err
 	if m.verifyFn != nil {
 		return m.verifyFn(history, block)
 	}
+
 	return nil
 }
 
@@ -243,6 +268,7 @@ func timestampJSONLen(t time.Time) int {
 	if err != nil {
 		return 0
 	}
+
 	return len(b)
 }
 

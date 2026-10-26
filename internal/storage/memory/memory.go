@@ -32,11 +32,14 @@ func New() *Repository {
 // NewPruned returns an empty Repository that snapshots and prunes as p says,
 // or storage.ErrInvalidPruning when p is invalid.
 func NewPruned(p storage.Pruning) (*Repository, error) {
-	if err := p.Validate(); err != nil {
+	err := p.Validate()
+	if err != nil {
 		return nil, err
 	}
+
 	r := New()
 	r.pruning = p
+
 	return r, nil
 }
 
@@ -47,6 +50,7 @@ func (r *Repository) Last() (*domain.Block, error) {
 	if len(r.blocks) == 0 {
 		return nil, storage.ErrEmpty
 	}
+
 	return r.blocks[len(r.blocks)-1], nil
 }
 
@@ -67,6 +71,7 @@ func (r *Repository) Append(b *domain.Block) error {
 
 	r.blocks = append(r.blocks, b)
 	r.byHash[b.Hash] = b
+
 	return nil
 }
 
@@ -76,6 +81,7 @@ func (r *Repository) All() ([]*domain.Block, error) {
 
 	out := make([]*domain.Block, len(r.blocks))
 	copy(out, r.blocks)
+
 	return out, nil
 }
 
@@ -86,6 +92,7 @@ func (r *Repository) ByHeight(h int) (*domain.Block, error) {
 	if h < 0 || h >= len(r.blocks) {
 		return nil, storage.ErrNotFound
 	}
+
 	return r.blocks[h], nil
 }
 
@@ -97,6 +104,7 @@ func (r *Repository) ByHash(hash string) (*domain.Block, error) {
 	if !ok {
 		return nil, storage.ErrNotFound
 	}
+
 	return b, nil
 }
 
@@ -112,8 +120,10 @@ func (r *Repository) Range(from, limit int) ([]*domain.Block, error) {
 	if n == 0 {
 		return []*domain.Block{}, nil
 	}
+
 	out := make([]*domain.Block, n)
 	copy(out, r.blocks[from:from+n])
+
 	return out, nil
 }
 
@@ -128,9 +138,11 @@ func (r *Repository) ReplaceFrom(height int, blocks []*domain.Block) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if err := r.checkSplice(height, blocks); err != nil {
+	err := r.checkSplice(height, blocks)
+	if err != nil {
 		return err
 	}
+
 	if height < r.idx.prunedBelow {
 		return storage.ErrReorgTooDeep
 	}
@@ -139,6 +151,7 @@ func (r *Repository) ReplaceFrom(height int, blocks []*domain.Block) error {
 	// The indexes still describe the removed tail; mark them stale even when the chain length is unchanged.
 	r.idx.hasTip = false
 	r.idx.dropSnapshotFrom(height)
+
 	return nil
 }
 
@@ -147,13 +160,16 @@ func (r *Repository) checkSplice(height int, blocks []*domain.Block) error {
 	if height < 1 || height > len(r.blocks) || len(blocks) == 0 {
 		return storage.ErrConflict
 	}
+
 	prev := r.blocks[height-1]
 	for i, b := range blocks {
 		if b.Index != height+i || b.PrevHash != prev.Hash {
 			return storage.ErrConflict
 		}
+
 		prev = b
 	}
+
 	return nil
 }
 

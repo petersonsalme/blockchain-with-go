@@ -32,6 +32,7 @@ func (f *fakePeers) Accept(h p2p.Hello) (p2p.Hello, error) {
 	if f.err != nil {
 		return p2p.Hello{}, f.err
 	}
+
 	return f.local, nil
 }
 func (f *fakePeers) Peers() []p2p.PeerInfo { return f.peers }
@@ -40,10 +41,12 @@ func (f *fakePeers) Addrs() []string       { return f.addrs }
 func p2pHandler(t *testing.T, cfg Config) http.Handler {
 	t.Helper()
 	svc, _ := realChain(t)
+
 	srv, err := NewServer(svc, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return srv.Handler()
 }
 
@@ -54,10 +57,14 @@ func helloBody(id string, height int) string {
 
 func errCode(t *testing.T, body string) string {
 	t.Helper()
+
 	var e errorResponse
-	if err := json.Unmarshal([]byte(body), &e); err != nil {
+
+	err := json.Unmarshal([]byte(body), &e)
+	if err != nil {
 		t.Fatalf("body %q: %v", body, err)
 	}
+
 	return e.Code
 }
 
@@ -71,10 +78,14 @@ func TestPostHelloAcceptedReturnsLocalHello(t *testing.T) {
 	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/json" {
 		t.Fatalf("got %d %q", rec.Code, rec.Header().Get("Content-Type"))
 	}
+
 	var got p2p.Hello
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || got != local {
+
+	err := json.Unmarshal(rec.Body.Bytes(), &got)
+	if err != nil || got != local {
 		t.Fatalf("body = %s (%v), want %+v", rec.Body, err, local)
 	}
+
 	if f.calls != 1 || f.got.NodeID != idB || f.got.Height != 7 || f.got.ListenAddr != "http://10.0.0.2:8080" {
 		t.Fatalf("Accept received %+v (%d calls)", f.got, f.calls)
 	}
@@ -98,10 +109,12 @@ func TestPostHelloErrorMapping(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			h := p2pHandler(t, Config{P2P: &fakePeers{err: c.err}})
+
 			rec := do(h, http.MethodPost, "/p2p/hello", helloBody(idB, 1))
 			if rec.Code != c.status || errCode(t, rec.Body.String()) != c.code {
 				t.Fatalf("got %d %s, want %d %q", rec.Code, rec.Body, c.status, c.code)
 			}
+
 			if c.code == "" && !strings.Contains(rec.Body.String(), "boom") {
 				t.Fatalf("500 body %s lacks the error", rec.Body)
 			}
@@ -111,6 +124,7 @@ func TestPostHelloErrorMapping(t *testing.T) {
 
 func TestPostHelloRejectsBadBodies(t *testing.T) {
 	good := helloBody(idB, 1)
+
 	cases := map[string]string{
 		"not json":      "{",
 		"empty":         "",
@@ -122,6 +136,7 @@ func TestPostHelloRejectsBadBodies(t *testing.T) {
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
 			f := &fakePeers{}
+
 			rec := do(p2pHandler(t, Config{P2P: f}), http.MethodPost, "/p2p/hello", body)
 			if rec.Code != http.StatusBadRequest || errCode(t, rec.Body.String()) != "invalid_hello" || f.calls != 0 {
 				t.Fatalf("got %d %s (%d calls)", rec.Code, rec.Body, f.calls)
@@ -132,6 +147,7 @@ func TestPostHelloRejectsBadBodies(t *testing.T) {
 
 func TestPostHelloTrailingWhitespaceIsFine(t *testing.T) {
 	f := &fakePeers{}
+
 	rec := do(p2pHandler(t, Config{P2P: f}), http.MethodPost, "/p2p/hello", helloBody(idB, 1)+"\n \n")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("got %d %s", rec.Code, rec.Body)
@@ -141,11 +157,14 @@ func TestPostHelloTrailingWhitespaceIsFine(t *testing.T) {
 func TestPostHelloBodyLimit(t *testing.T) {
 	f := &fakePeers{}
 	body := strings.TrimSuffix(helloBody(idB, 1), "}") + `,"pad":"` + strings.Repeat("a", int(maxRequestBodyBytes())) + `"}`
+
 	rec := do(p2pHandler(t, Config{P2P: f}), http.MethodPost, "/p2p/hello", body)
 	if rec.Code != http.StatusRequestEntityTooLarge || errCode(t, rec.Body.String()) != requestTooLargeCode || f.calls != 0 {
 		t.Fatalf("got %d %s", rec.Code, rec.Body)
 	}
+
 	var e errorResponse
+
 	_ = json.Unmarshal(rec.Body.Bytes(), &e)
 	if e.Details["max"] != float64(maxRequestBodyBytes()) {
 		t.Fatalf("details = %v", e.Details)
@@ -166,25 +185,32 @@ func TestGetPeersShape(t *testing.T) {
 	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/json" {
 		t.Fatalf("got %d %q", rec.Code, rec.Header().Get("Content-Type"))
 	}
+
 	var raw struct {
 		Peers []map[string]any `json:"peers"`
 		Addrs []string         `json:"addrs"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+
+	err := json.Unmarshal(rec.Body.Bytes(), &raw)
+	if err != nil {
 		t.Fatal(err)
 	}
+
 	want0 := map[string]any{"node_id": idB, "addr": "http://10.0.0.2:8080", "height": float64(7), "tip_hash": strings.Repeat("1", 64), "inbound": true, "last_seen": "2026-10-01T15:00:00Z"}
 	if len(raw.Peers) != 2 || len(raw.Peers[0]) != len(want0) {
 		t.Fatalf("peers = %v", raw.Peers)
 	}
+
 	for k, v := range want0 {
 		if raw.Peers[0][k] != v {
 			t.Fatalf("peer[0][%s] = %v, want %v", k, raw.Peers[0][k], v)
 		}
 	}
+
 	if raw.Peers[1]["node_id"] != idA || raw.Peers[1]["inbound"] != false || raw.Peers[1]["addr"] != "" {
 		t.Fatalf("peer[1] = %v", raw.Peers[1])
 	}
+
 	if len(raw.Addrs) != 2 || raw.Addrs[0] != "http://10.0.0.3:8080" || raw.Addrs[1] != "http://10.0.0.2:8080" {
 		t.Fatalf("addrs = %v", raw.Addrs)
 	}
@@ -194,10 +220,14 @@ func TestGetPeersEmptyListsAreArrays(t *testing.T) {
 	for name, f := range map[string]*fakePeers{"nil": {}, "empty": {peers: []p2p.PeerInfo{}, addrs: []string{}}} {
 		t.Run(name, func(t *testing.T) {
 			rec := do(p2pHandler(t, Config{P2P: f}), http.MethodGet, "/p2p/peers", "")
+
 			var m map[string]json.RawMessage
-			if err := json.Unmarshal(rec.Body.Bytes(), &m); err != nil {
+
+			err := json.Unmarshal(rec.Body.Bytes(), &m)
+			if err != nil {
 				t.Fatal(err)
 			}
+
 			if string(m["peers"]) != "[]" || string(m["addrs"]) != "[]" {
 				t.Fatalf("body = %s", rec.Body)
 			}
@@ -222,6 +252,7 @@ func TestP2PMethodNotAllowed(t *testing.T) {
 		{http.MethodPost, "/p2p/peers", "GET, HEAD"},
 		{http.MethodDelete, "/p2p/peers", "GET, HEAD"},
 	}
+
 	for _, p2pCfg := range []Peers{nil, &fakePeers{}} {
 		h := p2pHandler(t, Config{P2P: p2pCfg})
 		for _, c := range cases {
@@ -235,10 +266,12 @@ func TestP2PMethodNotAllowed(t *testing.T) {
 
 func TestP2PRoutesShareRateLimiterAndMetrics(t *testing.T) {
 	now := time.Unix(fixedNow, 0)
+
 	h := p2pHandler(t, Config{P2P: &fakePeers{}, RateLimit: 1, Now: func() time.Time { return now }})
 	if rec := do(h, http.MethodGet, "/p2p/peers", ""); rec.Code != http.StatusOK {
 		t.Fatalf("first = %d", rec.Code)
 	}
+
 	if rec := do(h, http.MethodPost, "/p2p/hello", helloBody(idB, 1)); rec.Code != http.StatusTooManyRequests {
 		t.Fatalf("second = %d", rec.Code)
 	}
@@ -246,6 +279,7 @@ func TestP2PRoutesShareRateLimiterAndMetrics(t *testing.T) {
 	h = p2pHandler(t, Config{P2P: &fakePeers{}})
 	do(h, http.MethodGet, "/p2p/peers", "")
 	do(h, http.MethodPost, "/p2p/hello", helloBody(idB, 1))
+
 	m := scrape(t, h)
 	if m[`http_requests_total{method="GET",route="GET /p2p/peers",code="200"}`] != 1 ||
 		m[`http_requests_total{method="POST",route="POST /p2p/hello",code="200"}`] != 1 {
@@ -262,8 +296,10 @@ func (c hashedChain) BlockByHeight(h int) (*domain.Block, error) {
 	if err != nil || b.Hash != "" {
 		return b, err
 	}
+
 	cp := *b
 	cp.Hash = strings.Repeat("0", 64)
+
 	return &cp, nil
 }
 
@@ -272,8 +308,10 @@ func (c hashedChain) Tip() (*domain.Block, error) {
 	if err != nil || b.Hash != "" {
 		return b, err
 	}
+
 	cp := *b
 	cp.Hash = strings.Repeat("0", 64)
+
 	return &cp, nil
 }
 
@@ -281,14 +319,17 @@ func (c hashedChain) Tip() (*domain.Block, error) {
 // refused hello leaves GET /p2p/peers unchanged.
 func TestRealNodeHandshake(t *testing.T) {
 	svc, _ := realChain(t)
+
 	node, err := p2p.NewNode(hashedChain{svc}, p2p.NewBook(p2p.Limits{MaxInbound: 1}, nil), idA, "http://10.0.0.1:8080")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	srv, err := NewServer(svc, Config{P2P: node})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	h := srv.Handler()
 	local, _ := node.Hello()
 	hello := func(id string, height int) string {
@@ -297,11 +338,14 @@ func TestRealNodeHandshake(t *testing.T) {
 	}
 
 	rec := do(h, http.MethodPost, "/p2p/hello", hello(idB, 9))
+
 	var got p2p.Hello
 	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil || got != local {
 		t.Fatalf("hello = %d %s", rec.Code, rec.Body)
 	}
+
 	after := do(h, http.MethodGet, "/p2p/peers", "").Body.String()
+
 	var pr struct {
 		Peers []struct {
 			NodeID  string `json:"node_id"`
@@ -310,7 +354,9 @@ func TestRealNodeHandshake(t *testing.T) {
 		} `json:"peers"`
 		Addrs []string `json:"addrs"`
 	}
-	if err := json.Unmarshal([]byte(after), &pr); err != nil || len(pr.Peers) != 1 || pr.Peers[0].NodeID != idB || pr.Peers[0].Height != 9 || !pr.Peers[0].Inbound || len(pr.Addrs) != 1 {
+
+	err = json.Unmarshal([]byte(after), &pr)
+	if err != nil || len(pr.Peers) != 1 || pr.Peers[0].NodeID != idB || pr.Peers[0].Height != 9 || !pr.Peers[0].Inbound || len(pr.Addrs) != 1 {
 		t.Fatalf("peers = %s (%v)", after, err)
 	}
 
@@ -321,11 +367,13 @@ func TestRealNodeHandshake(t *testing.T) {
 		hello("cccccccccccccccccccccccccccccccc", 1), // peer limit: idB holds the only inbound slot
 		strings.Replace(hello("cccccccccccccccccccccccccccccccc", 1), `"node_id":"cccccccccccccccccccccccccccccccc"`, `"node_id":"zz"`, 1),
 	}
+
 	wantStatus := []int{409, 409, 409, 503, 400}
 	for i, body := range refused {
 		if rec := do(h, http.MethodPost, "/p2p/hello", body); rec.Code != wantStatus[i] {
 			t.Fatalf("refused[%d] = %d %s, want %d", i, rec.Code, rec.Body, wantStatus[i])
 		}
+
 		if now := do(h, http.MethodGet, "/p2p/peers", "").Body.String(); now != after {
 			t.Fatalf("refused[%d] changed the peers:\n%s\nvs\n%s", i, now, after)
 		}

@@ -24,9 +24,10 @@ var _ = Describe("Service.TxProof", func() {
 
 	mineBlock := func(n int) {
 		var txs []domain.Transaction
-		for i := 0; i < n; i++ {
+		for range n {
 			txs = append(txs, f.tx()...)
 		}
+
 		_, err := svc.Mine(context.Background(), txs)
 		Expect(err).NotTo(HaveOccurred())
 	}
@@ -34,6 +35,7 @@ var _ = Describe("Service.TxProof", func() {
 	BeforeEach(func() {
 		repo = memory.New()
 		svc, f = funded(repo, pow.New(1))
+
 		for _, n := range []int{1, 2, 3, 5} {
 			mineBlock(n)
 		}
@@ -45,6 +47,7 @@ var _ = Describe("Service.TxProof", func() {
 		Expect(blocks).To(HaveLen(5))
 
 		count := 0
+
 		for _, b := range blocks {
 			for i := range b.Transactions {
 				tx := &b.Transactions[i]
@@ -56,9 +59,11 @@ var _ = Describe("Service.TxProof", func() {
 				Expect(p.LeafIndex).To(Equal(i))
 				Expect(p.LeafHash).To(Equal(domain.MerkleLeafHash(tx)))
 				Expect(domain.VerifyMerkleProof(p.LeafHash, p.Steps, p.MerkleRoot)).To(BeTrue())
+
 				count++
 			}
 		}
+
 		Expect(count).To(Equal(1 + 1 + 2 + 3 + 5))
 	})
 
@@ -95,6 +100,7 @@ var _ = Describe("Service.TxProof", func() {
 
 		after, _ := repo.All()
 		Expect(after).To(Equal(blocks))
+
 		balance, utxosAfter := svc.Balance(f.owner.Address())
 		Expect(balance).To(Equal(before))
 		Expect(utxosAfter).To(Equal(utxos))
@@ -116,19 +122,25 @@ var _ = Describe("Service.TxProof", func() {
 		release := make(chan struct{})
 		stuck, sf := funded(memory.New(), pow.New(1), WithGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 			close(entered)
+
 			select {
 			case <-release:
 			case <-ctx.Done():
 			}
+
 			return nil, ctx.Err()
 		}))
 		done := make(chan struct{})
+
 		go func() {
 			defer GinkgoRecover()
 			defer close(done)
+
 			_, _ = stuck.Mine(context.Background(), sf.tx())
 		}()
+
 		Eventually(entered).Should(BeClosed())
+
 		defer func() { close(release); <-done }()
 
 		all, _ := stuck.Blocks()

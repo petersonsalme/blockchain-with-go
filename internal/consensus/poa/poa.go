@@ -34,6 +34,7 @@ func New(validators []ed25519.PublicKey, signer *wallet.Wallet) (*ProofOfAuthori
 		if len(v) != ed25519.PublicKeySize {
 			return nil, errors.New("poa: validator key has invalid size")
 		}
+
 		set[i] = append(ed25519.PublicKey(nil), v...)
 	}
 
@@ -49,23 +50,15 @@ func New(validators []ed25519.PublicKey, signer *wallet.Wallet) (*ProofOfAuthori
 	return p, nil
 }
 
-func (p *ProofOfAuthority) isValidator(key ed25519.PublicKey) bool {
-	for _, v := range p.validators {
-		if bytes.Equal(v, key) {
-			return true
-		}
-	}
-	return false
-}
-
 // Seal fills the consensus fields of b: it names the signer as validator,
 // computes the hash and signs it.
-func (p *ProofOfAuthority) Seal(ctx context.Context, _ []*domain.Block, b *domain.Block) error {
+func (p *ProofOfAuthority) Seal(ctx context.Context, _ []*domain.Block, b *domain.Block) error { //nolint:contextcheck // Seal accepts a nil context from callers that have none
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
-	if err := ctx.Err(); err != nil {
+	err := ctx.Err()
+	if err != nil {
 		return err
 	}
 
@@ -124,4 +117,14 @@ func (p *ProofOfAuthority) Verify(history []*domain.Block, b *domain.Block) erro
 	}
 
 	return nil
+}
+
+func (p *ProofOfAuthority) isValidator(key ed25519.PublicKey) bool {
+	for _, v := range p.validators {
+		if bytes.Equal(v, key) {
+			return true
+		}
+	}
+
+	return false
 }

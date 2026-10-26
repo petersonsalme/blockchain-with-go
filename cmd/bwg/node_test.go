@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -27,12 +28,16 @@ import (
 
 func freePort(t *testing.T) string {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+
+	l, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	defer func() { _ = l.Close() }() // test listener; close error is irrelevant
+
 	_, port, _ := net.SplitHostPort(l.Addr().String())
+
 	return port
 }
 
@@ -43,29 +48,37 @@ func TestRunServesAndShutsDownGracefully(t *testing.T) {
 	t.Setenv("MINING_TIMEOUT", "5s")
 
 	ctx, cancel := context.WithCancel(context.Background())
+
 	done := make(chan error, 1)
 	go func() { done <- run(ctx, discardLogger()) }()
 
 	url := "http://127.0.0.1:" + port + "/"
-	var resp *http.Response
-	var err error
-	for i := 0; i < 100; i++ {
-		resp, err = http.Get(url)
+
+	var (
+		resp *http.Response
+		err  error
+	)
+	for range 100 {
+		resp, err = getURL(url)
 		if err == nil {
 			break
 		}
+
 		time.Sleep(50 * time.Millisecond)
 	}
+
 	if err != nil {
 		cancel()
 		t.Fatalf("server did not come up: %v", err)
 	}
+
 	_ = resp.Body.Close() // response body of a test request; close error is irrelevant
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET / = %d, want 200", resp.StatusCode)
 	}
 
 	cancel()
+
 	select {
 	case err := <-done:
 		if err != nil {
@@ -80,7 +93,8 @@ func TestRunFailsOnInvalidPort(t *testing.T) {
 	t.Setenv("PORT", "not-a-port")
 	t.Setenv("POW_DIFFICULTY", "1")
 
-	if err := run(context.Background(), discardLogger()); err == nil {
+	err := run(context.Background(), discardLogger())
+	if err == nil {
 		t.Fatal("run succeeded with an invalid PORT, want error")
 	}
 }
@@ -89,23 +103,30 @@ func discardLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 func TestFatalIf(t *testing.T) {
 	var buf bytes.Buffer
+
 	logger := slog.New(slog.NewJSONHandler(&buf, nil))
 	code := -1
 	exit := func(c int) { code = c }
 
 	fatalIf(nil, logger, exit)
+
 	if code != -1 || buf.Len() != 0 {
 		t.Fatalf("nil error: exit code %d, log %q; want no exit and no log", code, buf.String())
 	}
 
 	fatalIf(errors.New("boom"), logger, exit)
+
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1", code)
 	}
+
 	var rec map[string]any
-	if err := json.Unmarshal(buf.Bytes(), &rec); err != nil {
+
+	err := json.Unmarshal(buf.Bytes(), &rec)
+	if err != nil {
 		t.Fatalf("log is not JSON: %v: %q", err, buf.String())
 	}
+
 	if rec["level"] != "ERROR" || rec["error"] != "boom" {
 		t.Fatalf("log = %v, want level ERROR and error boom", rec)
 	}
@@ -117,7 +138,9 @@ func TestRunLogsListeningAddress(t *testing.T) {
 	t.Setenv("POW_DIFFICULTY", "1")
 
 	var buf syncBuffer
+
 	ctx, cancel := context.WithCancel(context.Background())
+
 	done := make(chan error, 1)
 	go func() { done <- run(ctx, slog.New(slog.NewJSONHandler(&buf, nil))) }()
 
@@ -125,10 +148,14 @@ func TestRunLogsListeningAddress(t *testing.T) {
 	for i := 0; i < 100 && !strings.Contains(buf.String(), want); i++ {
 		time.Sleep(50 * time.Millisecond)
 	}
+
 	cancel()
-	if err := <-done; err != nil {
+
+	err := <-done
+	if err != nil {
 		t.Fatalf("run returned %v, want nil", err)
 	}
+
 	if got := buf.String(); !strings.Contains(got, `"msg":"listening"`) || !strings.Contains(got, want) {
 		t.Fatalf("log = %q, want a listening record with %s", got, want)
 	}
@@ -143,12 +170,14 @@ type syncBuffer struct {
 func (b *syncBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
 	return b.buf.Write(p)
 }
 
 func (b *syncBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
 	return b.buf.String()
 }
 
@@ -160,6 +189,7 @@ func TestShutdownContextDeadline(t *testing.T) {
 	if !ok {
 		t.Fatal("no deadline")
 	}
+
 	if d := time.Until(dl); d < 9*time.Second || d > 10*time.Second {
 		t.Fatalf("deadline in %v, want ~10s", d)
 	}
@@ -168,53 +198,68 @@ func TestShutdownContextDeadline(t *testing.T) {
 func TestBootstrapFailsWithoutDotEnv(t *testing.T) {
 	t.Chdir(t.TempDir())
 
-	if err := bootstrap(context.Background(), discardLogger()); err == nil {
+	err := bootstrap(context.Background(), discardLogger())
+	if err == nil {
 		t.Fatal("bootstrap succeeded without a .env file, want error")
 	}
 }
 
 func TestBootstrapLoadsDotEnvAndRuns(t *testing.T) {
 	port := freePort(t)
+
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("PORT="+port+"\nPOW_DIFFICULTY=1\n"), 0o600); err != nil {
+
+	err := os.WriteFile(filepath.Join(dir, ".env"), []byte("PORT="+port+"\nPOW_DIFFICULTY=1\n"), 0o600)
+	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Chdir(dir)
 	// godotenv does not override existing variables; clear them so the file is used.
 	// Unsetenv only fails for an invalid name; these names are constants.
 	_ = os.Unsetenv("PORT")
 	_ = os.Unsetenv("POW_DIFFICULTY")
+
 	t.Cleanup(func() { _ = os.Unsetenv("PORT"); _ = os.Unsetenv("POW_DIFFICULTY") })
 
 	ctx, cancel := context.WithCancel(context.Background())
+
 	done := make(chan error, 1)
 	go func() { done <- bootstrap(ctx, discardLogger()) }()
 
 	url := "http://127.0.0.1:" + port + "/"
+
 	up := false
 	for i := 0; i < 100 && !up; i++ {
-		if resp, err := http.Get(url); err == nil {
+		resp, err := getURL(url)
+		if err == nil {
 			_ = resp.Body.Close() // response body of a test request; close error is irrelevant
 			up = true
 		} else {
 			time.Sleep(50 * time.Millisecond)
 		}
 	}
+
 	cancel()
+
 	if !up {
 		t.Fatal("server configured from .env did not come up")
 	}
-	if err := <-done; err != nil {
+
+	err = <-done
+	if err != nil {
 		t.Fatalf("bootstrap returned %v, want nil", err)
 	}
 }
 
 func newAddress(t *testing.T) string {
 	t.Helper()
+
 	w, err := wallet.New()
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return w.Address()
 }
 
@@ -232,6 +277,7 @@ func TestParseGenesisAllocations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	want := []domain.TxOut{{Amount: 10, Address: a}, {Amount: 20, Address: b}}
 	if !reflect.DeepEqual(outs, want) {
 		t.Fatalf("outs = %v, want %v", outs, want)
@@ -264,6 +310,7 @@ func TestParseGenesisAllocations(t *testing.T) {
 			if err == nil || outs != nil {
 				t.Fatalf("parse(%q) = %v, %v, want error", in, outs, err)
 			}
+
 			if bad := invalidItem(in); !strings.Contains(err.Error(), fmt.Sprintf("%q", bad)) {
 				t.Fatalf("error %v does not cite the invalid item %q", err, bad)
 			}
@@ -301,10 +348,14 @@ func TestBuildServiceGenesisAllocations(t *testing.T) {
 
 	t.Run("applied on empty repository", func(t *testing.T) {
 		t.Setenv(genesisAllocationsEnvVar, a+":7")
+
 		repo := memory.New()
-		if _, err := newService(repo, eng); err != nil {
+
+		_, err := newService(repo, eng)
+		if err != nil {
 			t.Fatal(err)
 		}
+
 		blocks, _ := repo.All()
 		if len(blocks) != 1 || len(blocks[0].Transactions) != 1 || blocks[0].Transactions[0].Outputs[0].Amount != 7 {
 			t.Fatalf("genesis = %+v, want one tx with 7", blocks)
@@ -313,10 +364,14 @@ func TestBuildServiceGenesisAllocations(t *testing.T) {
 
 	t.Run("unset leaves genesis empty", func(t *testing.T) {
 		t.Setenv(genesisAllocationsEnvVar, "")
+
 		repo := memory.New()
-		if _, err := newService(repo, eng); err != nil {
+
+		_, err := newService(repo, eng)
+		if err != nil {
 			t.Fatal(err)
 		}
+
 		blocks, _ := repo.All()
 		if len(blocks) != 1 || len(blocks[0].Transactions) != 0 {
 			t.Fatalf("genesis = %+v, want no transactions", blocks)
@@ -325,15 +380,23 @@ func TestBuildServiceGenesisAllocations(t *testing.T) {
 
 	t.Run("ignored on populated repository", func(t *testing.T) {
 		t.Setenv(genesisAllocationsEnvVar, "")
+
 		repo := memory.New()
-		if _, err := newService(repo, eng); err != nil {
+
+		_, err := newService(repo, eng)
+		if err != nil {
 			t.Fatal(err)
 		}
+
 		before, _ := repo.All()
+
 		t.Setenv(genesisAllocationsEnvVar, a+":7")
-		if _, err := newService(repo, eng); err != nil {
+
+		_, err = newService(repo, eng)
+		if err != nil {
 			t.Fatal(err)
 		}
+
 		after, _ := repo.All()
 		if !reflect.DeepEqual(before, after) {
 			t.Fatalf("chain changed: %+v -> %+v", before, after)
@@ -348,7 +411,8 @@ func TestOpenRepository(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer func() {
-			if err := closeRepo(); err != nil {
+			err := closeRepo()
+			if err != nil {
 				t.Fatal(err)
 			}
 		}()
@@ -360,12 +424,15 @@ func TestOpenRepository(t *testing.T) {
 
 	t.Run("non-empty DATA_DIR creates directory and chooses bolt adapter", func(t *testing.T) {
 		dir := filepath.Join(t.TempDir(), "nested", "data")
+
 		repo, closeRepo, err := openRepository(dir, storage.Pruning{})
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		defer func() {
-			if err := closeRepo(); err != nil {
+			err := closeRepo()
+			if err != nil {
 				t.Fatal(err)
 			}
 		}()
@@ -378,11 +445,13 @@ func TestOpenRepository(t *testing.T) {
 		if err != nil {
 			t.Fatalf("stat dir %s: %v", dir, err)
 		}
+
 		if perm := dirInfo.Mode().Perm(); perm != 0o700 {
 			t.Fatalf("dir perm = %#o, want %#o", perm, 0o700)
 		}
 
 		dbPath := filepath.Join(dir, "chain.db")
+
 		info, err := os.Stat(dbPath)
 		if err != nil || info.IsDir() {
 			t.Fatalf("db file %s not found: %v", dbPath, err)
@@ -399,29 +468,37 @@ func TestRunServesAndShutsDownGracefullyWithDataDir(t *testing.T) {
 	t.Setenv("DATA_DIR", dataDir)
 
 	ctx, cancel := context.WithCancel(context.Background())
+
 	done := make(chan error, 1)
 	go func() { done <- run(ctx, discardLogger()) }()
 
 	url := "http://127.0.0.1:" + port + "/"
-	var resp *http.Response
-	var err error
-	for i := 0; i < 100; i++ {
-		resp, err = http.Get(url)
+
+	var (
+		resp *http.Response
+		err  error
+	)
+	for range 100 {
+		resp, err = getURL(url)
 		if err == nil {
 			break
 		}
+
 		time.Sleep(50 * time.Millisecond)
 	}
+
 	if err != nil {
 		cancel()
 		t.Fatalf("server did not come up: %v", err)
 	}
+
 	_ = resp.Body.Close() // response body of a test request; close error is irrelevant
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET / = %d, want 200", resp.StatusCode)
 	}
 
 	cancel()
+
 	select {
 	case err := <-done:
 		if err != nil {
@@ -432,7 +509,9 @@ func TestRunServesAndShutsDownGracefullyWithDataDir(t *testing.T) {
 	}
 
 	dbPath := filepath.Join(dataDir, "chain.db")
-	if info, err := os.Stat(dbPath); err != nil || info.IsDir() {
+
+	info, err := os.Stat(dbPath)
+	if err != nil || info.IsDir() {
 		t.Fatalf("chain.db does not exist: %v", err)
 	}
 }
@@ -454,6 +533,7 @@ func TestRunReleasesBoltLockWhenBootstrapFails(t *testing.T) {
 	if openErr != nil {
 		t.Fatalf("database file still locked after run failure: %v", openErr)
 	}
+
 	_ = reopened.Close()
 }
 
@@ -465,13 +545,16 @@ func TestFinish(t *testing.T) {
 		logged bool
 	}{
 		{"nil", nil, -1, false},
-		{"node error", nodeStopped{errors.New("boom")}, 1, true},
+		{"node error", nodeStoppedError{errors.New("boom")}, 1, true},
 		{"other command error", errors.New("bad flag"), 1, false},
 	}
 	for _, c := range cases {
 		var buf bytes.Buffer
+
 		code := -1
+
 		finish(c.err, slog.New(slog.NewJSONHandler(&buf, nil)), func(n int) { code = n })
+
 		if code != c.code || (buf.Len() > 0) != c.logged {
 			t.Errorf("%s: exit code %d, log %q; want code %d, logged %v", c.name, code, buf.String(), c.code, c.logged)
 		}
@@ -505,19 +588,23 @@ func TestParseMinerAddress(t *testing.T) {
 func TestBuildServiceMinerAddress(t *testing.T) {
 	t.Setenv("POW_DIFFICULTY", "1")
 	t.Setenv(genesisAllocationsEnvVar, "")
+
 	eng := pow.NewProofOfWorkFromEnv()
 
 	t.Run("set pays the coinbase to the address", func(t *testing.T) {
 		a := newAddress(t)
 		t.Setenv(minerAddressEnvVar, " "+a+" ")
+
 		svc, err := newService(memory.New(), eng)
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		b, err := svc.MinePending(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if len(b.Transactions) != 1 || b.Transactions[0].Outputs[0].Address != a ||
 			b.Transactions[0].Outputs[0].Amount != domain.Subsidy(b.Index) {
 			t.Fatalf("block = %+v, want one coinbase paying the subsidy to %s", b.Transactions, a)
@@ -527,14 +614,17 @@ func TestBuildServiceMinerAddress(t *testing.T) {
 	for _, raw := range []string{"", "   "} {
 		t.Run(fmt.Sprintf("blank %q adds no coinbase", raw), func(t *testing.T) {
 			t.Setenv(minerAddressEnvVar, raw)
+
 			svc, err := newService(memory.New(), eng)
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			b, err := svc.MinePending(context.Background())
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			if len(b.Transactions) != 0 {
 				t.Fatalf("transactions = %+v, want none", b.Transactions)
 			}
@@ -543,7 +633,9 @@ func TestBuildServiceMinerAddress(t *testing.T) {
 
 	t.Run("invalid stops the service at startup", func(t *testing.T) {
 		t.Setenv(minerAddressEnvVar, "bad")
-		if _, err := newService(memory.New(), eng); err == nil || !strings.Contains(err.Error(), "MINER_ADDRESS") {
+
+		_, err := newService(memory.New(), eng)
+		if err == nil || !strings.Contains(err.Error(), "MINER_ADDRESS") {
 			t.Fatalf("err = %v, want one citing MINER_ADDRESS", err)
 		}
 	})
@@ -551,9 +643,30 @@ func TestBuildServiceMinerAddress(t *testing.T) {
 	t.Run("run fails on an invalid address", func(t *testing.T) {
 		t.Setenv("PORT", freePort(t))
 		t.Setenv(minerAddressEnvVar, "bad")
+
 		err := run(context.Background(), discardLogger())
 		if err == nil || !strings.Contains(err.Error(), "MINER_ADDRESS") {
 			t.Fatalf("run = %v, want error citing MINER_ADDRESS", err)
 		}
 	})
+}
+
+func getURL(url string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return http.DefaultClient.Do(req)
+}
+
+func postURL(url, contentType string, body io.Reader) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", contentType)
+
+	return http.DefaultClient.Do(req)
 }

@@ -29,6 +29,7 @@ var _ = Describe("Bolt Repository", func() {
 		DeferCleanup(func() {
 			_ = repo.Close()
 		})
+
 		return repo
 	})
 
@@ -39,6 +40,7 @@ var _ = Describe("Bolt Repository", func() {
 		DeferCleanup(func() {
 			_ = repo.Close()
 		})
+
 		return repo
 	})
 
@@ -89,6 +91,7 @@ var _ = Describe("Bolt Repository", func() {
 			Expect(b.Index).To(Equal(i))
 			Expect(b.CalculateHash()).To(Equal(b.Hash))
 		}
+
 		Expect(all[0].Hash).To(Equal(b0.Hash))
 		Expect(all[0].Transactions).To(HaveLen(1))
 		Expect(all[0].Transactions[0].Outputs[0].Address).To(Equal(w.Address()))
@@ -108,6 +111,7 @@ var _ = Describe("Bolt Repository", func() {
 		dbPath := filepath.Join(GinkgoT().TempDir(), "replace.db")
 		repo, err := bolt.Open(dbPath)
 		Expect(err).NotTo(HaveOccurred())
+
 		for _, b := range []*domain.Block{
 			{Index: 0, Hash: "h0"},
 			{Index: 1, PrevHash: "h0", Hash: "h1"},
@@ -115,6 +119,7 @@ var _ = Describe("Bolt Repository", func() {
 		} {
 			Expect(repo.Append(b)).To(Succeed())
 		}
+
 		Expect(repo.ReplaceFrom(1, []*domain.Block{{Index: 1, PrevHash: "h0", Hash: "n1"}})).To(Succeed())
 		Expect(repo.Close()).To(Succeed())
 
@@ -126,10 +131,12 @@ var _ = Describe("Bolt Repository", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(all).To(HaveLen(2))
 		Expect(all[1].Hash).To(Equal("n1"))
+
 		for _, gone := range []string{"h1", "h2"} {
 			_, err = reopened.ByHash(gone)
 			Expect(err).To(MatchError(storage.ErrNotFound))
 		}
+
 		byHash, err := reopened.ByHash("n1")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(byHash.Index).To(Equal(1))
@@ -164,9 +171,11 @@ var _ = Describe("Bolt Repository", func() {
 		dbPath := filepath.Join(GinkgoT().TempDir(), "corrupt-replace.db")
 		repo, err := bolt.Open(dbPath)
 		Expect(err).NotTo(HaveOccurred())
+
 		for _, b := range []*domain.Block{{Index: 0, Hash: "h0"}, {Index: 1, PrevHash: "h0", Hash: "h1"}, {Index: 2, PrevHash: "h1", Hash: "h2"}} {
 			Expect(repo.Append(b)).To(Succeed())
 		}
+
 		Expect(repo.Close()).To(Succeed())
 
 		rawDB, err := bbolt.Open(dbPath, 0o600, nil)
@@ -174,6 +183,7 @@ var _ = Describe("Bolt Repository", func() {
 		Expect(rawDB.Update(func(tx *bbolt.Tx) error {
 			key := make([]byte, 8)
 			binary.BigEndian.PutUint64(key, 2)
+
 			return tx.Bucket([]byte("blocks")).Put(key, []byte("invalid-json{["))
 		})).To(Succeed())
 		Expect(rawDB.Close()).To(Succeed())
@@ -185,10 +195,12 @@ var _ = Describe("Bolt Repository", func() {
 		err = reopened.ReplaceFrom(1, []*domain.Block{{Index: 1, PrevHash: "h0", Hash: "n1"}})
 		Expect(err).To(HaveOccurred())
 		Expect(err).NotTo(MatchError(storage.ErrConflict))
+
 		for _, kept := range []string{"h0", "h1"} {
 			_, err = reopened.ByHash(kept)
 			Expect(err).NotTo(HaveOccurred())
 		}
+
 		_, err = reopened.ByHash("n1")
 		Expect(err).To(MatchError(storage.ErrNotFound))
 	})
@@ -224,6 +236,7 @@ var _ = Describe("Bolt Repository", func() {
 		err = rawDB.Update(func(tx *bbolt.Tx) error {
 			key := make([]byte, 8)
 			binary.BigEndian.PutUint64(key, 0)
+
 			return tx.Bucket([]byte("blocks")).Put(key, []byte("invalid-json{["))
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -291,6 +304,7 @@ var _ = Describe("Bolt Repository", func() {
 		beforeBlocks, err := svc.Blocks()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(beforeBlocks).To(HaveLen(2))
+
 		w1Before, w1UTXOsBefore := svc.Balance(w1.Address())
 		w2Before, w2UTXOsBefore := svc.Balance(w2.Address())
 
@@ -315,6 +329,7 @@ var _ = Describe("Bolt Repository", func() {
 		afterBlocks, err := reopenedSvc.Blocks()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(afterBlocks).To(HaveLen(len(beforeBlocks)))
+
 		for i := range beforeBlocks {
 			Expect(afterBlocks[i].Index).To(Equal(beforeBlocks[i].Index))
 			Expect(afterBlocks[i].Hash).To(Equal(beforeBlocks[i].Hash))
@@ -325,10 +340,12 @@ var _ = Describe("Bolt Repository", func() {
 		// The persisted UTXO set must exactly match the one before restart
 		w1After, w1UTXOsAfter := reopenedSvc.Balance(w1.Address())
 		w2After, w2UTXOsAfter := reopenedSvc.Balance(w2.Address())
+
 		Expect(w1After).To(Equal(w1Before))
 		Expect(w1UTXOsAfter).To(Equal(w1UTXOsBefore))
 		Expect(w2After).To(Equal(w2Before))
 		Expect(w2UTXOsAfter).To(Equal(w2UTXOsBefore))
+
 		spentGenOp := domain.OutPoint{TxID: genTxID, Index: 0}
 		_, spentFound := reopened.Lookup(spentGenOp)
 		Expect(spentFound).To(BeFalse())
@@ -368,9 +385,11 @@ var _ = Describe("Bolt Repository", func() {
 		go func() {
 			defer GinkgoRecover()
 			defer wg.Done()
+
 			for i := 1; i <= blocksToMine; i++ {
 				last, err := repo.Last()
 				Expect(err).NotTo(HaveOccurred())
+
 				b := &domain.Block{
 					Index:    last.Index + 1,
 					PrevHash: last.Hash,
@@ -384,12 +403,15 @@ var _ = Describe("Bolt Repository", func() {
 		go func() {
 			defer GinkgoRecover()
 			defer wg.Done()
-			for i := 0; i < 50; i++ {
+
+			for range 50 {
 				all, err := repo.All()
 				Expect(err).NotTo(HaveOccurred())
-				Expect(len(all)).To(BeNumerically(">=", 1))
+				Expect(all).ToNot(BeEmpty())
+
 				for j, b := range all {
 					Expect(b.Index).To(Equal(j))
+
 					if j > 0 {
 						Expect(b.PrevHash).To(Equal(all[j-1].Hash))
 					}
@@ -409,6 +431,7 @@ var _ = Describe("Bolt Repository with pruning", func() {
 		DeferCleanup(func() {
 			_ = repo.Close()
 		})
+
 		return repo
 	})
 })

@@ -18,6 +18,7 @@ import (
 // reaches only Mine.
 type fuzzChain struct {
 	Chain
+
 	mined int
 }
 
@@ -39,22 +40,25 @@ func FuzzWriteBlockBody(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, body []byte) {
 		fake := &fuzzChain{}
+
 		srv, err := NewServer(fake, Config{})
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		rec := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body)))
+		srv.Handler().ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/", bytes.NewReader(body)))
 
 		switch rec.Code {
 		case http.StatusCreated, http.StatusBadRequest, http.StatusRequestEntityTooLarge:
 		default:
 			t.Fatalf("status %d outside {201, 400, 413}", rec.Code)
 		}
+
 		if !json.Valid(rec.Body.Bytes()) {
 			t.Fatalf("response body is not valid JSON: %q", rec.Body.String())
 		}
+
 		if wantMined := rec.Code == http.StatusCreated; (fake.mined == 1) != wantMined || fake.mined > 1 {
 			t.Fatalf("status %d but Mine called %d times", rec.Code, fake.mined)
 		}

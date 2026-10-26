@@ -29,6 +29,7 @@ func (p Pruning) Validate() error {
 	if p.SnapshotInterval < 0 || p.KeepBlocks < 0 || (p.KeepBlocks > 0 && p.SnapshotInterval == 0) {
 		return ErrInvalidPruning
 	}
+
 	return nil
 }
 
@@ -39,5 +40,6 @@ func (p Pruning) SnapshotHeight(t int) (int, bool) {
 	if p.SnapshotInterval <= 0 || s < 1 || s%p.SnapshotInterval != 0 {
 		return 0, false
 	}
+
 	return s, true
 }

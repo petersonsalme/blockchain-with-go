@@ -34,6 +34,7 @@ var backends = []backend{
 		r, err := bolt.Open(filepath.Join(GinkgoT().TempDir(), "chain.db"))
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(func() { _ = r.Close() })
+
 		return r
 	}, false},
 }
@@ -46,12 +47,14 @@ func init() {
 		backend{"memory-pruned", func() storage.IndexedRepository {
 			r, err := memory.NewPruned(prunedPolicy)
 			Expect(err).NotTo(HaveOccurred())
+
 			return r
 		}, true},
 		backend{"bolt-pruned", func() storage.IndexedRepository {
 			r, err := bolt.OpenPruned(filepath.Join(GinkgoT().TempDir(), "chain.db"), prunedPolicy)
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { _ = r.Close() })
+
 			return r
 		}, true},
 	)
@@ -81,14 +84,17 @@ func funded(repo storage.IndexedRepository, c consensus.Consensus, opts ...Optio
 	Expect(err).NotTo(HaveOccurred())
 
 	f := &funding{owner: owner}
+
 	blocks, err := repo.All()
 	if err != nil || len(blocks[0].Transactions) == 0 {
 		return svc, f
 	}
+
 	txid := blocks[0].Transactions[0].CalculateHash()
 	for i := range allocs {
 		f.ops = append(f.ops, domain.OutPoint{TxID: txid, Index: uint32(i)})
 	}
+
 	return svc, f
 }
 
@@ -96,6 +102,7 @@ func funded(repo storage.IndexedRepository, c consensus.Consensus, opts ...Optio
 func (f *funding) tx() []domain.Transaction {
 	op := f.ops[f.next]
 	f.next++
+
 	return []domain.Transaction{spend(f.owner, op, 9)}
 }
 
@@ -108,6 +115,7 @@ func spend(w *wallet.Wallet, op domain.OutPoint, out uint64) domain.Transaction 
 	}
 	tx.ID = tx.CalculateHash()
 	Expect(domain.SignInput(&tx, 0, w)).To(Succeed())
+
 	return tx
 }
 
@@ -116,8 +124,10 @@ func recipient() *wallet.Wallet {
 	for i := range seed {
 		seed[i] = 7
 	}
+
 	w, err := wallet.FromSeed(seed)
 	Expect(err).NotTo(HaveOccurred())
+
 	return w
 }
 
@@ -128,8 +138,10 @@ func grow(c consensus.Consensus, chain []*domain.Block, txss ...[]domain.Transac
 	for _, txs := range txss {
 		b, err := GenerateBlockWithContext(context.Background(), c, out, txs)
 		Expect(err).NotTo(HaveOccurred())
+
 		out = append(out, b)
 	}
+
 	return out
 }
 
@@ -144,6 +156,7 @@ func hashes(chain []*domain.Block) []string {
 	for i, b := range chain {
 		out[i] = b.Hash
 	}
+
 	return out
 }
 
@@ -153,12 +166,17 @@ func hashes(chain []*domain.Block) []string {
 func utxoSnapshot(repo storage.IndexedRepository) domain.UTXOSet {
 	blocks, err := repo.All()
 	Expect(err).NotTo(HaveOccurred())
-	if below, err := repo.PrunedBelow(); err == nil && below > 0 {
+
+	below, err := repo.PrunedBelow()
+	if err == nil && below > 0 {
 		set, err := repo.ForkState(len(blocks))
 		Expect(err).NotTo(HaveOccurred())
+
 		return set
 	}
+
 	set := domain.UTXOSet{}
+
 	for _, b := range blocks {
 		for i := range b.Transactions {
 			txid := b.Transactions[i].CalculateHash()
@@ -170,6 +188,7 @@ func utxoSnapshot(repo storage.IndexedRepository) domain.UTXOSet {
 			}
 		}
 	}
+
 	return set
 }
 
@@ -180,24 +199,29 @@ func replayRepo(repo storage.IndexedRepository) domain.UTXOSet {
 	blocks := mustAll(repo)
 	below, err := repo.PrunedBelow()
 	Expect(err).NotTo(HaveOccurred())
+
 	if below == 0 {
 		return replay(blocks)
 	}
+
 	snap, err := repo.Snapshot()
 	Expect(err).NotTo(HaveOccurred())
 	Expect(snap.Height).To(Equal(below - 1))
+
 	set := snap.UTXOs
 	for _, b := range blocks[below:] {
 		delta, err := domain.BlockDelta(set, b, false)
 		Expect(err).NotTo(HaveOccurred())
 		set.Apply(delta)
 	}
+
 	return set
 }
 
 // failingWrites fails Commit and Reorg on demand.
 type failingWrites struct {
 	storage.IndexedRepository
+
 	commitErr, reorgErr error
 }
 
@@ -205,6 +229,7 @@ func (f *failingWrites) Commit(b *domain.Block, d domain.UTXODelta) error {
 	if f.commitErr != nil {
 		return f.commitErr
 	}
+
 	return f.IndexedRepository.Commit(b, d)
 }
 
@@ -212,5 +237,34 @@ func (f *failingWrites) Reorg(h int, bs []*domain.Block, ds []domain.UTXODelta) 
 	if f.reorgErr != nil {
 		return f.reorgErr
 	}
+
 	return f.IndexedRepository.Reorg(h, bs, ds)
+}
+
+// mineTimeout bounds minePending. Mining fits the block in a loop that always ends, but a
+// broken loop would spin forever; failing fast keeps the suite and mutation runs from hanging.
+const mineTimeout = 10 * time.Second
+
+// minePending runs svc.MinePending and fails the spec instead of hanging when it does not return.
+func minePending(svc *Service) (*domain.Block, error) {
+	type result struct {
+		blk *domain.Block
+		err error
+	}
+
+	done := make(chan result, 1)
+
+	go func() {
+		blk, err := svc.MinePending(context.Background())
+		done <- result{blk, err}
+	}()
+
+	select {
+	case r := <-done:
+		return r.blk, r.err
+	case <-time.After(mineTimeout):
+		Fail("MinePending did not return within " + mineTimeout.String())
+
+		return nil, nil
+	}
 }

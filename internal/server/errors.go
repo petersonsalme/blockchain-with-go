@@ -54,38 +54,43 @@ const invalidContractIDCode = "invalid_contract_id"
 // contractNotFoundCode is the error code for a contract that is not deployed.
 const contractNotFoundCode = "contract_not_found"
 
-// transactionErrors maps transaction rejections to their HTTP status and code.
-var transactionErrors = []struct {
+// errorRule maps a sentinel error to its HTTP status and error code.
+type errorRule struct {
 	err    error
 	status int
 	code   string
-}{
-	{domain.ErrMissingSignature, http.StatusBadRequest, domain.CodeMissingSignature},
-	{domain.ErrInvalidSignature, http.StatusBadRequest, domain.CodeInvalidSignature},
-	{domain.ErrInvalidPublicKey, http.StatusBadRequest, domain.CodeInvalidPublicKey},
-	{domain.ErrInputOwnerMismatch, http.StatusBadRequest, domain.CodeInputOwnerMismatch},
-	{domain.ErrInvalidOutput, http.StatusBadRequest, domain.CodeInvalidOutput},
-	{domain.ErrMissingInputs, http.StatusBadRequest, domain.CodeMissingInputs},
-	{domain.ErrCoinbaseTooLarge, http.StatusBadRequest, domain.CodeCoinbaseTooLarge},
-	{domain.ErrInputMissingOrSpent, http.StatusConflict, domain.CodeInputMissingOrSpent},
-	{domain.ErrDoubleSpend, http.StatusConflict, domain.CodeDoubleSpend},
-	{domain.ErrInsufficientInputs, http.StatusUnprocessableEntity, domain.CodeInsufficientInputs},
-	{domain.ErrInvalidContractOp, http.StatusBadRequest, "invalid_contract_op"},
-	{vm.ErrInvalidCode, http.StatusBadRequest, "invalid_code"},
-	{vm.ErrUnknownContract, http.StatusUnprocessableEntity, "unknown_contract"},
-	{vm.ErrContractExists, http.StatusUnprocessableEntity, "contract_exists"},
-	{vm.ErrOutOfGas, http.StatusUnprocessableEntity, "out_of_gas"},
-	{vm.ErrReverted, http.StatusUnprocessableEntity, "reverted"},
-	{vm.ErrStackOverflow, http.StatusUnprocessableEntity, "stack_overflow"},
-	{vm.ErrStackUnderflow, http.StatusUnprocessableEntity, "stack_underflow"},
-	{vm.ErrBadJump, http.StatusUnprocessableEntity, "bad_jump"},
-	{vm.ErrArgIndex, http.StatusUnprocessableEntity, "arg_index"},
-	{vm.ErrInvalidGas, http.StatusUnprocessableEntity, "invalid_gas"},
+}
+
+// transactionErrors maps transaction rejections to their HTTP status and code.
+func transactionErrors() []errorRule {
+	return []errorRule{
+		{domain.ErrMissingSignature, http.StatusBadRequest, domain.CodeMissingSignature},
+		{domain.ErrInvalidSignature, http.StatusBadRequest, domain.CodeInvalidSignature},
+		{domain.ErrInvalidPublicKey, http.StatusBadRequest, domain.CodeInvalidPublicKey},
+		{domain.ErrInputOwnerMismatch, http.StatusBadRequest, domain.CodeInputOwnerMismatch},
+		{domain.ErrInvalidOutput, http.StatusBadRequest, domain.CodeInvalidOutput},
+		{domain.ErrMissingInputs, http.StatusBadRequest, domain.CodeMissingInputs},
+		{domain.ErrCoinbaseTooLarge, http.StatusBadRequest, domain.CodeCoinbaseTooLarge},
+		{domain.ErrInputMissingOrSpent, http.StatusConflict, domain.CodeInputMissingOrSpent},
+		{domain.ErrDoubleSpend, http.StatusConflict, domain.CodeDoubleSpend},
+		{domain.ErrInsufficientInputs, http.StatusUnprocessableEntity, domain.CodeInsufficientInputs},
+		{domain.ErrInvalidContractOp, http.StatusBadRequest, "invalid_contract_op"},
+		{vm.ErrInvalidCode, http.StatusBadRequest, "invalid_code"},
+		{vm.ErrUnknownContract, http.StatusUnprocessableEntity, "unknown_contract"},
+		{vm.ErrContractExists, http.StatusUnprocessableEntity, "contract_exists"},
+		{vm.ErrOutOfGas, http.StatusUnprocessableEntity, "out_of_gas"},
+		{vm.ErrReverted, http.StatusUnprocessableEntity, "reverted"},
+		{vm.ErrStackOverflow, http.StatusUnprocessableEntity, "stack_overflow"},
+		{vm.ErrStackUnderflow, http.StatusUnprocessableEntity, "stack_underflow"},
+		{vm.ErrBadJump, http.StatusUnprocessableEntity, "bad_jump"},
+		{vm.ErrArgIndex, http.StatusUnprocessableEntity, "arg_index"},
+		{vm.ErrInvalidGas, http.StatusUnprocessableEntity, "invalid_gas"},
+	}
 }
 
 // respondWithMineError maps an error from chain mining to its HTTP response.
 func respondWithMineError(w http.ResponseWriter, err error) {
-	for _, m := range transactionErrors {
+	for _, m := range transactionErrors() {
 		if errors.Is(err, m.err) {
 			respondWithJSON(w, m.status, errorResponse{Error: err.Error(), Code: m.code})
 			return
@@ -122,6 +127,7 @@ const mempoolFullCode = "mempool_full"
 // rejections answer 409; any other error maps as in respondWithMineError.
 func respondWithSubmitError(w http.ResponseWriter, err error) {
 	var code string
+
 	switch {
 	case errors.Is(err, mempool.ErrDuplicate):
 		code = duplicateTxCode
@@ -133,5 +139,6 @@ func respondWithSubmitError(w http.ResponseWriter, err error) {
 		respondWithMineError(w, err)
 		return
 	}
+
 	respondWithJSON(w, http.StatusConflict, errorResponse{Error: err.Error(), Code: code})
 }

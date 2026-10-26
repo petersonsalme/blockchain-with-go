@@ -19,7 +19,6 @@ import (
 
 var _ = Describe("Service with a miner address", func() {
 	for _, be := range backends {
-		be := be
 		Describe(be.name, func() {
 			var (
 				repo  storage.IndexedRepository
@@ -31,9 +30,12 @@ var _ = Describe("Service with a miner address", func() {
 			BeforeEach(func() {
 				newRepo = be.open
 				repo = newRepo()
+
 				var err error
+
 				miner, err = wallet.New()
 				Expect(err).NotTo(HaveOccurred())
+
 				svc, f = funded(repo, engineCases[0].new(), WithMinerAddress(miner.Address()))
 			})
 
@@ -45,16 +47,18 @@ var _ = Describe("Service with a miner address", func() {
 				Expect(cb.Inputs).To(BeEmpty())
 				Expect(cb.Outputs).To(Equal([]domain.TxOut{{Amount: want, Address: miner.Address()}}))
 				Expect(cb.ID).To(Equal(cb.CalculateHash()))
+
 				for _, tx := range b.Transactions[1:] {
 					Expect(tx.Inputs).NotTo(BeEmpty())
 				}
 			}
 
 			It("MinePending pays Subsidy to the miner in an empty block", func() {
-				b, err := svc.MinePending(context.Background())
+				b, err := minePending(svc)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(b.Transactions).To(HaveLen(1))
 				expectCoinbase(b, domain.Subsidy(b.Index))
+
 				balance, utxos := svc.Balance(miner.Address())
 				Expect(balance).To(Equal(domain.Subsidy(b.Index)))
 				Expect(utxos).To(HaveLen(1))
@@ -70,6 +74,7 @@ var _ = Describe("Service with a miner address", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(b.Transactions).To(HaveLen(3))
 				expectCoinbase(b, domain.Subsidy(b.Index)+4)
+
 				after, _ := svc.Balance(miner.Address())
 				Expect(after - before).To(Equal(domain.Subsidy(b.Index) + 4))
 			})
@@ -87,7 +92,7 @@ var _ = Describe("Service with a miner address", func() {
 			It("keeps the repository UTXO equal to the replay of the chain and reindexes to the same set", func() {
 				_, err := svc.Mine(context.Background(), f.tx())
 				Expect(err).NotTo(HaveOccurred())
-				_, err = svc.MinePending(context.Background())
+				_, err = minePending(svc)
 				Expect(err).NotTo(HaveOccurred())
 
 				blocks, _ := repo.All()
@@ -99,8 +104,9 @@ var _ = Describe("Service with a miner address", func() {
 			It("another node accepts the mined chain through ReplaceChain", func() {
 				_, err := svc.Mine(context.Background(), f.tx())
 				Expect(err).NotTo(HaveOccurred())
-				_, err = svc.MinePending(context.Background())
+				_, err = minePending(svc)
 				Expect(err).NotTo(HaveOccurred())
+
 				blocks, _ := repo.All()
 
 				other := be.open()
@@ -113,6 +119,7 @@ var _ = Describe("Service with a miner address", func() {
 				_, err = osvc.ReplaceChain(context.Background(), blocks)
 
 				Expect(err).NotTo(HaveOccurred())
+
 				got, _ := osvc.Balance(miner.Address())
 				want, _ := svc.Balance(miner.Address())
 				Expect(got).To(Equal(want))
@@ -125,8 +132,9 @@ var _ = Describe("Service with a miner address", func() {
 
 			It("rejects the block when the miner address is invalid and changes nothing", func() {
 				bad, _ := funded(be.open(), engineCases[0].new(), WithMinerAddress("not-an-address"))
-				_, err := bad.MinePending(context.Background())
+				_, err := minePending(bad)
 				Expect(err).To(MatchError(domain.ErrInvalidOutput))
+
 				tip, _ := bad.Tip()
 				Expect(tip.Index).To(Equal(0))
 			})
@@ -134,7 +142,7 @@ var _ = Describe("Service with a miner address", func() {
 			It("seals within MAX_BLOCK_BYTES counting the coinbase", func() {
 				c := engineCases[0].new()
 				base, _ := funded(be.open(), c, WithMinerAddress(miner.Address()))
-				empty, err := base.MinePending(context.Background())
+				empty, err := minePending(base)
 				Expect(err).NotTo(HaveOccurred())
 				emptySize, err := empty.Size()
 				Expect(err).NotTo(HaveOccurred())
@@ -142,20 +150,23 @@ var _ = Describe("Service with a miner address", func() {
 				txSize := mempool.Size(spend(f.owner, f.ops[0], 9))
 
 				included := 0
-				for k := 0; k <= 18; k++ {
+
+				for k := range 19 {
 					limit := emptySize + 100 + k*txSize/3
 					GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(limit))
+
 					psvc, pf := funded(be.open(), c, WithMinerAddress(miner.Address()))
 					for i, out := range []uint64{9, 8, 7, 6, 5} {
 						Expect(psvc.Submit(spend(pf.owner, pf.ops[i], out))).To(Succeed())
 					}
 
-					blk, err := psvc.MinePending(context.Background())
+					blk, err := minePending(psvc)
 
 					Expect(err).NotTo(HaveOccurred(), "limit %d", limit)
 					Expect(domain.ValidateSize(blk, domain.MaxBlockBytes())).To(Succeed(), "limit %d", limit)
 					included = max(included, len(blk.Transactions)-1)
 				}
+
 				Expect(included).To(BeNumerically(">=", 3))
 			})
 
@@ -164,6 +175,7 @@ var _ = Describe("Service with a miner address", func() {
 					for i, out := range []uint64{9, 8, 7, 6, 5} {
 						Expect(svc.Submit(spend(f.owner, f.ops[i], out))).To(Succeed())
 					}
+
 					pending := svc.Pending()
 					zeros := strings.Repeat("0", 64)
 					cb := domain.Transaction{
@@ -181,9 +193,10 @@ var _ = Describe("Service with a miner address", func() {
 					Expect(err).NotTo(HaveOccurred())
 					GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(widest+slack))
 
-					blk, err := svc.MinePending(context.Background())
+					blk, err := minePending(svc)
 
 					Expect(err).NotTo(HaveOccurred())
+
 					if slack < 0 {
 						// A smaller transaction further down may still take the room left.
 						Expect(ids(blk.Transactions)).To(ContainElement(pending[0].ID))
@@ -191,6 +204,7 @@ var _ = Describe("Service with a miner address", func() {
 					} else {
 						Expect(ids(blk.Transactions[1:])).To(Equal(ids(pending[:count])))
 					}
+
 					Expect(domain.ValidateSize(blk, domain.MaxBlockBytes())).To(Succeed())
 				},
 				Entry("two transactions, exact", 2, 0),
@@ -200,7 +214,7 @@ var _ = Describe("Service with a miner address", func() {
 
 			It("without the option blocks carry no coinbase", func() {
 				plain, _ := funded(be.open(), engineCases[0].new())
-				b, err := plain.MinePending(context.Background())
+				b, err := minePending(plain)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(b.Transactions).To(BeEmpty())
 			})

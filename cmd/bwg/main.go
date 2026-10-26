@@ -16,6 +16,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	err := newRootCmdWith(logger).ExecuteContext(ctx)
+
 	stop() // os.Exit skips deferred calls
 	finish(err, logger, os.Exit)
 }
@@ -23,8 +24,7 @@ func main() {
 // finish exits 1 on err. A node error is logged as a JSON "node stopped" line;
 // other commands have already printed theirs through cobra.
 func finish(err error, logger *slog.Logger, exit func(code int)) {
-	var stopped nodeStopped
-	if errors.As(err, &stopped) {
+	if stopped, ok := errors.AsType[nodeStoppedError](err); ok {
 		fatalIf(stopped.err, logger, exit)
 	} else if err != nil {
 		exit(1)
@@ -37,6 +37,7 @@ func execute(ctx context.Context, logger *slog.Logger, args []string, stdout io.
 	root.SetArgs(args)
 	root.SetOut(stdout)
 	root.SetErr(stdout)
+
 	return root.ExecuteContext(ctx)
 }
 
@@ -49,6 +50,7 @@ func newRootCmd() *cobra.Command {
 func newRootCmdWith(logger *slog.Logger) *cobra.Command {
 	root := &cobra.Command{Use: "bwg", Short: "Blockchain node, wallet and miner", SilenceUsage: true}
 	root.AddCommand(newWalletCmd(), newMinerCmd(), newNodeCmd(logger))
+
 	return root
 }
 
@@ -57,5 +59,6 @@ func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
+
 	return fallback
 }

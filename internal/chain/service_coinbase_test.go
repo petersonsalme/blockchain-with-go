@@ -19,12 +19,12 @@ func coinbaseTx(amount uint64) domain.Transaction {
 		Timestamp: time.Now(),
 	}
 	tx.ID = tx.CalculateHash()
+
 	return tx
 }
 
 var _ = Describe("Service coinbase rule", func() {
 	for _, be := range backends {
-		be := be
 		Describe(be.name, func() {
 			var (
 				repo storage.IndexedRepository
@@ -47,12 +47,14 @@ var _ = Describe("Service coinbase rule", func() {
 				func(position int) {
 					before, _ := repo.All()
 					beforeUTXO := utxoSnapshot(repo)
+
 					txs := append(f.tx(), f.tx()...)
 					txs = append(txs[:position], append([]domain.Transaction{coinbaseTx(1)}, txs[position:]...)...)
 
 					_, err := svc.Mine(context.Background(), txs)
 
 					Expect(err).To(MatchError(domain.ErrMissingInputs))
+
 					after, _ := repo.All()
 					Expect(hashes(after)).To(Equal(hashes(before)))
 					Expect(utxoSnapshot(repo)).To(Equal(beforeUTXO))
@@ -95,6 +97,7 @@ var _ = Describe("Service coinbase rule", func() {
 					_, err := svc.ReplaceChain(context.Background(), cand)
 
 					Expect(err).To(MatchError(domain.ErrCoinbaseTooLarge))
+
 					after, _ := repo.All()
 					Expect(hashes(after)).To(Equal(hashes(beforeBlocks)))
 					Expect(utxoSnapshot(repo)).To(Equal(beforeUTXO))
@@ -110,6 +113,7 @@ var _ = Describe("Service coinbase rule", func() {
 					_, err := svc.ReplaceChain(context.Background(), cand)
 
 					Expect(err).NotTo(HaveOccurred())
+
 					balance, _ := svc.Balance(recipient().Address())
 					Expect(balance).To(BeNumerically(">=", domain.InitialSubsidy))
 					Expect(utxoSnapshot(repo)).To(Equal(replay(cand)))

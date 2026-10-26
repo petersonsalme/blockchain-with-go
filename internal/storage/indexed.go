@@ -86,6 +86,7 @@ func CheckHeaders(headers []*domain.Block) error {
 	if len(headers) == 0 {
 		return ErrConflict
 	}
+
 	for i, h := range headers {
 		if h == nil || h.Index != i {
 			return ErrConflict
@@ -94,10 +95,12 @@ func CheckHeaders(headers []*domain.Block) error {
 		if h.Hash != h.CalculateHash() && (i > 0 || h.Hash != "") {
 			return ErrConflict
 		}
+
 		if i > 0 && h.PrevHash != headers[i-1].Hash {
 			return ErrConflict
 		}
 	}
+
 	return nil
 }
 
@@ -115,11 +118,13 @@ type TxIndex struct {
 // outputs created and spent inside b are resolved from the block itself.
 func IndexTxs(b *domain.Block, d domain.UTXODelta) []TxIndex {
 	local := map[domain.OutPoint]domain.TxOut{}
+
 	out := make([]TxIndex, 0, len(b.Transactions))
 	for pos := range b.Transactions {
 		tx := &b.Transactions[pos]
 		txid := tx.CalculateHash()
 		addrs := map[string]struct{}{}
+
 		for _, in := range tx.Inputs {
 			op := domain.OutPoint{TxID: in.PrevTxID, Index: in.OutIndex}
 			if o, ok := d.Spent[op]; ok {
@@ -128,16 +133,20 @@ func IndexTxs(b *domain.Block, d domain.UTXODelta) []TxIndex {
 				addrs[o.Address] = struct{}{}
 			}
 		}
+
 		for i, o := range tx.Outputs {
 			addrs[o.Address] = struct{}{}
 			local[domain.OutPoint{TxID: txid, Index: uint32(i)}] = o
 		}
+
 		list := make([]string, 0, len(addrs))
 		for a := range addrs {
 			list = append(list, a)
 		}
+
 		sort.Strings(list)
 		out = append(out, TxIndex{TxID: txid, Pos: pos, Addrs: list})
 	}
+
 	return out
 }

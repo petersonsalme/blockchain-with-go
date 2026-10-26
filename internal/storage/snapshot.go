@@ -33,20 +33,25 @@ func SnapshotHash(blockHash string, set domain.UTXOSet) string {
 	for op := range set {
 		ops = append(ops, op)
 	}
+
 	slices.SortFunc(ops, func(a, b domain.OutPoint) int {
 		return cmp.Or(strings.Compare(a.TxID, b.TxID), cmp.Compare(a.Index, b.Index))
 	})
+
 	h := sha256.New()
 	h.Write([]byte(blockHash))
+
 	var buf []byte
+
 	for _, op := range ops {
 		o := set[op]
 		buf = append(buf[:0], op.TxID...)
 		buf = binary.BigEndian.AppendUint32(buf, op.Index)
-		buf = binary.BigEndian.AppendUint16(buf, uint16(len(o.Address)))
+		buf = binary.BigEndian.AppendUint16(buf, uint16(len(o.Address))) //nolint:gosec // address length is not bounded below 65536 by the domain: a longer one would wrap this prefix
 		buf = append(buf, o.Address...)
 		buf = binary.BigEndian.AppendUint64(buf, o.Amount)
 		h.Write(buf)
 	}
+
 	return hex.EncodeToString(h.Sum(nil))
 }

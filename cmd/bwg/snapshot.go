@@ -34,16 +34,20 @@ func parsePruning() (storage.Pruning, error) {
 	if err != nil {
 		return storage.Pruning{}, err
 	}
+
 	keep, err := nonNegativeInt(pruneKeepBlocksEnvVar, 0)
 	if err != nil {
 		return storage.Pruning{}, err
 	}
+
 	if keep > 0 && keep < minPruneKeepBlocks {
 		return storage.Pruning{}, fmt.Errorf("%s: %d is too small: want 0 or at least %d", pruneKeepBlocksEnvVar, keep, minPruneKeepBlocks)
 	}
+
 	if keep > 0 && interval == 0 {
 		return storage.Pruning{}, fmt.Errorf("%s: pruning needs %s above 0", pruneKeepBlocksEnvVar, snapshotIntervalEnvVar)
 	}
+
 	return storage.Pruning{SnapshotInterval: interval, KeepBlocks: keep}, nil
 }
 
@@ -53,10 +57,12 @@ func nonNegativeInt(name string, fallback int) (int, error) {
 	if raw == "" {
 		return fallback, nil
 	}
+
 	n, err := strconv.Atoi(raw)
 	if err != nil || n < 0 {
 		return 0, fmt.Errorf("%s: invalid value %q: want a non-negative integer", name, raw)
 	}
+
 	return n, nil
 }
 
@@ -66,6 +72,7 @@ func snapshotDB(what string) (string, error) {
 	if strings.TrimSpace(dataDir) == "" {
 		return "", fmt.Errorf("%s: %s needs a DATA_DIR", dataDirEnvVar, what)
 	}
+
 	return filepath.Join(dataDir, "chain.db"), nil
 }
 
@@ -77,40 +84,54 @@ func exportSnapshot(file string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(path); err != nil {
+
+	_, err = os.Stat(path)
+	if err != nil {
 		return fmt.Errorf("%s: %w", dataDirEnvVar, err)
 	}
+
 	repo, err := bolt.Open(path)
 	if err != nil {
 		return err
 	}
+
 	defer func() { _ = repo.Close() }()
 
 	snap, err := repo.Snapshot()
 	if errors.Is(err, storage.ErrNotFound) {
 		return fmt.Errorf("no snapshot stored in %s yet (see %s)", path, snapshotIntervalEnvVar)
 	}
+
 	if err != nil {
 		return err
 	}
+
 	blocks, err := repo.Range(0, snap.Height+1)
 	if err != nil {
 		return err
 	}
+
 	headers := make([]*domain.Block, len(blocks))
 	for i, b := range blocks {
 		h := *b
 		h.Transactions = []domain.Transaction{}
 		headers[i] = &h
 	}
+
 	var buf bytes.Buffer
-	if err := storage.WriteSnapshotFile(&buf, headers, snap); err != nil {
+
+	err = storage.WriteSnapshotFile(&buf, headers, snap)
+	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(file, buf.Bytes(), 0o644); err != nil {
+
+	err = os.WriteFile(file, buf.Bytes(), 0o644)
+	if err != nil {
 		return err
 	}
+
 	_, err = fmt.Fprintf(stdout, "snapshot: height %d hash %s\n", snap.Height, snap.Hash)
+
 	return err
 }
 
@@ -123,31 +144,40 @@ func importSnapshot(file, wantHash string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+
 	if strings.TrimSpace(wantHash) == "" {
 		return errors.New("--snapshot-hash is required with --snapshot-import")
 	}
+
 	pruning, err := parsePruning()
 	if err != nil {
 		return err
 	}
+
 	f, err := os.Open(file)
 	if err != nil {
 		return err
 	}
+
 	headers, snap, err := storage.ReadSnapshotFile(f)
 	_ = f.Close() // read-only
+
 	if err != nil {
 		return err
 	}
+
 	if !strings.EqualFold(snap.Hash, strings.TrimSpace(wantHash)) {
 		return fmt.Errorf("snapshot hash mismatch: file has %s, expected %s", snap.Hash, strings.TrimSpace(wantHash))
 	}
+
 	engine, err := newConsensus()
 	if err != nil {
 		return err
 	}
+
 	for i := 1; i < len(headers); i++ {
-		if err := engine.Verify(headers[:i], headers[i]); err != nil {
+		err := engine.Verify(headers[:i], headers[i])
+		if err != nil {
 			return fmt.Errorf("header %d: %w", i, err)
 		}
 	}
@@ -157,9 +187,13 @@ func importSnapshot(file, wantHash string, stdout io.Writer) error {
 		return err
 	}
 	defer func() { _ = closeRepo() }()
-	if err := repo.Restore(headers, snap.UTXOs); err != nil {
+
+	err = repo.Restore(headers, snap.UTXOs)
+	if err != nil {
 		return fmt.Errorf("restore into %s: %w", path, err)
 	}
+
 	_, err = fmt.Fprintf(stdout, "restored: height %d\n", snap.Height)
+
 	return err
 }
