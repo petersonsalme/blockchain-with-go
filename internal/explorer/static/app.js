@@ -78,7 +78,7 @@
       "tr",
       { class: fresh ? "fresh" : "" },
       el("td", {}, link("block", String(b.Index))),
-      el("td", {}, link("block", b.Hash, short(b.Hash))),
+      el("td", {}, link("block", String(b.Index), short(b.Hash) || "(genesis)")),
       el("td", {}, when(b.Timestamp)),
       el("td", {}, String((b.Transactions || []).length)),
     );
@@ -124,8 +124,8 @@
     show(
       el("h1", {}, "Block " + b.Index),
       fields([
-        ["Hash", b.Hash],
-        ["Previous", b.Index > 0 ? link("block", b.PrevHash) : b.PrevHash],
+        ["Hash", b.Hash || "-"],
+        ["Previous", b.Index > 0 ? link("block", String(b.Index - 1), b.PrevHash || "height " + (b.Index - 1)) : "-"],
         ["Time", when(b.Timestamp)],
         ["Merkle root", b.MerkleRoot],
         ["Difficulty", String(b.Difficulty)],
@@ -147,7 +147,7 @@
       el("h1", {}, "Transaction"),
       fields([
         ["ID", tx.ID],
-        ["Block", link("block", res.block_hash, "height " + res.height + " · " + short(res.block_hash))],
+        ["Block", link("block", String(res.height), "height " + res.height + (res.block_hash ? " · " + short(res.block_hash) : ""))],
         ["Time", when(tx.Timestamp)],
       ]),
       el("h2", {}, "Inputs (" + inputs.length + ")"),
