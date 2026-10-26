@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -15,7 +16,13 @@ import (
 const maxResponseBytes = 1 << 20
 
 // Run does a Round at once and then one every interval, until ctx is done.
+// It also runs the relay worker and returns only after the worker has ended.
 func (n *Node) Run(ctx context.Context) {
+	var wg sync.WaitGroup
+
+	wg.Go(func() { n.relayLoop(ctx) })
+	defer wg.Wait()
+
 	ticker := time.NewTicker(n.interval)
 	defer ticker.Stop()
 
