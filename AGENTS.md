@@ -24,7 +24,7 @@ blockchain-with-go/
 │   ├── domain/        # Domain models (Block, Transaction, rules) — no internal dependencies
 │   ├── explorer/      # Embedded static files of the read-only web explorer served at /explorer/ (Files() fs.FS)
 │   ├── mempool/       # mempool.Pool: admitted transactions, fee-rate selection (ADR-0012); depends only on domain
-│   ├── p2p/           # Hello, handshake checks, peer book, persisted peer addresses and the dialer loop (ADR-0013); depends only on domain
+│   ├── p2p/           # Hello, handshake checks, peer book, persisted peer addresses, the dialer loop (ADR-0013) and block/tx gossip: inv/want, seen-set, relay worker (ADR-0018); depends only on domain
 │   ├── server/        # HTTP adapter: server.Server (DI), handlers, DTOs and error mapping
 │   ├── storage/       # BlockRepository port
 │   │   ├── bolt/      # bbolt disk adapter

@@ -64,6 +64,11 @@ type Node struct {
 	addrFile string
 	log      *slog.Logger
 	now      func() time.Time
+
+	ledger  Ledger
+	maxSeen int
+	seen    *seenSet
+	queue   chan relay
 }
 
 // NewNode validates nodeID and a non-empty listenAddr and builds a Node.
@@ -84,10 +89,13 @@ func NewNode(c ChainView, b *Book, nodeID, listenAddr string, opts ...Option) (*
 	n := &Node{
 		chain: c, book: b, nodeID: nodeID, listenAddr: listenAddr, version: ProtocolVersion,
 		client: newClient(), interval: 30 * time.Second, log: slog.New(slog.DiscardHandler), now: time.Now,
+		maxSeen: DefaultMaxSeen, queue: make(chan relay, relayQueueSize),
 	}
 	for _, o := range opts {
 		o(n)
 	}
+
+	n.seen = newSeenSet(n.maxSeen)
 
 	return n, nil
 }
