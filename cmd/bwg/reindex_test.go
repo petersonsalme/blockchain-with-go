@@ -35,7 +35,8 @@ func writeChain(t *testing.T, dir string) map[string][]string {
 	want := map[string][]string{}
 
 	for i := range 5 {
-		if err := repo.Commit(blocks[i], deltas[i]); err != nil {
+		err := repo.Commit(blocks[i], deltas[i])
+		if err != nil {
 			t.Fatal(err)
 		}
 
@@ -68,7 +69,8 @@ func dropBucket(t *testing.T, dir, name string) {
 
 	defer func() { _ = db.Close() }() // test database; close error is irrelevant
 
-	if err := db.Update(func(tx *bbolt.Tx) error { return tx.DeleteBucket([]byte(name)) }); err != nil {
+	err = db.Update(func(tx *bbolt.Tx) error { return tx.DeleteBucket([]byte(name)) })
+	if err != nil {
 		t.Fatal(err)
 	}
 }
@@ -105,7 +107,8 @@ func TestReindexRebuildsDroppedIndex(t *testing.T) {
 	}
 	defer func() { _ = repo.Close() }() // test repository; close error is irrelevant
 
-	if ok, err := repo.IndexCurrent(); err != nil || !ok {
+	ok, err := repo.IndexCurrent()
+	if err != nil || !ok {
 		t.Fatalf("IndexCurrent = %v, %v; want true", ok, err)
 	}
 
@@ -123,12 +126,15 @@ func TestReindexTwiceLeavesTheSameState(t *testing.T) {
 	t.Setenv(dataDirEnvVar, dir)
 	writeChain(t, dir)
 
-	if _, err := runReindexArgs(t); err != nil {
+	_, err := runReindexArgs(t)
+	if err != nil {
 		t.Fatal(err)
 	}
 
 	once := dumpIndexes(t, dir)
-	if _, err := runReindexArgs(t); err != nil {
+
+	_, err = runReindexArgs(t)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -157,7 +163,8 @@ func dumpIndexes(t *testing.T, dir string) map[string]map[string]string {
 		for _, name := range []string{"utxos", "undo", "txs", "addrtx", "meta"} {
 			m := map[string]string{}
 
-			if err := tx.Bucket([]byte(name)).ForEach(func(k, v []byte) error { m[string(k)] = string(v); return nil }); err != nil {
+			err := tx.Bucket([]byte(name)).ForEach(func(k, v []byte) error { m[string(k)] = string(v); return nil })
+			if err != nil {
 				return err
 			}
 
@@ -178,7 +185,9 @@ func TestReindexReadsDataDirFromDotEnv(t *testing.T) {
 	writeChain(t, dir)
 
 	cwd := t.TempDir()
-	if err := os.WriteFile(filepath.Join(cwd, ".env"), []byte("DATA_DIR="+dir+"\n"), 0o600); err != nil {
+
+	err := os.WriteFile(filepath.Join(cwd, ".env"), []byte("DATA_DIR="+dir+"\n"), 0o600)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -250,18 +259,22 @@ func TestReindexDoesNotCreateMissingDataDir(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "nope")
 	t.Setenv(dataDirEnvVar, missing)
 
-	if _, err := runReindexArgs(t); err == nil {
+	_, err := runReindexArgs(t)
+	if err == nil {
 		t.Fatal("--reindex on a missing DATA_DIR returned nil")
 	}
 
-	if _, err := os.Stat(missing); !os.IsNotExist(err) {
+	_, err = os.Stat(missing)
+	if !os.IsNotExist(err) {
 		t.Fatalf("DATA_DIR was created: %v", err)
 	}
 }
 
 func TestExecuteRejectsUnknownFlag(t *testing.T) {
 	var out bytes.Buffer
-	if err := execute(context.Background(), discardLogger(), []string{"node", "--bogus"}, &out); err == nil {
+
+	err := execute(context.Background(), discardLogger(), []string{"node", "--bogus"}, &out)
+	if err == nil {
 		t.Fatal("unknown flag returned nil")
 	}
 }
@@ -270,7 +283,9 @@ func TestExecuteWithoutFlagBootstraps(t *testing.T) {
 	t.Chdir(t.TempDir()) // no .env: bootstrap fails the same way as before the flag existed
 
 	var out bytes.Buffer
-	if err := execute(context.Background(), discardLogger(), []string{"node"}, &out); !errors.Is(err, os.ErrNotExist) {
+
+	err := execute(context.Background(), discardLogger(), []string{"node"}, &out)
+	if !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("err = %v, want the missing .env error from bootstrap", err)
 	}
 }

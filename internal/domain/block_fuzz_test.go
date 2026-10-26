@@ -18,7 +18,9 @@ func FuzzBlockJSONRoundTrip(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		var b domain.Block
-		if err := json.Unmarshal(data, &b); err != nil {
+
+		err := json.Unmarshal(data, &b)
+		if err != nil {
 			t.Skip()
 		}
 
@@ -33,7 +35,9 @@ func FuzzBlockJSONRoundTrip(f *testing.F) {
 		}
 
 		var decoded domain.Block
-		if err := json.Unmarshal(encoded, &decoded); err != nil {
+
+		err = json.Unmarshal(encoded, &decoded)
+		if err != nil {
 			t.Fatalf("encoded block does not decode: %v", err)
 		}
 

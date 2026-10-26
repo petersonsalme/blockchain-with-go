@@ -47,7 +47,8 @@ func (n *Node) Round(ctx context.Context) {
 	n.book.Expire(n.now().Add(-3 * n.interval))
 
 	if n.addrFile != "" {
-		if err := SaveAddrs(n.addrFile, n.book.Addrs()); err != nil {
+		err := SaveAddrs(n.addrFile, n.book.Addrs())
+		if err != nil {
 			n.log.Error("p2p: cannot save peers", "path", n.addrFile, "error", err)
 		}
 	}
@@ -83,7 +84,8 @@ func (n *Node) renew(ctx context.Context, local Hello) {
 
 		n.book.Disconnect(p.NodeID) // the peer may have restarted with a new identity
 
-		if err := n.book.Connect(remote, false); err != nil {
+		err = n.book.Connect(remote, false)
+		if err != nil {
 			n.log.Warn("p2p: peer dropped", "addr", p.Addr, "error", err)
 		}
 	}
@@ -107,7 +109,8 @@ func (n *Node) dial(ctx context.Context, local Hello) {
 			continue
 		}
 
-		if err := n.book.Connect(remote, false); err != nil {
+		err = n.book.Connect(remote, false)
+		if err != nil {
 			n.log.Warn("p2p: dial failed", "addr", addr, "error", err)
 			continue
 		}
@@ -130,7 +133,8 @@ func (n *Node) collect(ctx context.Context) {
 		}
 
 		for _, a := range addrs {
-			if norm, err := NormalizeAddr(a); err == nil && norm != n.listenAddr {
+			norm, err := NormalizeAddr(a)
+			if err == nil && norm != n.listenAddr {
 				n.book.AddAddrs(norm)
 			}
 		}
@@ -145,11 +149,14 @@ func (n *Node) handshake(ctx context.Context, addr string, local Hello) (Hello, 
 	}
 
 	var remote Hello
-	if err := n.do(ctx, http.MethodPost, addr+"/p2p/hello", body, &remote); err != nil {
+
+	err = n.do(ctx, http.MethodPost, addr+"/p2p/hello", body, &remote)
+	if err != nil {
 		return Hello{}, err
 	}
 
-	if err := Check(local, remote); err != nil {
+	err = Check(local, remote)
+	if err != nil {
 		return Hello{}, err
 	}
 
@@ -162,7 +169,9 @@ func (n *Node) fetchAddrs(ctx context.Context, addr string) ([]string, error) {
 	var resp struct {
 		Addrs []string `json:"addrs"`
 	}
-	if err := n.do(ctx, http.MethodGet, addr+"/p2p/peers", nil, &resp); err != nil {
+
+	err := n.do(ctx, http.MethodGet, addr+"/p2p/peers", nil, &resp)
+	if err != nil {
 		return nil, err
 	}
 

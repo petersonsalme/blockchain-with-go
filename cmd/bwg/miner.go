@@ -66,7 +66,8 @@ func runMiner(cmd *cobra.Command, _ []string) error {
 			txs = len(*b.Transactions)
 		}
 
-		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "block %d %s txs=%d\n", b.Index, b.Hash, txs); err != nil {
+		_, err = fmt.Fprintf(cmd.OutOrStdout(), "block %d %s txs=%d\n", b.Index, b.Hash, txs)
+		if err != nil {
 			return err
 		}
 

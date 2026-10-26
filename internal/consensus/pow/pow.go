@@ -240,7 +240,8 @@ func MineWithContext(ctx context.Context, b *domain.Block, difficulty int) error
 	b.Difficulty = difficulty
 
 	for b.Nonce = 0; ; b.Nonce++ {
-		if err := ctx.Err(); err != nil {
+		err := ctx.Err()
+		if err != nil {
 			return err
 		}
 

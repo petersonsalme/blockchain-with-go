@@ -68,7 +68,8 @@ func (s *Server) handleP2PHello(w http.ResponseWriter, r *http.Request) {
 
 	err := dec.Decode(&remote)
 	if err == nil { // only whitespace may follow the hello
-		if _, tokErr := dec.Token(); !errors.Is(tokErr, io.EOF) {
+		_, tokErr := dec.Token()
+		if !errors.Is(tokErr, io.EOF) {
 			err = errors.Join(errors.New("trailing data"), tokErr)
 		}
 	}

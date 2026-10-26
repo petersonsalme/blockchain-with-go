@@ -87,7 +87,9 @@ func encodeDelta(d domain.UTXODelta) ([]byte, error) {
 
 func decodeDelta(data []byte) (domain.UTXODelta, error) {
 	var dto deltaDTO
-	if err := json.Unmarshal(data, &dto); err != nil {
+
+	err := json.Unmarshal(data, &dto)
+	if err != nil {
 		return domain.UTXODelta{}, err
 	}
 
@@ -135,7 +137,9 @@ func utxoHolds(tx *bbolt.Tx, outs map[domain.OutPoint]domain.TxOut) (bool, error
 		}
 
 		var got domain.TxOut
-		if err := json.Unmarshal(v, &got); err != nil {
+
+		err := json.Unmarshal(v, &got)
+		if err != nil {
 			return false, err
 		}
 
@@ -169,11 +173,13 @@ func putOuts(tx *bbolt.Tx, outs map[domain.OutPoint]domain.TxOut) error {
 			return err
 		}
 
-		if err := bucket.Put(utxoKey(op), data); err != nil {
+		err = bucket.Put(utxoKey(op), data)
+		if err != nil {
 			return err
 		}
 
-		if err := tx.Bucket(addrutxoBucket).Put(addrUTXOKey(o.Address, op), binary.BigEndian.AppendUint64(nil, o.Amount)); err != nil {
+		err = tx.Bucket(addrutxoBucket).Put(addrUTXOKey(o.Address, op), binary.BigEndian.AppendUint64(nil, o.Amount))
+		if err != nil {
 			return err
 		}
 	}
@@ -184,11 +190,13 @@ func putOuts(tx *bbolt.Tx, outs map[domain.OutPoint]domain.TxOut) error {
 func deleteOuts(tx *bbolt.Tx, outs map[domain.OutPoint]domain.TxOut) error {
 	bucket := tx.Bucket(utxosBucket)
 	for op, o := range outs {
-		if err := bucket.Delete(utxoKey(op)); err != nil {
+		err := bucket.Delete(utxoKey(op))
+		if err != nil {
 			return err
 		}
 
-		if err := tx.Bucket(addrutxoBucket).Delete(addrUTXOKey(o.Address, op)); err != nil {
+		err = tx.Bucket(addrutxoBucket).Delete(addrUTXOKey(o.Address, op))
+		if err != nil {
 			return err
 		}
 	}
@@ -214,17 +222,20 @@ func writeIndex(tx *bbolt.Tx, b *domain.Block, d domain.UTXODelta) error {
 		return err
 	}
 
-	if err := tx.Bucket(undoBucket).Put(heightKey(b.Index), data); err != nil {
+	err = tx.Bucket(undoBucket).Put(heightKey(b.Index), data)
+	if err != nil {
 		return err
 	}
 
 	for _, t := range storage.IndexTxs(b, d) {
-		if err := tx.Bucket(txsBucket).Put([]byte(t.TxID), heightKey(b.Index)); err != nil {
+		err := tx.Bucket(txsBucket).Put([]byte(t.TxID), heightKey(b.Index))
+		if err != nil {
 			return err
 		}
 
 		for _, a := range t.Addrs {
-			if err := tx.Bucket(addrtxBucket).Put(addrKey(a, b.Index, t.Pos), []byte(t.TxID)); err != nil {
+			err := tx.Bucket(addrtxBucket).Put(addrKey(a, b.Index, t.Pos), []byte(t.TxID))
+			if err != nil {
 				return err
 			}
 		}
@@ -239,7 +250,8 @@ func commit(tx *bbolt.Tx, p storage.Pruning, b *domain.Block, d domain.UTXODelta
 		return storage.ErrIndexStale
 	}
 
-	if err := checkTip(tx.Bucket(blocksBucket), b); err != nil {
+	err := checkTip(tx.Bucket(blocksBucket), b)
+	if err != nil {
 		return err
 	}
 
@@ -252,19 +264,23 @@ func commit(tx *bbolt.Tx, p storage.Pruning, b *domain.Block, d domain.UTXODelta
 		return storage.ErrUTXOConflict
 	}
 
-	if err := putBlock(tx, b); err != nil {
+	err = putBlock(tx, b)
+	if err != nil {
 		return err
 	}
 
-	if err := deleteOuts(tx, d.Spent); err != nil {
+	err = deleteOuts(tx, d.Spent)
+	if err != nil {
 		return err
 	}
 
-	if err := putOuts(tx, d.Created); err != nil {
+	err = putOuts(tx, d.Created)
+	if err != nil {
 		return err
 	}
 
-	if err := writeIndex(tx, b, d); err != nil {
+	err = writeIndex(tx, b, d)
+	if err != nil {
 		return err
 	}
 
@@ -276,7 +292,9 @@ func readSet(tx *bbolt.Tx) (domain.UTXOSet, error) {
 	set := domain.UTXOSet{}
 	err := tx.Bucket(utxosBucket).ForEach(func(k, v []byte) error {
 		var o domain.TxOut
-		if err := json.Unmarshal(v, &o); err != nil {
+
+		err := json.Unmarshal(v, &o)
+		if err != nil {
 			return err
 		}
 
@@ -313,11 +331,14 @@ func snapshotStep(tx *bbolt.Tx, p storage.Pruning, t int) error {
 	}
 
 	var at domain.Block
-	if err := json.Unmarshal(tx.Bucket(blocksBucket).Get(heightKey(s)), &at); err != nil {
+
+	err = json.Unmarshal(tx.Bucket(blocksBucket).Get(heightKey(s)), &at)
+	if err != nil {
 		return err
 	}
 
-	if err := dropSnapshotFrom(tx, 0); err != nil {
+	err = dropSnapshotFrom(tx, 0)
+	if err != nil {
 		return err
 	}
 
@@ -329,17 +350,21 @@ func snapshotStep(tx *bbolt.Tx, p storage.Pruning, t int) error {
 			return err
 		}
 
-		if err := sb.Put(utxoKey(op), data); err != nil {
+		err = sb.Put(utxoKey(op), data)
+		if err != nil {
 			return err
 		}
 	}
 
 	meta := tx.Bucket(metaBucket)
-	if err := meta.Put(snapshotHeightKey, heightKey(s)); err != nil {
+
+	err = meta.Put(snapshotHeightKey, heightKey(s))
+	if err != nil {
 		return err
 	}
 
-	if err := meta.Put(snapshotHashKey, []byte(storage.SnapshotHash(at.Hash, set))); err != nil {
+	err = meta.Put(snapshotHashKey, []byte(storage.SnapshotHash(at.Hash, set)))
+	if err != nil {
 		return err
 	}
 
@@ -348,7 +373,8 @@ func snapshotStep(tx *bbolt.Tx, p storage.Pruning, t int) error {
 	}
 
 	for h := prunedBelow; h <= s; h++ {
-		if err := pruneBlock(tx, h); err != nil {
+		err := pruneBlock(tx, h)
+		if err != nil {
 			return err
 		}
 	}
@@ -359,7 +385,9 @@ func snapshotStep(tx *bbolt.Tx, p storage.Pruning, t int) error {
 // pruneBlock replaces the block at h by its header and drops its undo data and index entries.
 func pruneBlock(tx *bbolt.Tx, h int) error {
 	var b domain.Block
-	if err := json.Unmarshal(tx.Bucket(blocksBucket).Get(heightKey(h)), &b); err != nil {
+
+	err := json.Unmarshal(tx.Bucket(blocksBucket).Get(heightKey(h)), &b)
+	if err != nil {
 		return err
 	}
 
@@ -369,18 +397,21 @@ func pruneBlock(tx *bbolt.Tx, h int) error {
 	}
 
 	for _, t := range storage.IndexTxs(&b, d) {
-		if err := tx.Bucket(txsBucket).Delete([]byte(t.TxID)); err != nil {
+		err := tx.Bucket(txsBucket).Delete([]byte(t.TxID))
+		if err != nil {
 			return err
 		}
 
 		for _, a := range t.Addrs {
-			if err := tx.Bucket(addrtxBucket).Delete(addrKey(a, h, t.Pos)); err != nil {
+			err := tx.Bucket(addrtxBucket).Delete(addrKey(a, h, t.Pos))
+			if err != nil {
 				return err
 			}
 		}
 	}
 
-	if err := tx.Bucket(undoBucket).Delete(heightKey(h)); err != nil {
+	err = tx.Bucket(undoBucket).Delete(heightKey(h))
+	if err != nil {
 		return err
 	}
 
@@ -401,15 +432,18 @@ func dropSnapshotFrom(tx *bbolt.Tx, height int) error {
 		return nil
 	}
 
-	if err := tx.DeleteBucket(snapshotBucket); err != nil {
+	err := tx.DeleteBucket(snapshotBucket)
+	if err != nil {
 		return err
 	}
 
-	if _, err := tx.CreateBucket(snapshotBucket); err != nil {
+	_, err = tx.CreateBucket(snapshotBucket)
+	if err != nil {
 		return err
 	}
 
-	if err := meta.Delete(snapshotHeightKey); err != nil {
+	err = meta.Delete(snapshotHeightKey)
+	if err != nil {
 		return err
 	}
 
@@ -419,7 +453,9 @@ func dropSnapshotFrom(tx *bbolt.Tx, height int) error {
 // revert removes the stored block at height h, undoing its delta and index entries.
 func revert(tx *bbolt.Tx, h int) error {
 	var b domain.Block
-	if err := json.Unmarshal(tx.Bucket(blocksBucket).Get(heightKey(h)), &b); err != nil {
+
+	err := json.Unmarshal(tx.Bucket(blocksBucket).Get(heightKey(h)), &b)
+	if err != nil {
 		return err
 	}
 
@@ -437,35 +473,42 @@ func revert(tx *bbolt.Tx, h int) error {
 		return storage.ErrUTXOConflict
 	}
 
-	if err := deleteOuts(tx, d.Created); err != nil {
+	err = deleteOuts(tx, d.Created)
+	if err != nil {
 		return err
 	}
 
-	if err := putOuts(tx, d.Spent); err != nil {
+	err = putOuts(tx, d.Spent)
+	if err != nil {
 		return err
 	}
 
 	for _, t := range storage.IndexTxs(&b, d) {
-		if err := tx.Bucket(txsBucket).Delete([]byte(t.TxID)); err != nil {
+		err := tx.Bucket(txsBucket).Delete([]byte(t.TxID))
+		if err != nil {
 			return err
 		}
 
 		for _, a := range t.Addrs {
-			if err := tx.Bucket(addrtxBucket).Delete(addrKey(a, h, t.Pos)); err != nil {
+			err := tx.Bucket(addrtxBucket).Delete(addrKey(a, h, t.Pos))
+			if err != nil {
 				return err
 			}
 		}
 	}
 
-	if err := tx.Bucket(undoBucket).Delete(heightKey(h)); err != nil {
+	err = tx.Bucket(undoBucket).Delete(heightKey(h))
+	if err != nil {
 		return err
 	}
 	// Deleting a hash that was never indexed (an empty one) is a no-op.
-	if err := tx.Bucket(hashesBucket).Delete([]byte(b.Hash)); err != nil {
+	err = tx.Bucket(hashesBucket).Delete([]byte(b.Hash))
+	if err != nil {
 		return err
 	}
 
-	if err := tx.Bucket(blocksBucket).Delete(heightKey(h)); err != nil {
+	err = tx.Bucket(blocksBucket).Delete(heightKey(h))
+	if err != nil {
 		return err
 	}
 
@@ -513,7 +556,8 @@ func (r *Repository) Reorg(height int, blocks []*domain.Block, deltas []domain.U
 	}
 
 	return r.db.Update(func(tx *bbolt.Tx) error {
-		if err := checkSplice(tx.Bucket(blocksBucket), height, blocks); err != nil {
+		err := checkSplice(tx.Bucket(blocksBucket), height, blocks)
+		if err != nil {
 			return err
 		}
 
@@ -527,17 +571,20 @@ func (r *Repository) Reorg(height int, blocks []*domain.Block, deltas []domain.U
 
 		tip, _ := tx.Bucket(blocksBucket).Cursor().Last()
 		for h := int(binary.BigEndian.Uint64(tip)); h >= height; h-- {
-			if err := revert(tx, h); err != nil {
+			err := revert(tx, h)
+			if err != nil {
 				return err
 			}
 		}
 
-		if err := dropSnapshotFrom(tx, height); err != nil {
+		err = dropSnapshotFrom(tx, height)
+		if err != nil {
 			return err
 		}
 
 		for i, b := range blocks {
-			if err := commit(tx, r.pruning, b, deltas[i]); err != nil {
+			err := commit(tx, r.pruning, b, deltas[i])
+			if err != nil {
 				return err
 			}
 		}
@@ -595,17 +642,21 @@ func (r *Repository) IndexCurrent() (bool, error) {
 func (r *Repository) Reindex() error {
 	return r.db.Update(func(tx *bbolt.Tx) error {
 		for _, name := range indexBuckets {
-			if err := tx.DeleteBucket(name); err != nil {
+			err := tx.DeleteBucket(name)
+			if err != nil {
 				return err
 			}
 
-			if _, err := tx.CreateBucket(name); err != nil {
+			_, err = tx.CreateBucket(name)
+			if err != nil {
 				return err
 			}
 		}
 
 		meta := tx.Bucket(metaBucket)
-		if err := meta.Delete(indexedTipKey); err != nil {
+
+		err := meta.Delete(indexedTipKey)
+		if err != nil {
 			return err
 		}
 
@@ -615,7 +666,9 @@ func (r *Repository) Reindex() error {
 		if from > 0 {
 			err := tx.Bucket(snapshotBucket).ForEach(func(k, v []byte) error {
 				var o domain.TxOut
-				if err := json.Unmarshal(v, &o); err != nil {
+
+				err := json.Unmarshal(v, &o)
+				if err != nil {
 					return err
 				}
 
@@ -627,7 +680,8 @@ func (r *Repository) Reindex() error {
 				return err
 			}
 
-			if err := putOuts(tx, set); err != nil {
+			err = putOuts(tx, set)
+			if err != nil {
 				return err
 			}
 		}
@@ -635,7 +689,9 @@ func (r *Repository) Reindex() error {
 		c := tx.Bucket(blocksBucket).Cursor()
 		for k, v := c.Seek(heightKey(from)); k != nil; k, v = c.Next() {
 			var b domain.Block
-			if err := json.Unmarshal(v, &b); err != nil {
+
+			err := json.Unmarshal(v, &b)
+			if err != nil {
 				return err
 			}
 
@@ -646,15 +702,18 @@ func (r *Repository) Reindex() error {
 
 			set.Apply(d)
 
-			if err := deleteOuts(tx, d.Spent); err != nil {
+			err = deleteOuts(tx, d.Spent)
+			if err != nil {
 				return err
 			}
 
-			if err := putOuts(tx, d.Created); err != nil {
+			err = putOuts(tx, d.Created)
+			if err != nil {
 				return err
 			}
 
-			if err := writeIndex(tx, &b, d); err != nil {
+			err = writeIndex(tx, &b, d)
+			if err != nil {
 				return err
 			}
 		}
@@ -679,7 +738,9 @@ func (r *Repository) Snapshot() (storage.Snapshot, error) {
 		snap.Hash = string(hash)
 
 		var at domain.Block
-		if err := json.Unmarshal(tx.Bucket(blocksBucket).Get(heightKey(snap.Height)), &at); err != nil {
+
+		err := json.Unmarshal(tx.Bucket(blocksBucket).Get(heightKey(snap.Height)), &at)
+		if err != nil {
 			return err
 		}
 
@@ -688,7 +749,9 @@ func (r *Repository) Snapshot() (storage.Snapshot, error) {
 
 		return tx.Bucket(snapshotBucket).ForEach(func(k, v []byte) error {
 			var o domain.TxOut
-			if err := json.Unmarshal(v, &o); err != nil {
+
+			err := json.Unmarshal(v, &o)
+			if err != nil {
 				return err
 			}
 
@@ -751,7 +814,9 @@ func (r *Repository) ForkState(height int) (domain.UTXOSet, error) {
 		}
 
 		var err error
-		if set, err = readSet(tx); err != nil {
+
+		set, err = readSet(tx)
+		if err != nil {
 			return err
 		}
 
@@ -772,7 +837,8 @@ func (r *Repository) ForkState(height int) (domain.UTXOSet, error) {
 
 // Restore fills an empty database from a snapshot in one transaction; see storage.IndexedRepository.
 func (r *Repository) Restore(headers []*domain.Block, set domain.UTXOSet) error {
-	if err := storage.CheckHeaders(headers); err != nil {
+	err := storage.CheckHeaders(headers)
+	if err != nil {
 		return err
 	}
 
@@ -787,12 +853,15 @@ func (r *Repository) Restore(headers []*domain.Block, set domain.UTXOSet) error 
 			header := *h
 
 			header.Transactions = []domain.Transaction{}
-			if err := putBlock(tx, &header); err != nil {
+
+			err := putBlock(tx, &header)
+			if err != nil {
 				return err
 			}
 		}
 
-		if err := putOuts(tx, set); err != nil {
+		err := putOuts(tx, set)
+		if err != nil {
 			return err
 		}
 
@@ -804,21 +873,26 @@ func (r *Repository) Restore(headers []*domain.Block, set domain.UTXOSet) error 
 				return err
 			}
 
-			if err := sb.Put(utxoKey(op), data); err != nil {
+			err = sb.Put(utxoKey(op), data)
+			if err != nil {
 				return err
 			}
 		}
 
 		meta := tx.Bucket(metaBucket)
-		if err := meta.Put(snapshotHeightKey, heightKey(s)); err != nil {
+
+		err = meta.Put(snapshotHeightKey, heightKey(s))
+		if err != nil {
 			return err
 		}
 
-		if err := meta.Put(snapshotHashKey, []byte(storage.SnapshotHash(headers[s].Hash, set))); err != nil {
+		err = meta.Put(snapshotHashKey, []byte(storage.SnapshotHash(headers[s].Hash, set)))
+		if err != nil {
 			return err
 		}
 
-		if err := meta.Put(prunedBelowKey, heightKey(s+1)); err != nil {
+		err = meta.Put(prunedBelowKey, heightKey(s+1))
+		if err != nil {
 			return err
 		}
 

@@ -145,11 +145,13 @@ func TestShutdownCancelsMiningAndDrainsRequests(t *testing.T) {
 
 	close(fake.releaseTip)
 
-	if err := <-shutdownDone; err != nil {
+	err = <-shutdownDone
+	if err != nil {
 		t.Fatalf("Shutdown = %v, want nil", err)
 	}
 
-	if err := <-serveErr; !errors.Is(err, http.ErrServerClosed) {
+	err = <-serveErr
+	if !errors.Is(err, http.ErrServerClosed) {
 		t.Fatalf("Serve = %v, want ErrServerClosed", err)
 	}
 
@@ -163,7 +165,9 @@ func TestShutdownCancelsMiningAndDrainsRequests(t *testing.T) {
 	}
 
 	var e struct{ Error string }
-	if err := json.Unmarshal([]byte(m.body), &e); err != nil || e.Error != "mining cancelled" {
+
+	err = json.Unmarshal([]byte(m.body), &e)
+	if err != nil || e.Error != "mining cancelled" {
 		t.Fatalf("POST / body = %q, want error \"mining cancelled\"", m.body)
 	}
 
@@ -176,7 +180,9 @@ func TestShutdownCancelsMiningAndDrainsRequests(t *testing.T) {
 		Status string
 		Height int
 	}
-	if err := json.Unmarshal([]byte(h.body), &hr); err != nil || hr.Status != "ok" || hr.Height != 3 {
+
+	err = json.Unmarshal([]byte(h.body), &hr)
+	if err != nil || hr.Status != "ok" || hr.Height != 3 {
 		t.Fatalf("GET /health body = %q (%v), want a complete ok response", h.body, err)
 	}
 }

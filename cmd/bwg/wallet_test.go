@@ -61,7 +61,8 @@ func TestWalletNewReadsKeystoreFromEnv(t *testing.T) {
 		t.Fatalf("runCLI: %v", err)
 	}
 
-	if _, err := os.Stat(path); err != nil {
+	_, err = os.Stat(path)
+	if err != nil {
 		t.Fatalf("stat keystore: %v", err)
 	}
 
@@ -80,11 +81,13 @@ func TestWalletNewRefusesExistingKeystore(t *testing.T) {
 	dir := t.TempDir()
 
 	path := filepath.Join(dir, "existing.key")
-	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+
+	err := os.WriteFile(path, []byte("x"), 0o600)
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err := runCLI(t, context.Background(), "wallet", "new", "--keystore", path)
+	_, err = runCLI(t, context.Background(), "wallet", "new", "--keystore", path)
 	if !errors.Is(err, os.ErrExist) {
 		t.Fatalf("expected os.ErrExist, got %v", err)
 	}
@@ -109,7 +112,8 @@ func TestWalletNewRequiresPassword(t *testing.T) {
 		t.Fatalf("expected wallet.ErrEmptyPassword, got %v", err)
 	}
 
-	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+	_, err = os.Stat(path)
+	if !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected file to not exist, got err: %v", err)
 	}
 }

@@ -66,7 +66,8 @@ func TestMeasureSnapshotCost(t *testing.T) {
 			prev = b.Hash
 			start := time.Now()
 
-			if err := repo.Commit(b, d); err != nil {
+			err := repo.Commit(b, d)
+			if err != nil {
 				t.Fatal(err)
 			}
 
@@ -78,7 +79,8 @@ func TestMeasureSnapshotCost(t *testing.T) {
 			}
 		}
 
-		if err := repo.Close(); err != nil {
+		err = repo.Close()
+		if err != nil {
 			t.Fatal(err)
 		}
 

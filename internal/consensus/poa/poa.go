@@ -57,7 +57,8 @@ func (p *ProofOfAuthority) Seal(ctx context.Context, _ []*domain.Block, b *domai
 		ctx = context.Background()
 	}
 
-	if err := ctx.Err(); err != nil {
+	err := ctx.Err()
+	if err != nil {
 		return err
 	}
 

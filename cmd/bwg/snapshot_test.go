@@ -69,7 +69,8 @@ func TestParsePruning(t *testing.T) {
 		t.Setenv(snapshotIntervalEnvVar, "10")
 		t.Setenv(pruneKeepBlocksEnvVar, "100")
 
-		if got, err := parsePruning(); err != nil || got.KeepBlocks != 100 {
+		got, err := parsePruning()
+		if err != nil || got.KeepBlocks != 100 {
 			t.Fatalf("parsePruning() = %+v, %v", got, err)
 		}
 	})
@@ -105,7 +106,8 @@ func TestOpenRepositoryAppliesPruning(t *testing.T) {
 			}
 
 			for range 5 {
-				if _, err := svc.Mine(context.Background(), nil); err != nil {
+				_, err := svc.Mine(context.Background(), nil)
+				if err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -183,7 +185,8 @@ func mineWorld(t *testing.T, n, interval int) snapshotWorld {
 			t.Fatal(err)
 		}
 
-		if _, err := svc.Mine(context.Background(), []domain.Transaction{tx}); err != nil {
+		_, err = svc.Mine(context.Background(), []domain.Transaction{tx})
+		if err != nil {
 			t.Fatalf("mine %d: %v", i, err)
 		}
 	}
@@ -198,7 +201,9 @@ func exportFile(t *testing.T, w snapshotWorld) (string, string) {
 	file := filepath.Join(t.TempDir(), "snap.json")
 
 	var out bytes.Buffer
-	if err := execute(context.Background(), discardLogger(), []string{"node", "--snapshot-export", file}, &out); err != nil {
+
+	err := execute(context.Background(), discardLogger(), []string{"node", "--snapshot-export", file}, &out)
+	if err != nil {
 		t.Fatalf("export: %v", err)
 	}
 
@@ -244,7 +249,9 @@ func expectNoBlocks(t *testing.T, dir string) {
 	t.Helper()
 
 	path := filepath.Join(dir, "chain.db")
-	if _, err := os.Stat(path); err != nil {
+
+	_, err := os.Stat(path)
+	if err != nil {
 		return
 	}
 
@@ -296,15 +303,19 @@ func TestSnapshotExportFails(t *testing.T) {
 		t.Setenv(dataDirEnvVar, dir)
 
 		file := filepath.Join(t.TempDir(), "s.json")
-		if err := execute(context.Background(), discardLogger(), []string{"node", "--snapshot-export", file}, &bytes.Buffer{}); err == nil {
+
+		err := execute(context.Background(), discardLogger(), []string{"node", "--snapshot-export", file}, &bytes.Buffer{})
+		if err == nil {
 			t.Fatal("want an error")
 		}
 
-		if _, err := os.Stat(filepath.Join(dir, "chain.db")); err == nil {
+		_, err = os.Stat(filepath.Join(dir, "chain.db"))
+		if err == nil {
 			t.Fatal("export created chain.db")
 		}
 
-		if _, err := os.Stat(file); err == nil {
+		_, err = os.Stat(file)
+		if err == nil {
 			t.Fatal("export wrote a file")
 		}
 	})
@@ -318,7 +329,8 @@ func TestSnapshotExportFails(t *testing.T) {
 			t.Fatalf("err = %v, want a no-snapshot error", err)
 		}
 
-		if _, err := os.Stat(file); err == nil {
+		_, err = os.Stat(file)
+		if err == nil {
 			t.Fatal("export wrote a file")
 		}
 	})
@@ -356,7 +368,9 @@ func TestSnapshotImportRestores(t *testing.T) {
 	}
 	// An uppercase hash is the same hash.
 	dir2 := t.TempDir()
-	if _, err := importInto(t, dir2, file, strings.ToUpper(snap.Hash)); err != nil {
+
+	_, err = importInto(t, dir2, file, strings.ToUpper(snap.Hash))
+	if err != nil {
 		t.Fatalf("import with uppercase hash: %v", err)
 	}
 }
@@ -374,7 +388,8 @@ func TestSnapshotImportIntoEmptyChainDB(t *testing.T) {
 
 	_ = repo.Close()
 
-	if _, err := importInto(t, dir, file, snap.Hash); err != nil {
+	_, err = importInto(t, dir, file, snap.Hash)
+	if err != nil {
 		t.Fatalf("import into empty chain.db: %v", err)
 	}
 }
@@ -395,7 +410,8 @@ func rewriteSnapshot(t *testing.T, file string, edit func(h []*domain.Block, s *
 
 	defer func() { _ = f.Close() }()
 
-	if err := storage.WriteSnapshotFile(f, h, s); err != nil {
+	err = storage.WriteSnapshotFile(f, h, s)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -436,7 +452,9 @@ func TestSnapshotImportRejects(t *testing.T) {
 		}
 
 		var m map[string]any
-		if err := json.Unmarshal(raw, &m); err != nil {
+
+		err = json.Unmarshal(raw, &m)
+		if err != nil {
 			t.Fatal(err)
 		}
 
@@ -445,7 +463,9 @@ func TestSnapshotImportRejects(t *testing.T) {
 		raw, _ = json.Marshal(m)
 
 		tampered := filepath.Join(t.TempDir(), "tampered.json")
-		if err := os.WriteFile(tampered, raw, 0o600); err != nil {
+
+		err = os.WriteFile(tampered, raw, 0o600)
+		if err != nil {
 			t.Fatal(err)
 		}
 
@@ -461,7 +481,9 @@ func TestSnapshotImportRejects(t *testing.T) {
 
 	t.Run("not a file", func(t *testing.T) {
 		dir := t.TempDir()
-		if _, err := importInto(t, dir, filepath.Join(t.TempDir(), "missing.json"), snap.Hash); err == nil {
+
+		_, err := importInto(t, dir, filepath.Join(t.TempDir(), "missing.json"), snap.Hash)
+		if err == nil {
 			t.Fatal("want an error")
 		}
 
@@ -511,7 +533,9 @@ func TestSnapshotImportRejects(t *testing.T) {
 		_, s := readFile(t, bad)
 
 		dir := t.TempDir()
-		if _, err := importInto(t, dir, bad, s.Hash); err == nil {
+
+		_, err := importInto(t, dir, bad, s.Hash)
+		if err == nil {
 			t.Fatal("want an error")
 		}
 
@@ -522,7 +546,9 @@ func TestSnapshotImportRejects(t *testing.T) {
 		t.Setenv(consensusEnvVar, "poa")
 
 		dir := t.TempDir()
-		if _, err := importInto(t, dir, file, snap.Hash); err == nil {
+
+		_, err := importInto(t, dir, file, snap.Hash)
+		if err == nil {
 			t.Fatal("want an error")
 		}
 
@@ -583,7 +609,8 @@ func TestSnapshotFlagsAreExclusive(t *testing.T) {
 		{"node", "--snapshot-import", "b", "--snapshot-hash", "x", "--reindex"},
 		{"node", "--snapshot-hash", "x"},
 	} {
-		if err := execute(context.Background(), discardLogger(), args, &bytes.Buffer{}); err == nil {
+		err := execute(context.Background(), discardLogger(), args, &bytes.Buffer{})
+		if err == nil {
 			t.Errorf("%v: want an error", args)
 		}
 	}
@@ -604,7 +631,9 @@ func TestSnapshotBootReachesTheStateOfTheFullNode(t *testing.T) {
 	}
 
 	dirB := t.TempDir()
-	if _, err := importInto(t, dirB, file, snap.Hash); err != nil {
+
+	_, err := importInto(t, dirB, file, snap.Hash)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -643,7 +672,8 @@ func TestSnapshotBootReachesTheStateOfTheFullNode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := importedSvc.ReplaceChain(ctx, fullChain); err != nil {
+	_, err = importedSvc.ReplaceChain(ctx, fullChain)
+	if err != nil {
 		t.Fatalf("ReplaceChain on the imported node: %v", err)
 	}
 
@@ -699,7 +729,8 @@ func TestSnapshotBootReachesTheStateOfTheFullNode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := fullSvc.ReplaceChain(ctx, blocks); err != nil {
+	_, err = fullSvc.ReplaceChain(ctx, blocks)
+	if err != nil {
 		t.Fatalf("ReplaceChain on the full node: %v", err)
 	}
 

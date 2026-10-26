@@ -141,11 +141,13 @@ func (n *Node) Accept(remote Hello) (Hello, error) {
 		return Hello{}, err
 	}
 
-	if err := Check(local, remote); err != nil {
+	err = Check(local, remote)
+	if err != nil {
 		return Hello{}, err
 	}
 
-	if err := n.book.Connect(remote, true); err != nil {
+	err = n.book.Connect(remote, true)
+	if err != nil {
 		return Hello{}, err
 	}
 

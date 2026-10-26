@@ -116,11 +116,13 @@ func NewServer(svc Chain, cfg Config) (*Server, error) {
 // ParseMiningTimeout reads a MINING_TIMEOUT value: a Go duration or integer seconds.
 // Empty, invalid and non-positive values yield DefaultMiningTimeout.
 func ParseMiningTimeout(raw string) time.Duration {
-	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+	d, err := time.ParseDuration(raw)
+	if err == nil && d > 0 {
 		return d
 	}
 
-	if secs, err := strconv.Atoi(raw); err == nil && secs > 0 {
+	secs, err := strconv.Atoi(raw)
+	if err == nil && secs > 0 {
 		return time.Duration(secs) * time.Second
 	}
 
@@ -482,7 +484,9 @@ func (s *Server) handleGetTxProof(w http.ResponseWriter, r *http.Request) {
 // handleGetBalance serves the balance and unspent outputs for addr.
 func (s *Server) handleGetBalance(w http.ResponseWriter, r *http.Request) {
 	addr := r.PathValue("addr")
-	if err := wallet.ValidateAddress(addr); err != nil {
+
+	err := wallet.ValidateAddress(addr)
+	if err != nil {
 		respondWithJSON(w, http.StatusBadRequest, errorResponse{
 			Error: err.Error(),
 			Code:  invalidAddressCode,
@@ -557,7 +561,8 @@ func (s *Server) handleSubmitTx(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.chain.Submit(tx); err != nil {
+	err := s.chain.Submit(tx)
+	if err != nil {
 		respondWithSubmitError(w, err)
 		return
 	}
@@ -570,7 +575,9 @@ func (s *Server) handleSubmitTx(w http.ResponseWriter, r *http.Request) {
 // On failure it answers 413 or 400 and reports false.
 func decodeJSONBody(w http.ResponseWriter, r *http.Request, v any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes())
-	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+
+	err := json.NewDecoder(r.Body).Decode(v)
+	if err != nil {
 		if respondIfTooLarge(w, err) {
 			return false
 		}
@@ -605,7 +612,8 @@ func checkTx(w http.ResponseWriter, tx *domain.Transaction) bool {
 		tx.ID = tx.CalculateHash()
 	}
 
-	if err := tx.Validate(); err != nil {
+	err := tx.Validate()
+	if err != nil {
 		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid transaction: " + err.Error()})
 		return false
 	}

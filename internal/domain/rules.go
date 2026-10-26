@@ -104,11 +104,13 @@ func ValidateMerkleRoot(b *Block) error {
 
 // ValidateBlockRules applies the structural block rules (size, merkle root and timestamp).
 func ValidateBlockRules(b, parent *Block, now time.Time) error {
-	if err := ValidateSize(b, MaxBlockBytes()); err != nil {
+	err := ValidateSize(b, MaxBlockBytes())
+	if err != nil {
 		return err
 	}
 
-	if err := ValidateMerkleRoot(b); err != nil {
+	err = ValidateMerkleRoot(b)
+	if err != nil {
 		return err
 	}
 

@@ -81,11 +81,13 @@ func (w *Wallet) Save(path, password string) error {
 	salt := make([]byte, saltLen)
 	nonce := make([]byte, nonceLen)
 
-	if _, err := rand.Read(salt); err != nil {
+	_, err := rand.Read(salt)
+	if err != nil {
 		return fmt.Errorf("wallet: generating salt: %w", err)
 	}
 
-	if _, err := rand.Read(nonce); err != nil {
+	_, err = rand.Read(nonce)
+	if err != nil {
 		return fmt.Errorf("wallet: generating nonce: %w", err)
 	}
 
@@ -129,27 +131,33 @@ func (w *Wallet) Save(path, password string) error {
 		_ = tmp.Close()
 		_ = os.Remove(tmpName)
 	}
-	if err := tmp.Chmod(0o600); err != nil {
+
+	err = tmp.Chmod(0o600)
+	if err != nil {
 		cleanup()
 		return fmt.Errorf("wallet: setting permissions: %w", err)
 	}
 
-	if _, err := tmp.Write(data); err != nil {
+	_, err = tmp.Write(data)
+	if err != nil {
 		cleanup()
 		return fmt.Errorf("wallet: writing keystore: %w", err)
 	}
 
-	if err := tmp.Sync(); err != nil {
+	err = tmp.Sync()
+	if err != nil {
 		cleanup()
 		return fmt.Errorf("wallet: syncing keystore: %w", err)
 	}
 
-	if err := tmp.Close(); err != nil {
+	err = tmp.Close()
+	if err != nil {
 		_ = os.Remove(tmpName) // best-effort cleanup; the close error is the one to report
 		return fmt.Errorf("wallet: closing keystore: %w", err)
 	}
 
-	if err := os.Rename(tmpName, path); err != nil {
+	err = os.Rename(tmpName, path)
+	if err != nil {
 		_ = os.Remove(tmpName) // best-effort cleanup; the rename error is the one to report
 		return fmt.Errorf("wallet: replacing keystore: %w", err)
 	}
@@ -165,7 +173,9 @@ func Load(path, password string) (*Wallet, error) {
 	}
 
 	var ks keystoreFile
-	if err := json.Unmarshal(raw, &ks); err != nil {
+
+	err = json.Unmarshal(raw, &ks)
+	if err != nil {
 		return nil, invalid("malformed json: %v", err)
 	}
 

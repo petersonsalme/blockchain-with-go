@@ -39,7 +39,9 @@ func writeFixture(t *testing.T) ([]*domain.Block, storage.Snapshot, []byte) {
 	headers, snap := fileFixture()
 
 	var buf bytes.Buffer
-	if err := storage.WriteSnapshotFile(&buf, headers, snap); err != nil {
+
+	err := storage.WriteSnapshotFile(&buf, headers, snap)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -90,7 +92,9 @@ func TestSnapshotFileShapeAndOrder(t *testing.T) {
 			Amount  uint64 `json:"amount"`
 		} `json:"utxos"`
 	}
-	if err := json.Unmarshal(data, &raw); err != nil {
+
+	err := json.Unmarshal(data, &raw)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -120,7 +124,9 @@ func TestReadSnapshotFileRejects(t *testing.T) {
 	_, _, data := writeFixture(t)
 	mutate := func(f func(m map[string]any)) []byte {
 		var m map[string]any
-		if err := json.Unmarshal(data, &m); err != nil {
+
+		err := json.Unmarshal(data, &m)
+		if err != nil {
 			t.Fatal(err)
 		}
 
@@ -161,7 +167,9 @@ func TestReadSnapshotFileRejects(t *testing.T) {
 
 func TestCheckHeaders(t *testing.T) {
 	good, _ := fileFixture()
-	if err := storage.CheckHeaders(good); err != nil {
+
+	err := storage.CheckHeaders(good)
+	if err != nil {
 		t.Fatalf("good headers: %v", err)
 	}
 
@@ -172,7 +180,9 @@ func TestCheckHeaders(t *testing.T) {
 	unsealed[2].PrevHash = unsealed[1].Hash
 
 	unsealed[2].Hash = unsealed[2].CalculateHash()
-	if err := storage.CheckHeaders(unsealed); err != nil {
+
+	err = storage.CheckHeaders(unsealed)
+	if err != nil {
 		t.Fatalf("unsealed genesis: %v", err)
 	}
 
@@ -196,7 +206,8 @@ func TestCheckHeaders(t *testing.T) {
 		"nonce":    func(h []*domain.Block) []*domain.Block { h[2].Nonce++; return h },
 	}
 	for name, f := range bad {
-		if err := storage.CheckHeaders(f(clone())); !errors.Is(err, storage.ErrConflict) {
+		err := storage.CheckHeaders(f(clone()))
+		if !errors.Is(err, storage.ErrConflict) {
 			t.Errorf("%s: err = %v, want ErrConflict", name, err)
 		}
 	}

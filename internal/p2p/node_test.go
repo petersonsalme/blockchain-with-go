@@ -38,15 +38,19 @@ func chain2() fakeChain {
 
 func TestNewNodeValidation(t *testing.T) {
 	book := NewBook(Limits{}, nil)
-	if _, err := NewNode(chain2(), book, "short", ""); !errors.Is(err, ErrBadHello) {
+
+	_, err := NewNode(chain2(), book, "short", "")
+	if !errors.Is(err, ErrBadHello) {
 		t.Fatalf("err = %v", err)
 	}
 
-	if _, err := NewNode(chain2(), book, idA, "nope"); !errors.Is(err, ErrBadAddr) {
+	_, err = NewNode(chain2(), book, idA, "nope")
+	if !errors.Is(err, ErrBadAddr) {
 		t.Fatalf("err = %v", err)
 	}
 
-	if _, err := NewNode(chain2(), book, idA, ""); err != nil {
+	_, err = NewNode(chain2(), book, idA, "")
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -78,11 +82,14 @@ func TestNodeHello(t *testing.T) {
 	boom := errors.New("boom")
 
 	n, _ = NewNode(fakeChain{err: boom}, NewBook(Limits{}, nil), idA, "")
-	if _, err := n.Hello(); !errors.Is(err, boom) {
+
+	_, err = n.Hello()
+	if !errors.Is(err, boom) {
 		t.Fatalf("err = %v", err)
 	}
 
-	if _, err := n.Accept(hello(idB)); !errors.Is(err, boom) {
+	_, err = n.Accept(hello(idB))
+	if !errors.Is(err, boom) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -94,7 +101,9 @@ func (noGenesis) BlockByHeight(int) (*domain.Block, error) { return nil, errors.
 
 func TestNodeHelloGenesisError(t *testing.T) {
 	n, _ := NewNode(noGenesis{chain2()}, NewBook(Limits{}, nil), idA, "")
-	if _, err := n.Hello(); err == nil {
+
+	_, err := n.Hello()
+	if err == nil {
 		t.Fatal("want error")
 	}
 }
@@ -106,7 +115,9 @@ func TestNodeAccept(t *testing.T) {
 	bad := hello(idB)
 
 	bad.GenesisHash = tip
-	if _, err := n.Accept(bad); !errors.Is(err, ErrGenesisMismatch) {
+
+	_, err := n.Accept(bad)
+	if !errors.Is(err, ErrGenesisMismatch) {
 		t.Fatalf("err = %v", err)
 	}
 
@@ -114,7 +125,8 @@ func TestNodeAccept(t *testing.T) {
 		t.Fatal("rejected hello changed the book")
 	}
 
-	if _, err := n.Accept(hello(idA)); !errors.Is(err, ErrSelf) {
+	_, err = n.Accept(hello(idA))
+	if !errors.Is(err, ErrSelf) {
 		t.Fatalf("err = %v", err)
 	}
 
@@ -140,7 +152,9 @@ func TestNodeAccept(t *testing.T) {
 	}
 
 	other := hello(nid(9))
-	if _, err := n.Accept(other); !errors.Is(err, ErrPeerLimit) {
+
+	_, err = n.Accept(other)
+	if !errors.Is(err, ErrPeerLimit) {
 		t.Fatalf("err = %v", err)
 	}
 
@@ -156,7 +170,9 @@ func (noTip) Tip() (*domain.Block, error) { return nil, errors.New("no tip") }
 
 func TestNodeHelloTipError(t *testing.T) {
 	n, _ := NewNode(noTip{chain2()}, NewBook(Limits{}, nil), idA, "")
-	if _, err := n.Hello(); err == nil {
+
+	_, err := n.Hello()
+	if err == nil {
 		t.Fatal("want error")
 	}
 }

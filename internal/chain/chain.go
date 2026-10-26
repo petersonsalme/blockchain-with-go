@@ -29,11 +29,14 @@ func GenerateBlockWithContext(ctx context.Context, c consensus.Consensus, histor
 	estimate := newBlock
 
 	estimate.Hash = strings.Repeat("0", 64)
-	if err := domain.ValidateSize(&estimate, domain.MaxBlockBytes()); err != nil {
+
+	err := domain.ValidateSize(&estimate, domain.MaxBlockBytes())
+	if err != nil {
 		return nil, err
 	}
 
-	if err := c.Seal(ctx, history, &newBlock); err != nil {
+	err = c.Seal(ctx, history, &newBlock)
+	if err != nil {
 		return nil, err
 	}
 

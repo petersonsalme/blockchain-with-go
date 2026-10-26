@@ -131,7 +131,9 @@ func TestBuildTransferSignsEveryInput(t *testing.T) {
 
 	for i := range tx.Inputs {
 		spent := domain.TxOut{Amount: utxos[i].Amount, Address: w.Address()}
-		if err := domain.VerifyInputSignature(&tx, i, spent); err != nil {
+
+		err := domain.VerifyInputSignature(&tx, i, spent)
+		if err != nil {
 			t.Errorf("VerifyInputSignature(input %d) failed: %v", i, err)
 		}
 	}
@@ -140,7 +142,8 @@ func TestBuildTransferSignsEveryInput(t *testing.T) {
 		t.Errorf("tx.ID = %q, want %q", tx.ID, tx.CalculateHash())
 	}
 
-	if err := tx.Validate(); err != nil {
+	err = tx.Validate()
+	if err != nil {
 		t.Errorf("tx.Validate() failed: %v", err)
 	}
 

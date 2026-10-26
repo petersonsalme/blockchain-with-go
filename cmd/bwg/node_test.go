@@ -93,7 +93,8 @@ func TestRunFailsOnInvalidPort(t *testing.T) {
 	t.Setenv("PORT", "not-a-port")
 	t.Setenv("POW_DIFFICULTY", "1")
 
-	if err := run(context.Background(), discardLogger()); err == nil {
+	err := run(context.Background(), discardLogger())
+	if err == nil {
 		t.Fatal("run succeeded with an invalid PORT, want error")
 	}
 }
@@ -120,7 +121,9 @@ func TestFatalIf(t *testing.T) {
 	}
 
 	var rec map[string]any
-	if err := json.Unmarshal(buf.Bytes(), &rec); err != nil {
+
+	err := json.Unmarshal(buf.Bytes(), &rec)
+	if err != nil {
 		t.Fatalf("log is not JSON: %v: %q", err, buf.String())
 	}
 
@@ -148,7 +151,8 @@ func TestRunLogsListeningAddress(t *testing.T) {
 
 	cancel()
 
-	if err := <-done; err != nil {
+	err := <-done
+	if err != nil {
 		t.Fatalf("run returned %v, want nil", err)
 	}
 
@@ -194,7 +198,8 @@ func TestShutdownContextDeadline(t *testing.T) {
 func TestBootstrapFailsWithoutDotEnv(t *testing.T) {
 	t.Chdir(t.TempDir())
 
-	if err := bootstrap(context.Background(), discardLogger()); err == nil {
+	err := bootstrap(context.Background(), discardLogger())
+	if err == nil {
 		t.Fatal("bootstrap succeeded without a .env file, want error")
 	}
 }
@@ -203,7 +208,9 @@ func TestBootstrapLoadsDotEnvAndRuns(t *testing.T) {
 	port := freePort(t)
 
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("PORT="+port+"\nPOW_DIFFICULTY=1\n"), 0o600); err != nil {
+
+	err := os.WriteFile(filepath.Join(dir, ".env"), []byte("PORT="+port+"\nPOW_DIFFICULTY=1\n"), 0o600)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -224,7 +231,8 @@ func TestBootstrapLoadsDotEnvAndRuns(t *testing.T) {
 
 	up := false
 	for i := 0; i < 100 && !up; i++ {
-		if resp, err := getURL(url); err == nil {
+		resp, err := getURL(url)
+		if err == nil {
 			_ = resp.Body.Close() // response body of a test request; close error is irrelevant
 			up = true
 		} else {
@@ -238,7 +246,8 @@ func TestBootstrapLoadsDotEnvAndRuns(t *testing.T) {
 		t.Fatal("server configured from .env did not come up")
 	}
 
-	if err := <-done; err != nil {
+	err = <-done
+	if err != nil {
 		t.Fatalf("bootstrap returned %v, want nil", err)
 	}
 }
@@ -341,7 +350,9 @@ func TestBuildServiceGenesisAllocations(t *testing.T) {
 		t.Setenv(genesisAllocationsEnvVar, a+":7")
 
 		repo := memory.New()
-		if _, err := newService(repo, eng); err != nil {
+
+		_, err := newService(repo, eng)
+		if err != nil {
 			t.Fatal(err)
 		}
 
@@ -355,7 +366,9 @@ func TestBuildServiceGenesisAllocations(t *testing.T) {
 		t.Setenv(genesisAllocationsEnvVar, "")
 
 		repo := memory.New()
-		if _, err := newService(repo, eng); err != nil {
+
+		_, err := newService(repo, eng)
+		if err != nil {
 			t.Fatal(err)
 		}
 
@@ -369,7 +382,9 @@ func TestBuildServiceGenesisAllocations(t *testing.T) {
 		t.Setenv(genesisAllocationsEnvVar, "")
 
 		repo := memory.New()
-		if _, err := newService(repo, eng); err != nil {
+
+		_, err := newService(repo, eng)
+		if err != nil {
 			t.Fatal(err)
 		}
 
@@ -377,7 +392,8 @@ func TestBuildServiceGenesisAllocations(t *testing.T) {
 
 		t.Setenv(genesisAllocationsEnvVar, a+":7")
 
-		if _, err := newService(repo, eng); err != nil {
+		_, err = newService(repo, eng)
+		if err != nil {
 			t.Fatal(err)
 		}
 
@@ -395,7 +411,8 @@ func TestOpenRepository(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer func() {
-			if err := closeRepo(); err != nil {
+			err := closeRepo()
+			if err != nil {
 				t.Fatal(err)
 			}
 		}()
@@ -414,7 +431,8 @@ func TestOpenRepository(t *testing.T) {
 		}
 
 		defer func() {
-			if err := closeRepo(); err != nil {
+			err := closeRepo()
+			if err != nil {
 				t.Fatal(err)
 			}
 		}()
@@ -491,7 +509,9 @@ func TestRunServesAndShutsDownGracefullyWithDataDir(t *testing.T) {
 	}
 
 	dbPath := filepath.Join(dataDir, "chain.db")
-	if info, err := os.Stat(dbPath); err != nil || info.IsDir() {
+
+	info, err := os.Stat(dbPath)
+	if err != nil || info.IsDir() {
 		t.Fatalf("chain.db does not exist: %v", err)
 	}
 }
@@ -614,7 +634,8 @@ func TestBuildServiceMinerAddress(t *testing.T) {
 	t.Run("invalid stops the service at startup", func(t *testing.T) {
 		t.Setenv(minerAddressEnvVar, "bad")
 
-		if _, err := newService(memory.New(), eng); err == nil || !strings.Contains(err.Error(), "MINER_ADDRESS") {
+		_, err := newService(memory.New(), eng)
+		if err == nil || !strings.Contains(err.Error(), "MINER_ADDRESS") {
 			t.Fatalf("err = %v, want one citing MINER_ADDRESS", err)
 		}
 	})

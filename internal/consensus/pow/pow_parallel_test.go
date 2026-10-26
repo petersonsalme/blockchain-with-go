@@ -58,7 +58,8 @@ func TestSealParallelProducesVerifiableBlock(t *testing.T) {
 		p := powpkg.New(3).WithWorkers(w)
 		b := &domain.Block{Index: 1, Timestamp: genesis.Timestamp.Add(time.Second), PrevHash: genesis.Hash}
 
-		if err := p.Seal(context.Background(), history, b); err != nil {
+		err := p.Seal(context.Background(), history, b)
+		if err != nil {
 			t.Fatalf("workers=%d: Seal: %v", w, err)
 		}
 
@@ -66,7 +67,8 @@ func TestSealParallelProducesVerifiableBlock(t *testing.T) {
 			t.Fatalf("workers=%d: difficulty %d", w, b.Difficulty)
 		}
 
-		if err := p.Verify(history, b); err != nil {
+		err = p.Verify(history, b)
+		if err != nil {
 			t.Fatalf("workers=%d: Verify: %v", w, err)
 		}
 	}
@@ -114,7 +116,8 @@ func TestMineParallelSucceedsAndLeaksNothing(t *testing.T) {
 	for _, w := range []int{1, 3, 8} {
 		b := parallelBlock()
 
-		if err := powpkg.MineParallel(context.Background(), b, 3, w); err != nil {
+		err := powpkg.MineParallel(context.Background(), b, 3, w)
+		if err != nil {
 			t.Fatalf("workers=%d: %v", w, err)
 		}
 
@@ -158,11 +161,13 @@ func TestMineParallelPartitionsNoncesAndCancelsLosers(t *testing.T) {
 func TestMineParallelOneWorkerMatchesSequential(t *testing.T) {
 	seq, par := parallelBlock(), parallelBlock()
 
-	if err := powpkg.MineWithContext(context.Background(), seq, 3); err != nil {
+	err := powpkg.MineWithContext(context.Background(), seq, 3)
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	if err := powpkg.MineParallel(context.Background(), par, 3, 1); err != nil {
+	err = powpkg.MineParallel(context.Background(), par, 3, 1)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -176,7 +181,8 @@ func TestMineParallelNormalisesArguments(t *testing.T) {
 		b := parallelBlock()
 
 		//nolint:staticcheck // a nil context is part of the contract, as in MineWithContext.
-		if err := powpkg.MineParallel(nil, b, -1, w); err != nil {
+		err := powpkg.MineParallel(nil, b, -1, w)
+		if err != nil {
 			t.Fatalf("workers=%d: %v", w, err)
 		}
 

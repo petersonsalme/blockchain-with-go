@@ -16,7 +16,9 @@ type Wallet struct {
 // New generates a wallet using crypto/rand.
 func New() (*Wallet, error) {
 	seed := make([]byte, ed25519.SeedSize)
-	if _, err := rand.Read(seed); err != nil {
+
+	_, err := rand.Read(seed)
+	if err != nil {
 		return nil, fmt.Errorf("wallet: generating seed: %w", err)
 	}
 

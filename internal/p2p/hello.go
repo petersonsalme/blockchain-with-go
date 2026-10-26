@@ -43,7 +43,8 @@ func Check(local, remote Hello) error {
 	}
 
 	if remote.ListenAddr != "" {
-		if _, err := NormalizeAddr(remote.ListenAddr); err != nil {
+		_, err := NormalizeAddr(remote.ListenAddr)
+		if err != nil {
 			return ErrBadHello
 		}
 	}
@@ -82,7 +83,9 @@ func isHex(s string, n int) bool {
 // NewNodeID returns 16 random bytes as 32 lowercase hex characters.
 func NewNodeID() (string, error) {
 	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
+
+	_, err := rand.Read(b[:])
+	if err != nil {
 		return "", err
 	}
 

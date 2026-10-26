@@ -53,7 +53,9 @@ func WriteSnapshotFile(w io.Writer, headers []*domain.Block, s Snapshot) error {
 // SnapshotHash(blockHash, utxos).
 func ReadSnapshotFile(r io.Reader) ([]*domain.Block, Snapshot, error) {
 	var f snapshotFile
-	if err := json.NewDecoder(r).Decode(&f); err != nil {
+
+	err := json.NewDecoder(r).Decode(&f)
+	if err != nil {
 		return nil, Snapshot{}, fmt.Errorf("%w: %w", ErrInvalidSnapshot, err)
 	}
 

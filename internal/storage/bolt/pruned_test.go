@@ -111,7 +111,8 @@ var _ = Describe("Bolt pruned database", func() {
 		raw, err := bbolt.Open(dbPath, 0o600, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(raw.Update(func(tx *bbolt.Tx) error {
-			if err := tx.DeleteBucket([]byte("addrutxo")); err != nil {
+			err := tx.DeleteBucket([]byte("addrutxo"))
+			if err != nil {
 				return err
 			}
 

@@ -52,7 +52,8 @@ func TestLimitsDefaults(t *testing.T) {
 func TestBookInboundLimit(t *testing.T) {
 	b := NewBook(Limits{MaxInbound: 2, MaxOutbound: 1}, newClock().now)
 	for i := 1; i <= 2; i++ {
-		if err := b.Connect(hAt(i, ""), true); err != nil {
+		err := b.Connect(hAt(i, ""), true)
+		if err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -60,7 +61,9 @@ func TestBookInboundLimit(t *testing.T) {
 	before := b.Peers()
 
 	addrsBefore := b.Addrs()
-	if err := b.Connect(hAt(3, "http://c:1"), true); !errors.Is(err, ErrPeerLimit) {
+
+	err := b.Connect(hAt(3, "http://c:1"), true)
+	if !errors.Is(err, ErrPeerLimit) {
 		t.Fatalf("err = %v", err)
 	}
 
@@ -68,7 +71,8 @@ func TestBookInboundLimit(t *testing.T) {
 		t.Fatal("book changed on refusal")
 	}
 	// the outbound slot is independent
-	if err := b.Connect(hAt(4, "http://d:1"), false); err != nil {
+	err = b.Connect(hAt(4, "http://d:1"), false)
+	if err != nil {
 		t.Fatal(err)
 	}
 }
@@ -79,7 +83,9 @@ func TestBookOutboundLimit(t *testing.T) {
 	_ = b.Connect(hAt(2, "http://b:1"), false)
 
 	before := b.Peers()
-	if err := b.Connect(hAt(3, "http://c:1"), false); !errors.Is(err, ErrPeerLimit) {
+
+	err := b.Connect(hAt(3, "http://c:1"), false)
+	if !errors.Is(err, ErrPeerLimit) {
 		t.Fatalf("err = %v", err)
 	}
 
@@ -91,7 +97,8 @@ func TestBookOutboundLimit(t *testing.T) {
 		t.Fatalf("addrs = %v", got)
 	}
 
-	if err := b.Connect(hAt(5, ""), true); err != nil {
+	err = b.Connect(hAt(5, ""), true)
+	if err != nil {
 		t.Fatal(err)
 	}
 }
@@ -100,7 +107,9 @@ func TestBookReconnectRefreshes(t *testing.T) {
 	c := newClock()
 
 	b := NewBook(Limits{MaxInbound: 1, MaxOutbound: 1}, c.now)
-	if err := b.Connect(hAt(1, "http://a:1"), true); err != nil {
+
+	err := b.Connect(hAt(1, "http://a:1"), true)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -110,7 +119,8 @@ func TestBookReconnectRefreshes(t *testing.T) {
 	h.Height = 9
 	h.TipHash = idB + idB
 	// at the limit and even with the other direction: only refreshes
-	if err := b.Connect(h, false); err != nil {
+	err = b.Connect(h, false)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -119,14 +129,17 @@ func TestBookReconnectRefreshes(t *testing.T) {
 		t.Fatalf("peers = %+v", ps)
 	}
 
-	if err := b.Connect(hAt(2, ""), true); !errors.Is(err, ErrPeerLimit) {
+	err = b.Connect(hAt(2, ""), true)
+	if !errors.Is(err, ErrPeerLimit) {
 		t.Fatalf("second inbound: %v", err)
 	}
 }
 
 func TestBookConnectAddsListenAddr(t *testing.T) {
 	b := NewBook(Limits{}, nil)
-	if err := b.Connect(hAt(1, "http://A:1/"), true); err != nil {
+
+	err := b.Connect(hAt(1, "http://A:1/"), true)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -138,7 +151,8 @@ func TestBookConnectAddsListenAddr(t *testing.T) {
 		t.Fatalf("addr = %q", got)
 	}
 
-	if err := b.Connect(hAt(2, "bad"), true); !errors.Is(err, ErrBadAddr) {
+	err = b.Connect(hAt(2, "bad"), true)
+	if !errors.Is(err, ErrBadAddr) {
 		t.Fatalf("err = %v", err)
 	}
 
@@ -173,7 +187,8 @@ func TestBookAddAddrs(t *testing.T) {
 		t.Fatal("Addrs leaks internal state")
 	}
 	// a full book still lets a connected peer in, without its address
-	if err := b.Connect(hAt(1, "http://z:1"), true); err != nil {
+	err := b.Connect(hAt(1, "http://z:1"), true)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -254,7 +269,8 @@ func TestBookExpire(t *testing.T) {
 		t.Fatalf("expired = %d", n)
 	}
 	// slot freed
-	if err := b.Connect(hAt(1, ""), true); err != nil {
+	err := b.Connect(hAt(1, ""), true)
+	if err != nil {
 		t.Fatal(err)
 	}
 }

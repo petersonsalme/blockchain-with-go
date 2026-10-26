@@ -87,7 +87,9 @@ func BlockDelta(view StateView, b *domain.Block) (Delta, error) {
 
 	for i := range b.Transactions {
 		tx := &b.Transactions[i]
-		if err := domain.ValidateContractOp(tx.Contract); err != nil {
+
+		err := domain.ValidateContractOp(tx.Contract)
+		if err != nil {
 			return Delta{}, fmt.Errorf("transaction %d: %w", i, err)
 		}
 
@@ -95,7 +97,6 @@ func BlockDelta(view StateView, b *domain.Block) (Delta, error) {
 			continue
 		}
 
-		var err error
 		if tx.Contract.Kind == domain.ContractDeploy {
 			err = d.deploy(view, tx)
 		} else {
@@ -126,7 +127,9 @@ func (d *Delta) deploy(view StateView, tx *domain.Transaction) error {
 	id := tx.CalculateHash()
 
 	code, _ := hex.DecodeString(tx.Contract.Code)
-	if err := ValidateCode(code); err != nil {
+
+	err := ValidateCode(code)
+	if err != nil {
 		return err
 	}
 

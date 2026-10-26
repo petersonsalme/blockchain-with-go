@@ -49,7 +49,9 @@ func serve(n *Node, hellos *atomic.Int64) http.Handler {
 		hellos.Add(1)
 
 		var remote Hello
-		if err := json.NewDecoder(r.Body).Decode(&remote); err != nil {
+
+		err := json.NewDecoder(r.Body).Decode(&remote)
+		if err != nil {
 			http.Error(w, "bad", http.StatusBadRequest)
 			return
 		}
@@ -466,7 +468,9 @@ func TestRoundExpiresPeersNotSeenForThreeIntervals(t *testing.T) {
 	}
 
 	n.now = clock
-	if _, err := n.Accept(hello(idB)); err != nil {
+
+	_, err = n.Accept(hello(idB))
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -751,7 +755,8 @@ func TestHelloAnnouncesAnUnsealedGenesisByItsCommittedHash(t *testing.T) {
 		t.Fatalf("hello = %+v", h)
 	}
 
-	if err := Check(h, Hello{Version: 1, NodeID: idB, GenesisHash: h.GenesisHash, TipHash: h.TipHash}); err != nil {
+	err = Check(h, Hello{Version: 1, NodeID: idB, GenesisHash: h.GenesisHash, TipHash: h.TipHash})
+	if err != nil {
 		t.Fatal(err)
 	}
 }

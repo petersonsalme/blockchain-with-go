@@ -49,7 +49,9 @@ func savedWallet(t *testing.T) (*wallet.Wallet, string) {
 	}
 
 	path := filepath.Join(t.TempDir(), "wallet.key")
-	if err := w.Save(path, "pw"); err != nil {
+
+	err = w.Save(path, "pw")
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -80,7 +82,8 @@ func TestWalletSendSubmitsSignedTransaction(t *testing.T) {
 		t.Fatalf("expected 64 hex chars, got %q (len %d)", txID, len(txID))
 	}
 
-	if _, err := hex.DecodeString(txID); err != nil {
+	_, err = hex.DecodeString(txID)
+	if err != nil {
 		t.Fatalf("invalid hex string %q: %v", txID, err)
 	}
 

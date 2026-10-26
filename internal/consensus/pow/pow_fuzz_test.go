@@ -140,12 +140,15 @@ func FuzzVerifyTamper(f *testing.F) {
 			b.Transactions = append(b.Transactions, tx)
 		}
 
-		if err := powpkg.MineWithContext(context.Background(), &b, int(diff%3)); err != nil {
+		err := powpkg.MineWithContext(context.Background(), &b, int(diff%3))
+		if err != nil {
 			t.Fatal(err)
 		}
 
 		p := powpkg.New(int(diff % 3))
-		if err := p.Verify([]*domain.Block{prev}, &b); err != nil {
+
+		err = p.Verify([]*domain.Block{prev}, &b)
+		if err != nil {
 			t.Fatalf("mined block rejected: %v", err)
 		}
 
@@ -153,7 +156,8 @@ func FuzzVerifyTamper(f *testing.F) {
 
 		want := tamper(&tampered, sel)
 		if errors.Is(want, errTxEdit) {
-			if err := p.Verify([]*domain.Block{prev}, &tampered); err != nil {
+			err := p.Verify([]*domain.Block{prev}, &tampered)
+			if err != nil {
 				t.Fatalf("tamper %d: Verify = %v, want nil", sel%13, err)
 			}
 
@@ -164,7 +168,8 @@ func FuzzVerifyTamper(f *testing.F) {
 			return
 		}
 
-		if err := p.Verify([]*domain.Block{prev}, &tampered); !errors.Is(err, want) {
+		err = p.Verify([]*domain.Block{prev}, &tampered)
+		if !errors.Is(err, want) {
 			t.Fatalf("tamper %d: Verify = %v, want %v", sel%13, err, want)
 		}
 	})

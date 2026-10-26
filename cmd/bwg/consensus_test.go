@@ -35,7 +35,9 @@ func poaEnv(t *testing.T, validators func(self *wallet.Wallet) string) (*wallet.
 	}
 
 	path := filepath.Join(t.TempDir(), "validator.key")
-	if err := w.Save(path, testPassword); err != nil {
+
+	err = w.Save(path, testPassword)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -119,7 +121,9 @@ func TestNewConsensusPoA(t *testing.T) {
 	}
 
 	b := &domain.Block{Index: 1, Timestamp: time.Unix(1, 0)}
-	if err := eng.Seal(context.Background(), nil, b); err != nil {
+
+	err = eng.Seal(context.Background(), nil, b)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -222,7 +226,9 @@ func mineFirstBlock(t *testing.T) []domain.Block {
 		Outputs:   []domain.TxOut{{Amount: 10, Address: dest.Address()}},
 		Timestamp: time.Unix(1700000000, 0).UTC(),
 	}
-	if err := domain.SignInput(&tx, 0, funder); err != nil {
+
+	err = domain.SignInput(&tx, 0, funder)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -245,7 +251,9 @@ func mineFirstBlock(t *testing.T) []domain.Block {
 	defer func() { _ = resp.Body.Close() }() // response body of a test request; close error is irrelevant
 
 	var got struct{ Blocks []domain.Block }
-	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+
+	err = json.NewDecoder(resp.Body).Decode(&got)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -271,7 +279,8 @@ func TestEndToEndPoA(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := verifier.Verify([]*domain.Block{&blocks[0]}, &blocks[1]); err != nil {
+	err = verifier.Verify([]*domain.Block{&blocks[0]}, &blocks[1])
+	if err != nil {
 		t.Fatalf("poa.Verify rejected block 1: %v", err)
 	}
 }
@@ -288,7 +297,8 @@ func TestEndToEndPoWLeavesSealFieldsEmpty(t *testing.T) {
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+	err := os.WriteFile(path, []byte(content), 0o600)
+	if err != nil {
 		t.Fatal(err)
 	}
 }

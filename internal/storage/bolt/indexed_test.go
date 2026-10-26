@@ -100,7 +100,8 @@ var _ = Describe("Bolt IndexedRepository", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(legacy.Update(func(tx *bbolt.Tx) error {
 			for _, name := range []string{"blocks", "hashes"} {
-				if _, err := tx.CreateBucket([]byte(name)); err != nil {
+				_, err := tx.CreateBucket([]byte(name))
+				if err != nil {
 					return err
 				}
 			}

@@ -134,12 +134,14 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 // flushEvent renews the write deadline, runs write (if any) and flushes.
 // Writers without deadline support, such as httptest.ResponseRecorder, are served without one.
 func flushEvent(rc *http.ResponseController, write func() error) error {
-	if err := rc.SetWriteDeadline(time.Now().Add(eventWriteTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+	err := rc.SetWriteDeadline(time.Now().Add(eventWriteTimeout))
+	if err != nil && !errors.Is(err, http.ErrNotSupported) {
 		return err
 	}
 
 	if write != nil {
-		if err := write(); err != nil {
+		err := write()
+		if err != nil {
 			return err
 		}
 	}

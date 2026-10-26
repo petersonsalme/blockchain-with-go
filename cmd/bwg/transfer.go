@@ -24,7 +24,8 @@ func buildTransfer(w *wallet.Wallet, utxos []client.Utxo, to string, amount, fee
 		return domain.Transaction{}, errZeroAmount
 	}
 
-	if err := wallet.ValidateAddress(to); err != nil {
+	err := wallet.ValidateAddress(to)
+	if err != nil {
 		return domain.Transaction{}, fmt.Errorf("--to: %w", err)
 	}
 
@@ -59,7 +60,8 @@ func buildTransfer(w *wallet.Wallet, utxos []client.Utxo, to string, amount, fee
 	}
 
 	for i := range tx.Inputs {
-		if err := domain.SignInput(&tx, i, w); err != nil {
+		err := domain.SignInput(&tx, i, w)
+		if err != nil {
 			return domain.Transaction{}, err
 		}
 	}

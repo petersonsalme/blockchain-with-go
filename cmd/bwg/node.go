@@ -93,7 +93,8 @@ func runSnapshot(cmd *cobra.Command, reindex bool, export, imp, hash string) err
 		return errors.New("use exactly one of --snapshot-export or --snapshot-import (with --snapshot-hash), and not --reindex")
 	}
 
-	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
+	err := godotenv.Load()
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 
@@ -116,7 +117,8 @@ func runNode(ctx context.Context, logger *slog.Logger, reindex bool, stdout io.W
 // reindexData loads .env when present, then rebuilds the indexes of DATA_DIR/chain.db
 // and prints the tip height. It never creates DATA_DIR and never opens a port.
 func reindexData(stdout io.Writer) error {
-	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
+	err := godotenv.Load()
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 
@@ -132,7 +134,8 @@ func reindexData(stdout io.Writer) error {
 
 	defer func() { _ = repo.Close() }()
 
-	if err := repo.Reindex(); err != nil {
+	err = repo.Reindex()
+	if err != nil {
 		return err
 	}
 
@@ -153,7 +156,8 @@ func reindexData(stdout io.Writer) error {
 
 // bootstrap loads .env and runs the node until ctx is done.
 func bootstrap(ctx context.Context, logger *slog.Logger) error {
-	if err := godotenv.Load(); err != nil {
+	err := godotenv.Load()
+	if err != nil {
 		return err
 	}
 
@@ -281,7 +285,8 @@ func parseMinerAddress(raw string) (string, error) {
 		return "", nil
 	}
 
-	if err := wallet.ValidateAddress(addr); err != nil {
+	err := wallet.ValidateAddress(addr)
+	if err != nil {
 		return "", fmt.Errorf("%s: invalid address %q: %w", minerAddressEnvVar, addr, err)
 	}
 
@@ -306,7 +311,9 @@ func parseGenesisAllocations(raw string) ([]domain.TxOut, error) {
 		}
 
 		addr, value = strings.TrimSpace(addr), strings.TrimSpace(value)
-		if err := wallet.ValidateAddress(addr); err != nil {
+
+		err := wallet.ValidateAddress(addr)
+		if err != nil {
 			return nil, fmt.Errorf("%s: invalid item %q: %w", genesisAllocationsEnvVar, item, err)
 		}
 
@@ -337,7 +344,8 @@ func openRepository(dataDir string, p storage.Pruning) (storage.IndexedRepositor
 		return repo, func() error { return nil }, nil
 	}
 
-	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+	err := os.MkdirAll(dataDir, 0o700)
+	if err != nil {
 		return nil, nil, err
 	}
 
@@ -411,11 +419,13 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	shutdownCtx, cancel := shutdownContext()
 	defer cancel()
 
-	if err := httpSrv.Shutdown(shutdownCtx); err != nil { //nolint:contextcheck // ctx is already cancelled here; graceful shutdown needs a fresh deadline
+	err = httpSrv.Shutdown(shutdownCtx) //nolint:contextcheck // ctx is already cancelled here; graceful shutdown needs a fresh deadline
+	if err != nil {
 		return err
 	}
 
-	if err := <-errCh; !errors.Is(err, http.ErrServerClosed) {
+	err = <-errCh
+	if !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 

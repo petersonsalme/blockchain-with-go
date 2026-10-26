@@ -32,7 +32,8 @@ func New() *Repository {
 // NewPruned returns an empty Repository that snapshots and prunes as p says,
 // or storage.ErrInvalidPruning when p is invalid.
 func NewPruned(p storage.Pruning) (*Repository, error) {
-	if err := p.Validate(); err != nil {
+	err := p.Validate()
+	if err != nil {
 		return nil, err
 	}
 
@@ -137,7 +138,8 @@ func (r *Repository) ReplaceFrom(height int, blocks []*domain.Block) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if err := r.checkSplice(height, blocks); err != nil {
+	err := r.checkSplice(height, blocks)
+	if err != nil {
 		return err
 	}
 

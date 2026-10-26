@@ -39,11 +39,14 @@ func TestMineLockedValidatesWithTheNextIndex(t *testing.T) {
 	}
 
 	half := domain.InitialSubsidy / 2
-	if _, err := s.mineLocked(context.Background(), coinbase(half)); !errors.Is(err, errSealed) {
+
+	_, err := s.mineLocked(context.Background(), coinbase(half))
+	if !errors.Is(err, errSealed) {
 		t.Fatalf("coinbase at the halved subsidy: got %v, want to reach the generator", err)
 	}
 
-	if _, err := s.mineLocked(context.Background(), coinbase(half+1)); !errors.Is(err, domain.ErrCoinbaseTooLarge) {
+	_, err = s.mineLocked(context.Background(), coinbase(half+1))
+	if !errors.Is(err, domain.ErrCoinbaseTooLarge) {
 		t.Fatalf("coinbase above the halved subsidy: got %v, want ErrCoinbaseTooLarge", err)
 	}
 }

@@ -76,7 +76,9 @@ func NewMnemonic(words int) (string, error) {
 	}
 
 	entropy := make([]byte, size)
-	if _, err := rand.Read(entropy); err != nil {
+
+	_, err := rand.Read(entropy)
+	if err != nil {
 		return "", fmt.Errorf("wallet: failed to read random entropy: %w", err)
 	}
 
@@ -92,7 +94,9 @@ func ValidateMnemonic(mnemonic string) error {
 // MnemonicToSeed derives a BIP-39 binary seed from a mnemonic and passphrase using PBKDF2 and NFKD normalization.
 func MnemonicToSeed(mnemonic, passphrase string) ([]byte, error) {
 	m := strings.Join(strings.Fields(norm.NFKD.String(mnemonic)), " ")
-	if err := ValidateMnemonic(m); err != nil {
+
+	err := ValidateMnemonic(m)
+	if err != nil {
 		return nil, err
 	}
 

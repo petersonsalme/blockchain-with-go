@@ -271,7 +271,8 @@ func (r *Repository) Commit(b *domain.Block, d domain.UTXODelta) error {
 		}
 	}
 
-	if err := r.idx.apply(b, d); err != nil {
+	err := r.idx.apply(b, d)
+	if err != nil {
 		return err
 	}
 
@@ -306,7 +307,8 @@ func (r *Repository) Reorg(height int, blocks []*domain.Block, deltas []domain.U
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if err := r.checkSplice(height, blocks); err != nil {
+	err := r.checkSplice(height, blocks)
+	if err != nil {
 		return err
 	}
 
@@ -320,7 +322,8 @@ func (r *Repository) Reorg(height int, blocks []*domain.Block, deltas []domain.U
 
 	ix := r.idx.clone()
 	for i := len(r.blocks) - 1; i >= height; i-- {
-		if err := ix.revert(r.blocks[i]); err != nil {
+		err := ix.revert(r.blocks[i])
+		if err != nil {
 			return err
 		}
 	}
@@ -329,7 +332,8 @@ func (r *Repository) Reorg(height int, blocks []*domain.Block, deltas []domain.U
 	// The cap limit forces append to copy; the pruning below edits only this copy.
 	chain := slices.Concat(r.blocks[:height], blocks)
 	for i, b := range blocks {
-		if err := ix.apply(b, deltas[i]); err != nil {
+		err := ix.apply(b, deltas[i])
+		if err != nil {
 			return err
 		}
 
@@ -399,7 +403,8 @@ func (r *Repository) Reindex() error {
 			return err
 		}
 
-		if err := ix.apply(b, d); err != nil {
+		err = ix.apply(b, d)
+		if err != nil {
 			return err
 		}
 	}
@@ -481,7 +486,8 @@ func (r *Repository) Restore(headers []*domain.Block, set domain.UTXOSet) error 
 		return storage.ErrConflict
 	}
 
-	if err := storage.CheckHeaders(headers); err != nil {
+	err := storage.CheckHeaders(headers)
+	if err != nil {
 		return err
 	}
 

@@ -13,7 +13,9 @@ func TestSaveLoadAddrs(t *testing.T) {
 	path := filepath.Join(dir, "peers.json")
 
 	want := []string{"http://a:1", "http://b:2"}
-	if err := SaveAddrs(path, want); err != nil {
+
+	err := SaveAddrs(path, want)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -32,7 +34,8 @@ func TestSaveLoadAddrs(t *testing.T) {
 		t.Fatalf("leftovers: %v", entries)
 	}
 	// overwrite keeps the mode and replaces content
-	if err := SaveAddrs(path, nil); err != nil {
+	err = SaveAddrs(path, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -58,18 +61,23 @@ func TestLoadAddrsMissingAndCorrupt(t *testing.T) {
 	bad := filepath.Join(dir, "bad.json")
 
 	_ = os.WriteFile(bad, []byte("{not json"), 0o600)
-	if _, err := LoadAddrs(bad); err == nil {
+
+	_, err = LoadAddrs(bad)
+	if err == nil {
 		t.Fatal("want error")
 	}
 
-	if _, err := LoadAddrs(dir); err == nil {
+	_, err = LoadAddrs(dir)
+	if err == nil {
 		t.Fatal("want error reading a directory")
 	}
 }
 
 func TestSaveAddrsFailureLeavesNothing(t *testing.T) {
 	dir := t.TempDir()
-	if err := SaveAddrs(filepath.Join(dir, "missing", "peers.json"), []string{"x"}); err == nil {
+
+	err := SaveAddrs(filepath.Join(dir, "missing", "peers.json"), []string{"x"})
+	if err == nil {
 		t.Fatal("want error")
 	}
 	// rename onto a directory fails: the temporary file must be removed
@@ -77,7 +85,9 @@ func TestSaveAddrsFailureLeavesNothing(t *testing.T) {
 	_ = os.Mkdir(target, 0o700)
 
 	_ = os.WriteFile(filepath.Join(target, "keep"), nil, 0o600)
-	if err := SaveAddrs(target, []string{"x"}); err == nil {
+
+	err = SaveAddrs(target, []string{"x"})
+	if err == nil {
 		t.Fatal("want error")
 	}
 
@@ -122,7 +132,9 @@ func TestWriteAndCloseSteps(t *testing.T) {
 	}
 
 	f := &stepFile{}
-	if err := writeAndClose(f, []byte("x")); err != nil || !reflect.DeepEqual(f.calls, []string{"write", "chmod", "sync", "close"}) {
+
+	err := writeAndClose(f, []byte("x"))
+	if err != nil || !reflect.DeepEqual(f.calls, []string{"write", "chmod", "sync", "close"}) {
 		t.Fatalf("calls = %v, %v", f.calls, err)
 	}
 }

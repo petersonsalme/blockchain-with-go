@@ -35,7 +35,8 @@ func TestParseSeedPeers(t *testing.T) {
 	}
 
 	for _, blank := range []string{"", "  "} {
-		if got, err := parseSeedPeers(blank); err != nil || got != nil {
+		got, err := parseSeedPeers(blank)
+		if err != nil || got != nil {
 			t.Fatalf("blank %q: %v, %v", blank, got, err)
 		}
 	}
@@ -83,7 +84,8 @@ func newTestService(t *testing.T, blocks int, genesis *domain.Block) *chain.Serv
 			t.Fatal(err)
 		}
 
-		if err := repo.Commit(genesis, delta); err != nil {
+		err = repo.Commit(genesis, delta)
+		if err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -94,7 +96,8 @@ func newTestService(t *testing.T, blocks int, genesis *domain.Block) *chain.Serv
 	}
 
 	for range blocks {
-		if _, err := svc.Mine(context.Background(), nil); err != nil {
+		_, err := svc.Mine(context.Background(), nil)
+		if err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -122,11 +125,13 @@ func TestNewP2PNodeConfigErrors(t *testing.T) {
 	})
 	t.Run("corrupt peers file", func(t *testing.T) {
 		dir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(dir, "peers.json"), []byte("{"), 0o600); err != nil {
+
+		err := os.WriteFile(filepath.Join(dir, "peers.json"), []byte("{"), 0o600)
+		if err != nil {
 			t.Fatal(err)
 		}
 
-		_, err := newP2PNode(svc, dir, discardLogger())
+		_, err = newP2PNode(svc, dir, discardLogger())
 		if err == nil || !strings.Contains(err.Error(), "peers.json") {
 			t.Fatalf("err = %v", err)
 		}
@@ -171,7 +176,9 @@ func TestNewP2PNodeBookAndIdentity(t *testing.T) {
 
 	t.Run("file plus seeds, saved on every round", func(t *testing.T) {
 		dir := t.TempDir()
-		if err := p2p.SaveAddrs(filepath.Join(dir, "peers.json"), []string{"http://old:2"}); err != nil {
+
+		err := p2p.SaveAddrs(filepath.Join(dir, "peers.json"), []string{"http://old:2"})
+		if err != nil {
 			t.Fatal(err)
 		}
 
@@ -222,11 +229,14 @@ func TestNewP2PNodeAppliesLimits(t *testing.T) {
 
 		return h
 	}
-	if _, err := n.Accept(hello(strings.Repeat("a", 32))); err != nil {
+
+	_, err = n.Accept(hello(strings.Repeat("a", 32)))
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := n.Accept(hello(strings.Repeat("b", 32))); !errors.Is(err, p2p.ErrPeerLimit) {
+	_, err = n.Accept(hello(strings.Repeat("b", 32)))
+	if !errors.Is(err, p2p.ErrPeerLimit) {
 		t.Fatalf("err = %v, want ErrPeerLimit", err)
 	}
 }
@@ -458,7 +468,8 @@ func TestRunFailsOnBadP2PConfig(t *testing.T) {
 	t.Setenv("POW_DIFFICULTY", "1")
 	t.Setenv(seedPeersEnvVar, "bad")
 
-	if err := run(context.Background(), discardLogger()); err == nil || !strings.Contains(err.Error(), "SEED_PEERS") {
+	err := run(context.Background(), discardLogger())
+	if err == nil || !strings.Contains(err.Error(), "SEED_PEERS") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -487,7 +498,8 @@ func TestRunWithDataDirPersistsPeers(t *testing.T) {
 
 	cancel()
 
-	if err := <-done; err != nil {
+	err := <-done
+	if err != nil {
 		t.Fatal(err)
 	}
 

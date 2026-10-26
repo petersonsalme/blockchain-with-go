@@ -167,7 +167,8 @@ func utxoSnapshot(repo storage.IndexedRepository) domain.UTXOSet {
 	blocks, err := repo.All()
 	Expect(err).NotTo(HaveOccurred())
 
-	if below, err := repo.PrunedBelow(); err == nil && below > 0 {
+	below, err := repo.PrunedBelow()
+	if err == nil && below > 0 {
 		set, err := repo.ForkState(len(blocks))
 		Expect(err).NotTo(HaveOccurred())
 

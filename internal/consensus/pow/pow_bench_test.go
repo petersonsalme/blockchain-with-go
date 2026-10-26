@@ -23,7 +23,9 @@ func BenchmarkMineParallel(b *testing.B) {
 						Timestamp: time.Date(2021, 8, 15, 14, 30, 45, 0, time.UTC),
 						PrevHash:  "bench",
 					}
-					if err := powpkg.MineParallel(context.Background(), blk, d, w); err != nil {
+
+					err := powpkg.MineParallel(context.Background(), blk, d, w)
+					if err != nil {
 						b.Fatalf("difficulty=%d workers=%d: %v", d, w, err)
 					}
 

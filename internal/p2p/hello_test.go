@@ -52,7 +52,8 @@ func TestCheck(t *testing.T) {
 			remote := hello(idB)
 			tt.mod(&remote)
 
-			if err := Check(local, remote); !errors.Is(err, tt.want) {
+			err := Check(local, remote)
+			if !errors.Is(err, tt.want) {
 				t.Fatalf("Check = %v, want %v", err, tt.want)
 			}
 		})
@@ -76,7 +77,8 @@ func TestNormalizeAddr(t *testing.T) {
 			t.Errorf("NormalizeAddr(%q) = %q, %v; want %q", in, got, err, want)
 		}
 
-		if again, err := NormalizeAddr(got); err != nil || again != got {
+		again, err := NormalizeAddr(got)
+		if err != nil || again != got {
 			t.Errorf("not idempotent for %q: %q, %v", got, again, err)
 		}
 	}
@@ -88,7 +90,8 @@ func TestNormalizeAddr(t *testing.T) {
 		"http://h%41:80", "http://[::1%25eth0]:80", "http://[zz]:80", "http://h_x:80", " http://h:80",
 	}
 	for _, in := range bad {
-		if got, err := NormalizeAddr(in); !errors.Is(err, ErrBadAddr) {
+		got, err := NormalizeAddr(in)
+		if !errors.Is(err, ErrBadAddr) {
 			t.Errorf("NormalizeAddr(%q) = %q, %v; want ErrBadAddr", in, got, err)
 		}
 	}

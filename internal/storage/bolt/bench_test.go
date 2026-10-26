@@ -52,17 +52,20 @@ func benchRepo(b *testing.B, n int) (*bolt.Repository, []string) {
 		prevTx = &tx
 	}
 	// One transaction for the whole chain: Commit would fsync n times.
-	if err := repo.Append(blocks[0]); err != nil {
+	err = repo.Append(blocks[0])
+	if err != nil {
 		b.Fatal(err)
 	}
 
 	if n > 1 {
-		if err := repo.ReplaceFrom(1, blocks[1:]); err != nil {
+		err := repo.ReplaceFrom(1, blocks[1:])
+		if err != nil {
 			b.Fatal(err)
 		}
 	}
 
-	if err := repo.Reindex(); err != nil {
+	err = repo.Reindex()
+	if err != nil {
 		b.Fatal(err)
 	}
 
@@ -74,21 +77,24 @@ func BenchmarkLookups(b *testing.B) {
 		repo, txids := benchRepo(b, n)
 		b.Run(fmt.Sprintf("ByHash/%d", n), func(b *testing.B) {
 			for i := range b.N {
-				if _, err := repo.ByHash(fmt.Sprintf("h%d", i%n)); err != nil {
+				_, err := repo.ByHash(fmt.Sprintf("h%d", i%n))
+				if err != nil {
 					b.Fatal(err)
 				}
 			}
 		})
 		b.Run(fmt.Sprintf("ByHeight/%d", n), func(b *testing.B) {
 			for i := range b.N {
-				if _, err := repo.ByHeight(i % n); err != nil {
+				_, err := repo.ByHeight(i % n)
+				if err != nil {
 					b.Fatal(err)
 				}
 			}
 		})
 		b.Run(fmt.Sprintf("TxHeight/%d", n), func(b *testing.B) {
 			for i := range b.N {
-				if _, err := repo.TxHeight(txids[i%n]); err != nil {
+				_, err := repo.TxHeight(txids[i%n])
+				if err != nil {
 					b.Fatal(err)
 				}
 			}

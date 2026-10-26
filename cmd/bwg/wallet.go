@@ -108,7 +108,8 @@ func runWalletNew(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+	_, err = os.Stat(path)
+	if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("keystore %q: %w", path, os.ErrExist)
 	}
 
@@ -117,7 +118,8 @@ func runWalletNew(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := w.Save(path, password); err != nil {
+	err = w.Save(path, password)
+	if err != nil {
 		return err
 	}
 
@@ -127,7 +129,8 @@ func runWalletNew(cmd *cobra.Command, args []string) error {
 }
 
 func runWalletBalance(cmd *cobra.Command, args []string) error {
-	if err := wallet.ValidateAddress(args[0]); err != nil {
+	err := wallet.ValidateAddress(args[0])
+	if err != nil {
 		return err
 	}
 

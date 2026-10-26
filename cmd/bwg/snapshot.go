@@ -85,7 +85,8 @@ func exportSnapshot(file string, stdout io.Writer) error {
 		return err
 	}
 
-	if _, err := os.Stat(path); err != nil {
+	_, err = os.Stat(path)
+	if err != nil {
 		return fmt.Errorf("%s: %w", dataDirEnvVar, err)
 	}
 
@@ -118,11 +119,14 @@ func exportSnapshot(file string, stdout io.Writer) error {
 	}
 
 	var buf bytes.Buffer
-	if err := storage.WriteSnapshotFile(&buf, headers, snap); err != nil {
+
+	err = storage.WriteSnapshotFile(&buf, headers, snap)
+	if err != nil {
 		return err
 	}
 
-	if err := os.WriteFile(file, buf.Bytes(), 0o644); err != nil {
+	err = os.WriteFile(file, buf.Bytes(), 0o644)
+	if err != nil {
 		return err
 	}
 
@@ -172,7 +176,8 @@ func importSnapshot(file, wantHash string, stdout io.Writer) error {
 	}
 
 	for i := 1; i < len(headers); i++ {
-		if err := engine.Verify(headers[:i], headers[i]); err != nil {
+		err := engine.Verify(headers[:i], headers[i])
+		if err != nil {
 			return fmt.Errorf("header %d: %w", i, err)
 		}
 	}
@@ -183,7 +188,8 @@ func importSnapshot(file, wantHash string, stdout io.Writer) error {
 	}
 	defer func() { _ = closeRepo() }()
 
-	if err := repo.Restore(headers, snap.UTXOs); err != nil {
+	err = repo.Restore(headers, snap.UTXOs)
+	if err != nil {
 		return fmt.Errorf("restore into %s: %w", path, err)
 	}
 

@@ -20,7 +20,9 @@ func LoadAddrs(path string) ([]string, error) {
 	}
 
 	addrs := []string{}
-	if err := json.Unmarshal(raw, &addrs); err != nil {
+
+	err = json.Unmarshal(raw, &addrs)
+	if err != nil {
 		return nil, err
 	}
 
@@ -45,12 +47,15 @@ func SaveAddrs(path string, addrs []string) error {
 	}
 
 	tmp := f.Name()
-	if err := writeAndClose(f, raw); err != nil {
+
+	err = writeAndClose(f, raw)
+	if err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}
 
-	if err := os.Rename(tmp, path); err != nil {
+	err = os.Rename(tmp, path)
+	if err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}
@@ -68,17 +73,20 @@ type tmpFile interface {
 // writeAndClose writes raw, sets mode 0o600 and syncs; the file is closed on
 // every path.
 func writeAndClose(f tmpFile, raw []byte) error {
-	if _, err := f.Write(raw); err != nil {
+	_, err := f.Write(raw)
+	if err != nil {
 		_ = f.Close()
 		return err
 	}
 
-	if err := f.Chmod(0o600); err != nil {
+	err = f.Chmod(0o600)
+	if err != nil {
 		_ = f.Close()
 		return err
 	}
 
-	if err := f.Sync(); err != nil {
+	err = f.Sync()
+	if err != nil {
 		_ = f.Close()
 		return err
 	}

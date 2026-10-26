@@ -441,18 +441,21 @@ func TestShutdownEndsEventStreams(t *testing.T) {
 		t.Fatalf("unexpected event %+v; want the stream to end", ev)
 	}
 
-	if _, err := io.ReadAll(st.resp.Body); err != nil {
+	_, err = io.ReadAll(st.resp.Body)
+	if err != nil {
 		t.Fatalf("stream did not end with a clean EOF: %v", err)
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := hs.Shutdown(shutdownCtx); err != nil {
+	err = hs.Shutdown(shutdownCtx)
+	if err != nil {
 		t.Fatalf("Shutdown = %v, want nil", err)
 	}
 
-	if err := <-serveErr; !errors.Is(err, http.ErrServerClosed) {
+	err = <-serveErr
+	if !errors.Is(err, http.ErrServerClosed) {
 		t.Fatalf("Serve = %v, want ErrServerClosed", err)
 	}
 

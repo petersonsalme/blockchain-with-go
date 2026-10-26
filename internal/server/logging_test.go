@@ -35,7 +35,9 @@ func decodeLog(t *testing.T, buf *bytes.Buffer) []logRecord {
 		}
 
 		var r logRecord
-		if err := json.Unmarshal([]byte(line), &r); err != nil {
+
+		err := json.Unmarshal([]byte(line), &r)
+		if err != nil {
 			t.Fatalf("log line %q is not JSON: %v", line, err)
 		}
 

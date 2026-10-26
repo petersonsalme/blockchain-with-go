@@ -128,7 +128,8 @@ func NewService(repo storage.IndexedRepository, c consensus.Consensus, opts ...O
 		s.pool = mempool.New(mempool.DefaultMaxTxs)
 	}
 
-	if _, err := repo.Last(); err != nil {
+	_, err := repo.Last()
+	if err != nil {
 		if !errors.Is(err, storage.ErrEmpty) {
 			return nil, err
 		}
@@ -140,7 +141,8 @@ func NewService(repo storage.IndexedRepository, c consensus.Consensus, opts ...O
 			return nil, err
 		}
 
-		if err := repo.Commit(genesis, delta); err != nil {
+		err = repo.Commit(genesis, delta)
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -151,7 +153,8 @@ func NewService(repo storage.IndexedRepository, c consensus.Consensus, opts ...O
 	}
 
 	if !current {
-		if err := repo.Reindex(); err != nil {
+		err := repo.Reindex()
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -161,7 +164,8 @@ func NewService(repo storage.IndexedRepository, c consensus.Consensus, opts ...O
 		return nil, err
 	}
 
-	if s.contracts, err = vm.BuildState(all); err != nil {
+	s.contracts, err = vm.BuildState(all)
+	if err != nil {
 		return nil, err
 	}
 
@@ -198,7 +202,8 @@ func verifyInputs(view domain.UTXOView, txs []domain.Transaction) error {
 				spent, _ = view.Lookup(op)
 			}
 
-			if err := domain.VerifyInputSignature(tx, j, spent); err != nil {
+			err := domain.VerifyInputSignature(tx, j, spent)
+			if err != nil {
 				return err
 			}
 		}
@@ -411,11 +416,13 @@ func (s *Service) Submit(tx domain.Transaction) error {
 		return err
 	}
 
-	if err := verifyInputs(s.repo, txs); err != nil {
+	err = verifyInputs(s.repo, txs)
+	if err != nil {
 		return err
 	}
 
-	if _, err := s.confirmedDelta(txs); err != nil {
+	_, err = s.confirmedDelta(txs)
+	if err != nil {
 		return err
 	}
 
@@ -520,11 +527,13 @@ func (s *Service) ReplaceChain(ctx context.Context, candidate []*domain.Block) (
 			return nil, ErrInvalidBlock
 		}
 
-		if err := s.consensus.Verify(history, b); err != nil {
+		err := s.consensus.Verify(history, b)
+		if err != nil {
 			return nil, err
 		}
 
-		if err := domain.ValidateBlockRules(b, history[len(history)-1], now); err != nil {
+		err = domain.ValidateBlockRules(b, history[len(history)-1], now)
+		if err != nil {
 			return nil, err
 		}
 
@@ -533,7 +542,8 @@ func (s *Service) ReplaceChain(ctx context.Context, candidate []*domain.Block) (
 			return nil, err
 		}
 
-		if err := verifyInputs(forkState, b.Transactions); err != nil {
+		err = verifyInputs(forkState, b.Transactions)
+		if err != nil {
 			return nil, err
 		}
 
@@ -554,7 +564,9 @@ func (s *Service) ReplaceChain(ctx context.Context, candidate []*domain.Block) (
 	}
 
 	connected := slices.Clone(candidate[fork:])
-	if err := s.repo.Reorg(fork, connected, deltas); err != nil {
+
+	err = s.repo.Reorg(fork, connected, deltas)
+	if err != nil {
 		return nil, s.writeFailed(err)
 	}
 
@@ -660,7 +672,8 @@ func (s *Service) addressTxs(addr string) ([]domain.Transaction, error) {
 
 		b, ok := blocks[h]
 		if !ok {
-			if b, err = s.repo.ByHeight(h); err != nil {
+			b, err = s.repo.ByHeight(h)
+			if err != nil {
 				return nil, err
 			}
 
@@ -720,7 +733,8 @@ func (s *Service) lock(ctx context.Context) (func(), error) {
 	}
 
 	// select picks at random when both cases are ready; do not mine for a dead ctx.
-	if err := ctx.Err(); err != nil {
+	err := ctx.Err()
+	if err != nil {
 		release()
 		return nil, err
 	}
@@ -780,14 +794,18 @@ func (s *Service) dropStale(txs []domain.Transaction) []domain.Transaction {
 
 	for i := range txs {
 		one := txs[i : i+1]
-		if _, err := domain.BlockDelta(s.repo, &domain.Block{Transactions: one}, false); err != nil || verifyInputs(s.repo, one) != nil {
+
+		_, err := domain.BlockDelta(s.repo, &domain.Block{Transactions: one}, false)
+		if err != nil || verifyInputs(s.repo, one) != nil {
 			stale = append(stale, txs[i].ID)
 			continue
 		}
 
 		if txs[i].Contract != nil {
 			withThis := append(slices.Clone(contractTxs), txs[i])
-			if _, err := s.confirmedDelta(withThis); err != nil {
+
+			_, err := s.confirmedDelta(withThis)
+			if err != nil {
 				stale = append(stale, txs[i].ID)
 				continue
 			}
@@ -873,7 +891,8 @@ func (s *Service) mineLocked(ctx context.Context, txs []domain.Transaction) (*do
 		}
 	}
 
-	if err := verifyInputs(s.repo, txs); err != nil {
+	err = verifyInputs(s.repo, txs)
+	if err != nil {
 		return nil, err
 	}
 
@@ -888,7 +907,8 @@ func (s *Service) mineLocked(ctx context.Context, txs []domain.Transaction) (*do
 	}
 
 	if block != nil {
-		if err := domain.ValidateBlockRules(block, prev, time.Now()); err != nil {
+		err := domain.ValidateBlockRules(block, prev, time.Now())
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -897,7 +917,8 @@ func (s *Service) mineLocked(ctx context.Context, txs []domain.Transaction) (*do
 		return nil, ErrInvalidBlock
 	}
 
-	if err := s.repo.Commit(block, delta); err != nil {
+	err = s.repo.Commit(block, delta)
+	if err != nil {
 		return nil, s.writeFailed(err)
 	}
 

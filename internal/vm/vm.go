@@ -250,32 +250,41 @@ func (m *machine) step(op byte) (done bool, err error) {
 		m.stack[n-1], m.stack[n-2] = m.stack[n-2], m.stack[n-1]
 	case OpADD, OpSUB, OpMUL, OpLT, OpEQ:
 		var a, b uint64
-		if a, b, err = m.pop2(); err != nil {
+
+		a, b, err = m.pop2()
+		if err != nil {
 			return false, err
 		}
 
 		err = m.push(binaryOp(op, a, b))
 	case OpISZERO:
 		var v uint64
-		if v, err = m.pop(); err != nil {
+
+		v, err = m.pop()
+		if err != nil {
 			return false, err
 		}
 
 		err = m.push(boolWord(v == 0))
 	case OpJUMP:
 		var dest uint64
-		if dest, err = m.pop(); err != nil {
+
+		dest, err = m.pop()
+		if err != nil {
 			return false, err
 		}
 
 		next, err = m.jump(dest)
 	case OpJUMPI:
 		var dest, cond uint64
-		if dest, err = m.pop(); err != nil {
+
+		dest, err = m.pop()
+		if err != nil {
 			return false, err
 		}
 
-		if cond, err = m.pop(); err != nil {
+		cond, err = m.pop()
+		if err != nil {
 			return false, err
 		}
 
@@ -284,25 +293,32 @@ func (m *machine) step(op byte) (done bool, err error) {
 		}
 	case OpSLOAD:
 		var key uint64
-		if key, err = m.pop(); err != nil {
+
+		key, err = m.pop()
+		if err != nil {
 			return false, err
 		}
 
 		err = m.push(m.load(key))
 	case OpSSTORE:
 		var key, val uint64
-		if key, err = m.pop(); err != nil {
+
+		key, err = m.pop()
+		if err != nil {
 			return false, err
 		}
 
-		if val, err = m.pop(); err != nil {
+		val, err = m.pop()
+		if err != nil {
 			return false, err
 		}
 
 		m.writes[key] = val
 	case OpARG:
 		var i uint64
-		if i, err = m.pop(); err != nil {
+
+		i, err = m.pop()
+		if err != nil {
 			return false, err
 		}
 

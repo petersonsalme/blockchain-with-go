@@ -59,7 +59,9 @@ func errCode(t *testing.T, body string) string {
 	t.Helper()
 
 	var e errorResponse
-	if err := json.Unmarshal([]byte(body), &e); err != nil {
+
+	err := json.Unmarshal([]byte(body), &e)
+	if err != nil {
 		t.Fatalf("body %q: %v", body, err)
 	}
 
@@ -78,7 +80,9 @@ func TestPostHelloAcceptedReturnsLocalHello(t *testing.T) {
 	}
 
 	var got p2p.Hello
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || got != local {
+
+	err := json.Unmarshal(rec.Body.Bytes(), &got)
+	if err != nil || got != local {
 		t.Fatalf("body = %s (%v), want %+v", rec.Body, err, local)
 	}
 
@@ -186,7 +190,9 @@ func TestGetPeersShape(t *testing.T) {
 		Peers []map[string]any `json:"peers"`
 		Addrs []string         `json:"addrs"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+
+	err := json.Unmarshal(rec.Body.Bytes(), &raw)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -216,7 +222,9 @@ func TestGetPeersEmptyListsAreArrays(t *testing.T) {
 			rec := do(p2pHandler(t, Config{P2P: f}), http.MethodGet, "/p2p/peers", "")
 
 			var m map[string]json.RawMessage
-			if err := json.Unmarshal(rec.Body.Bytes(), &m); err != nil {
+
+			err := json.Unmarshal(rec.Body.Bytes(), &m)
+			if err != nil {
 				t.Fatal(err)
 			}
 
@@ -346,7 +354,9 @@ func TestRealNodeHandshake(t *testing.T) {
 		} `json:"peers"`
 		Addrs []string `json:"addrs"`
 	}
-	if err := json.Unmarshal([]byte(after), &pr); err != nil || len(pr.Peers) != 1 || pr.Peers[0].NodeID != idB || pr.Peers[0].Height != 9 || !pr.Peers[0].Inbound || len(pr.Addrs) != 1 {
+
+	err = json.Unmarshal([]byte(after), &pr)
+	if err != nil || len(pr.Peers) != 1 || pr.Peers[0].NodeID != idB || pr.Peers[0].Height != 9 || !pr.Peers[0].Inbound || len(pr.Addrs) != 1 {
 		t.Fatalf("peers = %s (%v)", after, err)
 	}
 
