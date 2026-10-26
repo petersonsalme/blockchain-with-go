@@ -198,6 +198,11 @@ func contractCases() []contractCase {
 		{method: "GET", route: "/blocks", status: 429, serve: limited("/blocks"), warmup: 1},
 		{method: "GET", route: "/blocks", status: 500, serve: brokenAt("/blocks")},
 
+		{method: "GET", route: "/headers", status: 200, serve: plain("/headers?from=0&limit=1")},
+		{method: "GET", route: "/headers", status: 400, specInvalid: true, serve: plain("/headers?from=abc")},
+		{method: "GET", route: "/headers", status: 429, serve: limited("/headers"), warmup: 1},
+		{method: "GET", route: "/headers", status: 500, serve: brokenAt("/headers")},
+
 		{method: "GET", route: "/block/{ref}", status: 200, serve: plain("/block/0")},
 		{method: "GET", route: "/block/{ref}", status: 400, specInvalid: true, serve: plain("/block/not-a-ref")},
 		{method: "GET", route: "/block/{ref}", status: 404, serve: plain("/block/999")},
