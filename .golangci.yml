@@ -69,6 +69,7 @@ linters:
     - maintidx
     - containedctx
     - tagliatelle
+    - gochecknoglobals
   settings:
     nlreturn:
       # Same threshold as wsl_v5's branch-max-lines: a return in a block of up to 2 lines needs no blank line.
@@ -102,6 +103,10 @@ linters:
         - name: redefines-builtin-id
   exclusions:
     rules:
+      # AGENTS.md limits package-level state to const and errors.New sentinels in internal/server and internal/chain only.
+      # The other packages hold lookup tables and bucket names that cannot be const.
+      - path: ^(cmd|client|pkg)/|^internal/(consensus|domain|mempool|p2p|storage|vm)/
+        linters: [gochecknoglobals]
       # Transaction is hashed and persisted with its Go field names; renaming "Contract" would change the schema.
       - path: internal/domain/transaction\.go
         linters: [tagliatelle]
@@ -138,7 +143,7 @@ linters:
         text: mapKey
       # Test fixtures use fixed seeds, local URLs and small constants.
       - path: _test\.go
-        linters: [gosec, unparam, forcetypeassert, errchkjson, nilnil, prealloc, gochecknoinits, goconst, containedctx]
+        linters: [gosec, unparam, forcetypeassert, errchkjson, nilnil, prealloc, gochecknoinits, goconst, containedctx, gochecknoglobals]
       - path: internal/(storage/storagetest|consensus/consensustest)/
         linters: [prealloc, goconst, gocyclo, maintidx]
       - path: internal/server/contract_test\.go

@@ -14,16 +14,14 @@ import (
 const p2pDisabledCode = "p2p_disabled"
 
 // helloRefusals maps the handshake refusals of ADR-0013 to their HTTP status and code.
-var helloRefusals = []struct {
-	err    error
-	status int
-	code   string
-}{
-	{p2p.ErrBadHello, http.StatusBadRequest, "invalid_hello"},
-	{p2p.ErrIncompatibleVersion, http.StatusConflict, "incompatible_version"},
-	{p2p.ErrGenesisMismatch, http.StatusConflict, "genesis_mismatch"},
-	{p2p.ErrSelf, http.StatusConflict, "self_connection"},
-	{p2p.ErrPeerLimit, http.StatusServiceUnavailable, "peer_limit"},
+func helloRefusals() []errorRule {
+	return []errorRule{
+		{p2p.ErrBadHello, http.StatusBadRequest, "invalid_hello"},
+		{p2p.ErrIncompatibleVersion, http.StatusConflict, "incompatible_version"},
+		{p2p.ErrGenesisMismatch, http.StatusConflict, "genesis_mismatch"},
+		{p2p.ErrSelf, http.StatusConflict, "self_connection"},
+		{p2p.ErrPeerLimit, http.StatusServiceUnavailable, "peer_limit"},
+	}
 }
 
 // peerResponse is one connected peer in GET /p2p/peers.
@@ -84,7 +82,7 @@ func (s *Server) handleP2PHello(w http.ResponseWriter, r *http.Request) {
 
 	local, err := s.p2p.Accept(remote)
 	if err != nil {
-		for _, m := range helloRefusals {
+		for _, m := range helloRefusals() {
 			if errors.Is(err, m.err) {
 				respondWithJSON(w, m.status, errorResponse{Error: err.Error(), Code: m.code})
 				return

@@ -68,7 +68,9 @@ func (m *metrics) middleware(next http.Handler) http.Handler {
 }
 
 // escapeLabelValue escapes a label value for the text format: backslash, double quote and newline.
-var escapeLabelValue = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`).Replace
+func escapeLabelValue(v string) string {
+	return strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`).Replace(v)
+}
 
 // write renders every family. The blocks gauge is skipped when haveBlocks is false.
 func (m *metrics) write(w io.Writer, blocks int, haveBlocks bool) {
