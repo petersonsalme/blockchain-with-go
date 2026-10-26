@@ -333,6 +333,15 @@ type GetBlocksParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// GetHeadersParams defines parameters for GetHeaders.
+type GetHeadersParams struct {
+	// From First height of the page.
+	From *int `form:"from,omitempty" json:"from,omitempty"`
+
+	// Limit Page size; values above 1000 are capped at 1000.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // LegacyBpmJSONBody defines parameters for LegacyBpm.
 type LegacyBpmJSONBody map[string]interface{}
 
@@ -480,6 +489,11 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /events (the `GetEvents` operationId).
 	GetEvents(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetHeaders Page through the chain headers
+	//
+	// Corresponds with GET /headers (the `GetHeaders` operationId).
+	GetHeaders(ctx context.Context, params *GetHeadersParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetHealth Report the chain tip
 	//
@@ -751,6 +765,21 @@ func (c *Client) GetContract(ctx context.Context, id string, reqEditors ...Reque
 // Corresponds with GET /events (the `GetEvents` operationId).
 func (c *Client) GetEvents(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetEventsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetHeaders Page through the chain headers
+//
+// Corresponds with GET /headers (the `GetHeaders` operationId).
+func (c *Client) GetHeaders(ctx context.Context, params *GetHeadersParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetHeadersRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -1362,6 +1391,72 @@ func NewGetEventsRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewGetHeadersRequest constructs an http.Request for the GetHeaders method
+func NewGetHeadersRequest(server string, params *GetHeadersParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/headers")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.From != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "from", *params.From, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetHealthRequest constructs an http.Request for the GetHealth method
 func NewGetHealthRequest(server string) (*http.Request, error) {
 	var err error
@@ -1908,6 +2003,13 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /events (the `GetEvents` operationId).
 	GetEventsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetEventsResponse, error)
+
+	// GetHeadersWithResponse Page through the chain headers
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /headers (the `GetHeaders` operationId).
+	GetHeadersWithResponse(ctx context.Context, params *GetHeadersParams, reqEditors ...RequestEditorFn) (*GetHeadersResponse, error)
 
 	// GetHealthWithResponse Report the chain tip
 	//
@@ -2566,6 +2668,75 @@ func (r GetEventsResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetEventsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// GetHeadersResponse429Headers the declared response headers of an HTTP 429 response for GetHeaders
+type GetHeadersResponse429Headers struct {
+	RetryAfter int
+}
+
+type GetHeadersResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *PageResponse
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *RateLimited
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalError
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *GetHeadersResponse429Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetHeadersResponse) GetJSON200() *PageResponse {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r GetHeadersResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r GetHeadersResponse) GetJSON429() *RateLimited {
+	return r.JSON429
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r GetHeadersResponse) GetJSON500() *InternalError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetHeadersResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetHeadersResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetHeadersResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetHeadersResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -3689,6 +3860,19 @@ func (c *ClientWithResponses) GetEventsWithResponse(ctx context.Context, reqEdit
 	return ParseGetEventsResponse(rsp)
 }
 
+// GetHeadersWithResponse Page through the chain headers
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /headers (the `GetHeaders` operationId).
+func (c *ClientWithResponses) GetHeadersWithResponse(ctx context.Context, params *GetHeadersParams, reqEditors ...RequestEditorFn) (*GetHeadersResponse, error) {
+	rsp, err := c.GetHeaders(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetHeadersResponse(rsp)
+}
+
 // GetHealthWithResponse Report the chain tip
 //
 // Returns a wrapper object for the known response body format(s).
@@ -4388,6 +4572,66 @@ func ParseGetEventsResponse(rsp *http.Response) (*GetEventsResponse, error) {
 	switch {
 	case rsp.StatusCode == 429:
 		var headers GetEventsResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseGetHeadersResponse parses an HTTP response from a GetHeadersWithResponse call
+func ParseGetHeadersResponse(rsp *http.Response) (*GetHeadersResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetHeadersResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PageResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest RateLimited
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers GetHeadersResponse429Headers
 		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
 			var value int
 			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {

@@ -840,6 +840,112 @@ var _ = Describe("Server", func() {
 			})
 		})
 
+		Describe("GET /headers", func() {
+			BeforeEach(func() { mineN(4) }) // heights 0..4
+
+			It("returns every header without transactions", func() {
+				rec := get("/headers")
+				Expect(rec.Code).To(Equal(http.StatusOK))
+				Expect(strings.Count(rec.Body.String(), `"Transactions": null`)).To(Equal(5))
+
+				p := getPage("/headers")
+				Expect(p.From).To(Equal(0))
+				Expect(p.Limit).To(Equal(1000))
+				Expect(p.Blocks).To(HaveLen(5))
+				Expect(p.Next).To(BeNil())
+				expectLinked(p)
+
+				for _, b := range p.Blocks {
+					Expect(b.Transactions).To(BeNil())
+				}
+			})
+
+			It("returns the window and a next cursor while more headers exist", func() {
+				p := getPage("/headers?from=1&limit=2")
+				Expect(p.From).To(Equal(1))
+				Expect(p.Limit).To(Equal(2))
+				Expect(p.Blocks).To(HaveLen(2))
+				Expect(p.Next).NotTo(BeNil())
+				Expect(*p.Next).To(Equal(3))
+				expectLinked(p)
+			})
+
+			It("omits next when the page ends exactly at the tip", func() {
+				p := getPage("/headers?from=3&limit=2")
+				Expect(p.Blocks).To(HaveLen(2))
+				Expect(p.Next).To(BeNil())
+				Expect(get("/headers?from=3&limit=2").Body.String()).NotTo(ContainSubstring(`"next"`))
+			})
+
+			It("returns an empty page without next when from is past the tip", func() {
+				rec := get("/headers?from=10")
+				Expect(rec.Code).To(Equal(http.StatusOK))
+				Expect(rec.Body.String()).To(ContainSubstring(`"blocks": []`))
+				Expect(rec.Body.String()).NotTo(ContainSubstring(`"next"`))
+
+				p := getPage("/headers?from=10")
+				Expect(p.Blocks).To(BeEmpty())
+				Expect(p.From).To(Equal(10))
+				Expect(p.Next).To(BeNil())
+			})
+
+			It("caps limit at 1000", func() {
+				p := getPage("/headers?limit=1000")
+				Expect(p.Limit).To(Equal(1000))
+				p = getPage("/headers?limit=1001")
+				Expect(p.Limit).To(Equal(1000))
+				p = getPage("/headers?limit=9223372036854775807")
+				Expect(p.Limit).To(Equal(1000))
+			})
+
+			It("leaves the blocks of GET /blocks untouched", func() {
+				before := getPage("/blocks")
+				Expect(before.Blocks).NotTo(BeEmpty())
+				Expect(before.Blocks[len(before.Blocks)-1].Transactions).NotTo(BeEmpty())
+
+				_ = getPage("/headers")
+
+				after := getPage("/blocks")
+				Expect(after.Blocks).To(HaveLen(len(before.Blocks)))
+
+				for i, b := range after.Blocks {
+					Expect(b.Transactions).To(HaveLen(len(before.Blocks[i].Transactions)))
+
+					for j, tx := range b.Transactions {
+						Expect(tx.ID).To(Equal(before.Blocks[i].Transactions[j].ID))
+					}
+				}
+			})
+
+			DescribeTable("rejects bad query values with 400 invalid_query",
+				func(target string) {
+					expectError(get(target), http.StatusBadRequest, "invalid_query")
+				},
+				Entry("zero limit", "/headers?limit=0"),
+				Entry("non-integer limit", "/headers?limit=abc"),
+				Entry("non-integer from", "/headers?from=abc"),
+			)
+
+			It("returns 405 for POST /headers with Allow GET, HEAD", func() {
+				req := httptest.NewRequest(http.MethodPost, "/headers", nil)
+				rec := httptest.NewRecorder()
+				router.ServeHTTP(rec, req)
+				Expect(rec.Code).To(Equal(http.StatusMethodNotAllowed))
+				Expect(rec.Body.String()).To(BeEmpty())
+				Expect(rec.Header().Get("Allow")).To(Equal("GET, HEAD"))
+			})
+
+			It("returns 500 when the chain cannot be read", func() {
+				srv, err := NewServer(brokenChain{}, Config{})
+				Expect(err).NotTo(HaveOccurred())
+
+				h := srv.Handler()
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/headers", nil))
+				Expect(rec.Code).To(Equal(http.StatusInternalServerError))
+			})
+		})
+
 		Describe("GET /block/{ref}", func() {
 			BeforeEach(func() { mineN(2) })
 

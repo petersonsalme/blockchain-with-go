@@ -113,6 +113,38 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
+  /headers:
+    get:
+      operationId: getHeaders
+      summary: Page through the chain headers
+      parameters:
+        - name: from
+          in: query
+          description: First height of the page.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          description: Page size; values above 1000 are capped at 1000.
+          schema:
+            type: integer
+            minimum: 1
+            default: 1000
+      responses:
+        "200":
+          description: One page of headers; every block has null Transactions.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/pageResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /block/{ref}:
     get:
       operationId: getBlock
