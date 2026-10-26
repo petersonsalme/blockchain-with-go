@@ -692,3 +692,31 @@ func TestRunStopsRelayWorkerOnCancel(t *testing.T) {
 }
 
 func slogTo(w io.Writer) *slog.Logger { return slog.New(slog.NewTextHandler(w, nil)) }
+
+func TestSuccessfulRelayLogsNothing(t *testing.T) {
+	var buf syncBuf
+
+	good := newFakePeer(t)
+
+	n, err := NewNode(chain1(), NewBook(Limits{}, nil), idE, "", WithLedger(newLedger()), WithLogger(slogTo(&buf)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	connect(t, n, idC, good.srv.URL)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+
+	go func() { n.relayLoop(ctx); close(done) }()
+
+	n.AnnounceBlock(blk(hashX))
+	good.waitFor(t, 2)
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	<-done
+
+	if buf.String() != "" {
+		t.Fatalf("log = %q", buf.String())
+	}
+}
