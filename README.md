@@ -113,7 +113,7 @@ fmt.Println(w.Address())
 
 ## Architectural Trade-offs
 1. **In-Memory Storage vs. Persistence**: The node supports both in-memory and persistent disk storage. When `DATA_DIR` is set, blocks and hash indexes are persisted to `$DATA_DIR/chain.db` via the bbolt adapter (`internal/storage/bolt`). When `DATA_DIR` is empty, state lives in memory (`internal/storage/memory`) and is lost on restart. The UTXO set remains derived in memory and is rebuilt from the chain at startup (ADR-0001, ADR-0004).
-2. **Centralization vs. P2P Network**: Nodes talk to each other over the same HTTP server, with no second port and no new dependency ([ADR-0013](docs/adr/0013-p2p-over-http.md)). A node says hello to its peers (`POST /p2p/hello`: protocol version, genesis hash, height, tip), refuses incompatible ones, exchanges peer addresses (`GET /p2p/peers`) and keeps a persisted list, starting from `SEED_PEERS`. The price is polling: a "connection" is a peer entry that a hello created and a later round refreshes every `PEER_INTERVAL`, so a peer's height is at most one round old. Blocks and transactions do not travel between nodes yet (gossip and sync are separate roadmap items), there is no authentication between peers and a node dials the addresses its peers advertise (see [SECURITY.md](SECURITY.md)). Two independently started nodes only pair when their genesis blocks are identical.
+2. **Centralization vs. P2P Network**: Nodes talk to each other over the same HTTP server, with no second port and no new dependency ([ADR-0013](docs/adr/0013-p2p-over-http.md)). A node says hello to its peers (`POST /p2p/hello`: protocol version, genesis hash, height, tip), refuses incompatible ones, exchanges peer addresses (`GET /p2p/peers`) and keeps a persisted list, starting from `SEED_PEERS`. The price is polling: a "connection" is a peer entry that a hello created and a later round refreshes every `PEER_INTERVAL`, so a peer's height is at most one round old. Blocks and transactions travel by gossip ([ADR-0018](docs/adr/0018-block-and-tx-gossip.md)): the announcer posts the hashes (`POST /p2p/inv`), the peer answers the ones it wants and the announcer then posts those objects (`POST /p2p/block`, `POST /p2p/tx`). The price is one extra round-trip before each object, which saves sending every object to every neighbour; a block reaches a node only if it extends that node's tip (a node that is behind learns it through the sync of a separate roadmap item) and a peer without a `P2P_LISTEN_ADDR` cannot receive pushes. There is no authentication between peers and a node dials the addresses its peers advertise (see [SECURITY.md](SECURITY.md)). Two independently started nodes only pair when their genesis blocks are identical.
 3. **Sybil Protection (Proof of Work)**: A Proof of Work (PoW) mechanism is implemented to require computational effort for block creation and mitigate spam. The difficulty (number of leading zero **bits** required in the 256-bit block hash, so one step doubles the expected work; [ADR-0012](docs/adr/0012-difficulty-bits.md)) is configured via the `POW_DIFFICULTY` environment variable, defaulting to `8`. The logic lives in the `consensus` package behind the `Consensus` interface (`Seal`/`Verify`); `consensus.ProofOfWork` is the default implementation, and `POW_DIFFICULTY` is read once at startup (`cmd/bwg`).
    - **Difficulty Retargeting**: Each block records its difficulty in `b.Difficulty` (included in the SHA-256 hash), and validation requires it to equal the difficulty the rule expects for that position in the chain, then checks the proof of work against it. The child of genesis uses `POW_DIFFICULTY`; every `POW_RETARGET_INTERVAL` blocks the difficulty moves by one towards `TARGET_BLOCK_TIME` (up when the window took less than half the target, down when it took more than twice), within `1..32`; other blocks inherit the parent's difficulty. `Seal` and `Verify` receive the chain history for this ([ADR-0008](docs/adr/0008-difficulty-retargeting.md)). Miners still choose block timestamps within the ENG-18 bounds, so time-warp attacks are not prevented.
    - **Parallel Mining**: `Seal` searches the nonce space with `MINING_WORKERS` goroutines (worker `i` tries the nonces `i, i+w, i+2w, …` on its own copy of the block). The first valid nonce cancels the others, and `Seal` returns only after all workers stopped. Any nonce that solves the difficulty is valid, so the nonce found may differ between runs when there is more than one worker; validation is unchanged.
@@ -511,6 +511,28 @@ A refused hello leaves the peer list unchanged.
 ```
 
 Other methods answer `405` with `Allow: POST` and `Allow: GET, HEAD`; the rate limiter, the body limit, the log and the metrics apply as on every other route.
+
+### POST /p2p/inv, POST /p2p/block and POST /p2p/tx
+
+Block and transaction gossip ([ADR-0018](docs/adr/0018-block-and-tx-gossip.md)). A node mines a block or admits a transaction, queues it, and a relay worker offers it to every connected peer that has an address, except the peer the object came from: `POST /p2p/inv` carries the hashes, the answer lists the ones the peer wants, and each wanted object is then posted to `/p2p/block` or `/p2p/tx`. A received object is relayed only after the chain appended it (it must extend the tip) or the pool admitted it. Every body carries the sender's `node_id`, which must be a connected peer; it is not authentication. Without the peer layer the three routes answer `404` `p2p_disabled`, and mining and submitting work without announcing.
+
+```
+curl -X POST localhost:8080/p2p/inv -d '{"node_id":"<32 hex>","items":[{"type":"block","hash":"<64 hex>"},{"type":"tx","hash":"<64 hex>"}]}'
+curl -X POST localhost:8080/p2p/block -d '{"node_id":"<32 hex>","block":{...}}'
+curl -X POST localhost:8080/p2p/tx -d '{"node_id":"<32 hex>","tx":{...}}'
+```
+
+| Status | `code` | Route | Cause |
+|---|---|---|---|
+| `200` | | inv | `{"want": [...]}`: the items the node wants, in request order (`[]` when it has them all). |
+| `200` | | block, tx | `{"status": "accepted"}` or `{"status": "known"}`. |
+| `400` | `invalid_inv` | inv | Invalid JSON, unknown field, 0 or more than 1000 items, unknown type or a hash that is not 64 lowercase hex. |
+| `400` | `invalid_body` | block, tx | Invalid JSON, unknown field or trailing data. |
+| `403` | `unknown_peer` | all | `node_id` is not a connected peer. |
+| `404` | `p2p_disabled` | all | The node has no peer-to-peer layer. |
+| `409` | `not_on_tip` | block | The block does not extend the current tip. |
+| `413` | `request_too_large` | all | Body over the limit. |
+| `422` | `invalid_block` / `invalid_tx` | block / tx | The object failed validation; it is not relayed. |
 
 ### GET /metrics
 

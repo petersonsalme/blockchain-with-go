@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/petersonsalme/blockchain-with-go/internal/chain"
+	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/internal/p2p"
 )
 
@@ -26,10 +29,27 @@ const (
 	peersFileName = "peers.json"
 )
 
-// newP2PNode builds the peer-to-peer node of this process from the environment.
-// Its book starts with the addresses in DATA_DIR/peers.json plus SEED_PEERS; a
+// chainLedger adapts *chain.Service to p2p.Ledger (ADR-0018). The embedded service
+// provides HasBlock and HasTx.
+type chainLedger struct{ *chain.Service }
+
+// SubmitTx admits tx into the pool.
+func (l chainLedger) SubmitTx(tx domain.Transaction) error { return l.Submit(tx) }
+
+// AcceptBlock appends b; a block that does not extend the tip also satisfies errors.Is(err, p2p.ErrNotOnTip).
+func (l chainLedger) AcceptBlock(ctx context.Context, b *domain.Block) error {
+	err := l.Service.AcceptBlock(ctx, b)
+	if errors.Is(err, chain.ErrNotOnTip) {
+		return fmt.Errorf("%w: %w", p2p.ErrNotOnTip, err)
+	}
+
+	return err
+}
+
+// newP2PNode builds the peer-to-peer node of this process from the environment,
+// with gossip over svc. Its book starts with the addresses in DATA_DIR/peers.json plus SEED_PEERS; a
 // corrupt file, a bad seed or a bad listen address fails the start.
-func newP2PNode(c p2p.ChainView, dataDir string, logger *slog.Logger) (*p2p.Node, error) {
+func newP2PNode(svc *chain.Service, dataDir string, logger *slog.Logger) (*p2p.Node, error) {
 	seeds, err := parseSeedPeers(os.Getenv(seedPeersEnvVar))
 	if err != nil {
 		return nil, err
@@ -43,6 +63,7 @@ func newP2PNode(c p2p.ChainView, dataDir string, logger *slog.Logger) (*p2p.Node
 	opts := []p2p.Option{
 		p2p.WithInterval(parsePeerInterval(os.Getenv(peerIntervalEnvVar))),
 		p2p.WithLogger(logger),
+		p2p.WithLedger(chainLedger{svc}),
 	}
 
 	if strings.TrimSpace(dataDir) != "" {
@@ -65,7 +86,7 @@ func newP2PNode(c p2p.ChainView, dataDir string, logger *slog.Logger) (*p2p.Node
 		return nil, err
 	}
 
-	node, err := p2p.NewNode(c, book, id, strings.TrimSpace(os.Getenv(p2pListenAddrEnvVar)), opts...)
+	node, err := p2p.NewNode(svc, book, id, strings.TrimSpace(os.Getenv(p2pListenAddrEnvVar)), opts...)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", p2pListenAddrEnvVar, err)
 	}

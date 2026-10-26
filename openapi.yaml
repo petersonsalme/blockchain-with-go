@@ -509,6 +509,162 @@ paths:
                 $ref: "#/components/schemas/errorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
+  /p2p/inv:
+    post:
+      operationId: p2pInv
+      summary: Announce objects by hash (gossip)
+      description: A connected peer announces 1 to 1000 block or transaction hashes (ADR-0018); the node answers the items it wants, those neither seen recently nor known to the ledger, in request order. `node_id` is the sender's id from the handshake; it is not authentication. The body must hold exactly these fields.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/invRequest"
+      responses:
+        "200":
+          description: The items the node wants (empty when it has them all).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/wantResponse"
+        "400":
+          description: Invalid JSON, unknown field, no item or more than 1000, an unknown item type or a hash that is not 64 lowercase hex characters (`invalid_inv`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "403":
+          description: The sender is not a connected peer (`unknown_peer`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "404":
+          description: The node has no peer-to-peer layer or gossip (`p2p_disabled`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "413":
+          description: Request body exceeds the maximum size (`request_too_large`; `details.max` is the limit).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /p2p/block:
+    post:
+      operationId: p2pBlock
+      summary: Send a block a peer asked for (gossip)
+      description: A connected peer sends a block after the node wanted it in answer to an inv (ADR-0018). The block is relayed to the other peers only after it was appended to the chain, so it must extend the current tip and pass the same checks as a mined block. The block uses the Go field names of `GET /blocks`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/blockGossipRequest"
+      responses:
+        "200":
+          description: "`accepted` when the block was appended, `known` when the node already had it."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/gossipResponse"
+        "400":
+          description: Invalid JSON, unknown field or trailing data (`invalid_body`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "403":
+          description: The sender is not a connected peer (`unknown_peer`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "404":
+          description: The node has no peer-to-peer layer or gossip (`p2p_disabled`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "409":
+          description: The block does not extend the current tip (`not_on_tip`); sync and forks are not part of gossip.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "413":
+          description: Request body exceeds the maximum size (`request_too_large`; `details.max` is the limit).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "422":
+          description: The block is invalid (`invalid_block`); it is not relayed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /p2p/tx:
+    post:
+      operationId: p2pTx
+      summary: Send a transaction a peer asked for (gossip)
+      description: A connected peer sends a transaction after the node wanted it in answer to an inv (ADR-0018). The transaction is relayed to the other peers only after the pool admitted it. It uses the Go field names of the mined transaction (`Contract`, not `contract`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/txGossipRequest"
+      responses:
+        "200":
+          description: "`accepted` when the pool admitted the transaction, `known` when the node already had it."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/gossipResponse"
+        "400":
+          description: Invalid JSON, unknown field or trailing data (`invalid_body`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "403":
+          description: The sender is not a connected peer (`unknown_peer`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "404":
+          description: The node has no peer-to-peer layer or gossip (`p2p_disabled`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "413":
+          description: Request body exceeds the maximum size (`request_too_large`; `details.max` is the limit).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "422":
+          description: The transaction is invalid (`invalid_tx`); it is not relayed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   responses:
     BadRequest:
@@ -836,3 +992,57 @@ components:
           type: array
           items:
             type: string
+    invItem:
+      type: object
+      required: [type, hash]
+      properties:
+        type:
+          type: string
+          enum: [block, tx]
+        hash:
+          type: string
+          description: 64 lowercase hex characters; the block hash or the transaction ID.
+    invRequest:
+      type: object
+      required: [node_id, items]
+      properties:
+        node_id:
+          type: string
+          description: 32 lowercase hex characters; the sender's id from the handshake.
+        items:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            $ref: "#/components/schemas/invItem"
+    wantResponse:
+      type: object
+      required: [want]
+      properties:
+        want:
+          type: array
+          items:
+            $ref: "#/components/schemas/invItem"
+    blockGossipRequest:
+      type: object
+      required: [node_id, block]
+      properties:
+        node_id:
+          type: string
+        block:
+          $ref: "#/components/schemas/block"
+    txGossipRequest:
+      type: object
+      required: [node_id, tx]
+      properties:
+        node_id:
+          type: string
+        tx:
+          $ref: "#/components/schemas/transaction"
+    gossipResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [accepted, known]
