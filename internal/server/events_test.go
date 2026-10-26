@@ -42,7 +42,7 @@ func openStream(ctx context.Context, url string) (*sseStream, error) {
 		return nil, err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req) //nolint:bodyclose // the body is closed by sseStream.close
 	if err != nil {
 		return nil, err
 	}
