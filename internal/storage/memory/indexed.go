@@ -52,7 +52,7 @@ func cloneOuts(m map[domain.OutPoint]domain.TxOut) map[domain.OutPoint]domain.Tx
 	return out
 }
 
-func (ix index) clone() index {
+func (ix *index) clone() index {
 	c := newIndex()
 
 	c.utxos = domain.UTXOSet(cloneOuts(ix.utxos))

@@ -30,7 +30,7 @@ type StateView interface {
 
 // State maps a contract ID (the hash of its deploying transaction) to the
 // contract. It is derived from the chain by BuildState and never persisted.
-type State map[string]Contract
+type State map[string]Contract //nolint:recvcheck // map type: Apply needs a pointer to initialise a nil State, reads do not
 
 // Contract returns the contract with the given ID.
 func (s State) Contract(id string) (Contract, bool) {
