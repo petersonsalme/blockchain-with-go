@@ -42,6 +42,10 @@ var ErrInsufficientWork = errors.New("chain: candidate has no more work than the
 // start at the local genesis block.
 var ErrGenesisMismatch = errors.New("chain: candidate genesis differs from the local genesis")
 
+// ErrNotOnTip is returned by AcceptBlock when the block does not extend the
+// current tip.
+var ErrNotOnTip = errors.New("chain: block does not extend the tip")
+
 // Reorg describes a chain switch made by ReplaceChain.
 type Reorg struct {
 	// ForkHeight is the Index of the first block that changed.
@@ -582,6 +586,96 @@ func (s *Service) ReplaceChain(ctx context.Context, candidate []*domain.Block) (
 		Connected:    connected,
 		Orphaned:     orphaned(disconnected, connected),
 	}, nil
+}
+
+// AcceptBlock appends b, a block received from outside, when it extends the
+// tip. A block that does not fails with ErrNotOnTip; otherwise b gets the
+// checks ReplaceChain applies to a candidate block, in the same order, against
+// the confirmed state. The first failure returns its error and leaves the
+// repository, the UTXO set, the contract state and the pool untouched. An
+// accepted block removes from the pool the transactions it holds and those it
+// conflicts with. Calls are serialized with Mine and ReplaceChain; waiting for
+// the turn is bounded by ctx.
+func (s *Service) AcceptBlock(ctx context.Context, b *domain.Block) error {
+	if b == nil {
+		return ErrInvalidBlock
+	}
+
+	release, err := s.lock(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	history, err := s.repo.All()
+	if err != nil {
+		return err
+	}
+
+	if len(history) == 0 {
+		return storage.ErrEmpty
+	}
+
+	tip := history[len(history)-1]
+	if b.PrevHash != tip.Hash || b.Index != tip.Index+1 {
+		return ErrNotOnTip
+	}
+
+	err = s.consensus.Verify(history, b)
+	if err != nil {
+		return err
+	}
+
+	err = domain.ValidateBlockRules(b, tip, time.Now())
+	if err != nil {
+		return err
+	}
+
+	delta, err := domain.BlockDelta(s.repo, b, false)
+	if err != nil {
+		return err
+	}
+
+	err = verifyInputs(s.repo, b.Transactions)
+	if err != nil {
+		return err
+	}
+
+	contractDelta, err := s.confirmedDelta(b.Transactions)
+	if err != nil {
+		return err
+	}
+
+	err = s.repo.Commit(b, delta)
+	if err != nil {
+		return s.writeFailed(err)
+	}
+
+	s.applyContracts(contractDelta)
+
+	s.pool.Prune(b, s.repo)
+
+	return nil
+}
+
+// HasBlock reports whether the chain retains a block with the given hash. It
+// never waits for Mine.
+func (s *Service) HasBlock(hash string) bool {
+	_, err := s.BlockByHash(hash)
+
+	return err == nil
+}
+
+// HasTx reports whether the transaction is in the pool or confirmed in a block
+// of the chain. It never waits for Mine.
+func (s *Service) HasTx(id string) bool {
+	if s.pool.Has(id) {
+		return true
+	}
+
+	_, err := s.repo.TxHeight(id)
+
+	return err == nil
 }
 
 // applyContracts adds d to the contract state once its block is committed.

@@ -166,6 +166,16 @@ func (p *Pool) Prune(b *domain.Block, view domain.UTXOView) {
 	})
 }
 
+// Has reports whether the pool holds the transaction with the given ID.
+func (p *Pool) Has(id string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	_, ok := p.byID[id]
+
+	return ok
+}
+
 // Len is the number of transactions in the pool.
 func (p *Pool) Len() int {
 	p.mu.Lock()
