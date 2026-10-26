@@ -28,6 +28,7 @@ type Book struct {
 	now    func() time.Time
 	addrs  map[string]struct{}
 	peers  map[string]*PeerInfo
+	bans   map[string]time.Time // by NodeID or normalised address, until when
 }
 
 // NewBook returns an empty book; a nil now means time.Now.
@@ -48,7 +49,7 @@ func NewBook(l Limits, now func() time.Time) *Book {
 		now = time.Now
 	}
 
-	return &Book{limits: l, now: now, addrs: map[string]struct{}{}, peers: map[string]*PeerInfo{}}
+	return &Book{limits: l, now: now, addrs: map[string]struct{}{}, peers: map[string]*PeerInfo{}, bans: map[string]time.Time{}}
 }
 
 // AddAddrs normalises and stores addresses, ignoring invalid and repeated
@@ -86,12 +87,13 @@ func (b *Book) Candidates() []string {
 		used[p.Addr] = true
 	}
 
-	return b.sortedAddrs(func(a string) bool { return !used[a] })
+	return b.sortedAddrs(func(a string) bool { return !used[a] && !b.bannedLocked(a) })
 }
 
-// Connect registers the sender of h as a peer. A NodeID that is already
-// connected is only refreshed; a new one over the limit of its direction is
-// refused with ErrPeerLimit. A refusal leaves the book unchanged.
+// Connect registers the sender of h as a peer. A banned NodeID or address is
+// refused with ErrBanned. A NodeID that is already connected is only
+// refreshed; a new one over the limit of its direction is refused with
+// ErrPeerLimit. A refusal leaves the book unchanged.
 func (b *Book) Connect(h Hello, inbound bool) error {
 	addr := ""
 
@@ -106,6 +108,10 @@ func (b *Book) Connect(h Hello, inbound bool) error {
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	if b.bannedLocked(h.NodeID) || (addr != "" && b.bannedLocked(addr)) {
+		return ErrBanned
+	}
 
 	if p, ok := b.peers[h.NodeID]; ok {
 		p.Height, p.TipHash, p.LastSeen = h.Height, h.TipHash, b.now()
@@ -141,6 +147,36 @@ func (b *Book) Disconnect(nodeID string) {
 	defer b.mu.Unlock()
 
 	delete(b.peers, nodeID)
+}
+
+// Ban disconnects nodeID and, until the given time, makes Connect refuse that
+// NodeID and that address with ErrBanned and Candidates skip the address. An
+// empty or invalid addr bans the NodeID alone.
+func (b *Book) Ban(nodeID, addr string, until time.Time) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	delete(b.peers, nodeID)
+	b.bans[nodeID] = until
+
+	a, err := NormalizeAddr(addr)
+	if err == nil {
+		b.bans[a] = until
+	}
+}
+
+// Banned reports whether the NodeID or the address is banned now.
+func (b *Book) Banned(nodeID, addr string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.bannedLocked(nodeID) {
+		return true
+	}
+
+	a, err := NormalizeAddr(addr)
+
+	return err == nil && b.bannedLocked(a)
 }
 
 // Peers returns a copy of the connected peers, ordered by NodeID.
@@ -179,6 +215,21 @@ func (b *Book) Expire(before time.Time) int {
 
 // MaxOutbound returns the effective limit of outbound peers.
 func (b *Book) MaxOutbound() int { return b.limits.MaxOutbound }
+
+// bannedLocked reports whether key is banned now, forgetting an expired ban.
+func (b *Book) bannedLocked(key string) bool {
+	until, ok := b.bans[key]
+	if !ok {
+		return false
+	}
+
+	if !b.now().Before(until) {
+		delete(b.bans, key)
+		return false
+	}
+
+	return true
+}
 
 func (b *Book) addLocked(raw string) bool {
 	a, err := NormalizeAddr(raw)

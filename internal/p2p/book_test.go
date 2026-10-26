@@ -316,3 +316,96 @@ func TestBookConcurrent(t *testing.T) {
 
 	wg.Wait()
 }
+
+func TestBanRefusesNodeAndAddressUntilItExpires(t *testing.T) {
+	c := newClock()
+	b := NewBook(Limits{}, c.now)
+
+	err := b.Connect(hAt(1, "http://a:1"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b.Ban(nid(1), "http://a:1", c.now().Add(time.Minute))
+
+	if len(b.Peers()) != 0 {
+		t.Fatal("Ban must disconnect the peer")
+	}
+
+	if !b.Banned(nid(1), "") || !b.Banned("", "http://A:1/") || b.Banned(nid(2), "http://b:1") {
+		t.Fatal("Banned must match the NodeID or the normalised address, and only those")
+	}
+
+	err = b.Connect(hAt(1, "http://z:1"), false)
+	if !errors.Is(err, ErrBanned) {
+		t.Fatalf("banned NodeID: %v", err)
+	}
+
+	err = b.Connect(hAt(2, "http://a:1"), false)
+	if !errors.Is(err, ErrBanned) {
+		t.Fatalf("banned address: %v", err)
+	}
+
+	err = b.Connect(hAt(2, ""), false)
+	if err != nil {
+		t.Fatalf("an unrelated peer without address: %v", err)
+	}
+
+	b.AddAddrs("http://a:1", "http://b:1")
+
+	if got := b.Candidates(); !reflect.DeepEqual(got, []string{"http://b:1"}) {
+		t.Fatalf("Candidates = %v", got)
+	}
+
+	c.add(time.Minute - time.Nanosecond)
+
+	if !b.Banned(nid(1), "") {
+		t.Fatal("the ban ended early")
+	}
+
+	c.add(time.Nanosecond)
+
+	if b.Banned(nid(1), "http://a:1") {
+		t.Fatal("the ban did not end at until")
+	}
+
+	err = b.Connect(hAt(1, "http://a:1"), false)
+	if err != nil {
+		t.Fatalf("after the ban: %v", err)
+	}
+
+	if got := b.Candidates(); !reflect.DeepEqual(got, []string{"http://b:1"}) {
+		t.Fatalf("Candidates after the ban = %v", got)
+	}
+}
+
+func TestBanWithoutAddressBansTheNodeAlone(t *testing.T) {
+	b := NewBook(Limits{}, nil)
+	b.Ban(nid(1), "", time.Now().Add(time.Hour))
+	b.Ban(nid(2), "not an address", time.Now().Add(time.Hour))
+
+	err := b.Connect(hAt(3, ""), false)
+	if err != nil {
+		t.Fatalf("a peer without address must not match the empty key: %v", err)
+	}
+
+	if b.Banned(nid(3), "") {
+		t.Fatal("an empty address is never banned")
+	}
+}
+
+func TestBanRefusesAnAlreadyConnectedNodeThatReturns(t *testing.T) {
+	b := NewBook(Limits{}, nil)
+
+	err := b.Connect(hAt(1, ""), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b.Ban(nid(1), "", time.Now().Add(time.Hour))
+
+	err = b.Connect(hAt(1, ""), true)
+	if !errors.Is(err, ErrBanned) {
+		t.Fatalf("err = %v", err)
+	}
+}
