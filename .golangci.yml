@@ -63,6 +63,7 @@ linters:
     - dupword
     - godoclint
     - gochecknoinits
+    - goconst
   settings:
     nlreturn:
       # Same threshold as wsl_v5's branch-max-lines: a return in a block of up to 2 lines needs no blank line.
@@ -111,9 +112,9 @@ linters:
         text: mapKey
       # Test fixtures use fixed seeds, local URLs and small constants.
       - path: _test\.go
-        linters: [gosec, unparam, forcetypeassert, thelper, errchkjson, nilnil, prealloc, gochecknoinits]
-      - path: internal/storage/storagetest/
-        linters: [prealloc]
+        linters: [gosec, unparam, forcetypeassert, thelper, errchkjson, nilnil, prealloc, gochecknoinits, goconst]
+      - path: internal/(storage/storagetest|consensus/consensustest)/
+        linters: [prealloc, goconst]
       - path: _test\.go
         linters: [revive]
         text: "(redefines-builtin-id|context-as-argument|empty-block)"
