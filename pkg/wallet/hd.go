@@ -11,7 +11,7 @@ import (
 )
 
 // ErrInvalidPath indicates that a derivation path is malformed or uses
-// unhardened derivation, which is not supported by SLIP-0010 for Ed25519 (ADR-0014).
+// unhardened derivation, which is not supported by SLIP-0010 for Ed25519 (ADR-0017).
 var ErrInvalidPath = errors.New("wallet: invalid derivation path")
 
 const hardenedOffset uint32 = 1 << 31
@@ -72,7 +72,7 @@ func deriveSLIP10(seed []byte, path string) (key, chainCode []byte, err error) {
 }
 
 // DeriveKey derives an Ed25519 Wallet from a master seed using SLIP-0010
-// hardened key derivation (ADR-0014). The path must start with "m" and every
+// hardened key derivation (ADR-0017). The path must start with "m" and every
 // subsequent component must be hardened (e.g. "m/44'/1'/0'/0'/0'").
 func DeriveKey(seed []byte, path string) (*Wallet, error) {
 	key, _, err := deriveSLIP10(seed, path)
@@ -83,7 +83,7 @@ func DeriveKey(seed []byte, path string) (*Wallet, error) {
 }
 
 // FromMnemonic derives an Ed25519 Wallet from a BIP-39 mnemonic phrase and
-// optional passphrase using SLIP-0010 key derivation at the specified path (ADR-0014).
+// optional passphrase using SLIP-0010 key derivation at the specified path (ADR-0017).
 func FromMnemonic(mnemonic, passphrase, path string) (*Wallet, error) {
 	seed, err := MnemonicToSeed(mnemonic, passphrase)
 	if err != nil {
