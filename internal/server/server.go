@@ -50,7 +50,7 @@ type Chain interface {
 
 // Peers is the peer-to-peer port behind POST /p2p/hello and GET /p2p/peers (ADR-0013); *p2p.Node satisfies it.
 type Peers interface {
-	Accept(p2p.Hello) (p2p.Hello, error)
+	Accept(hello p2p.Hello) (p2p.Hello, error)
 	Peers() []p2p.PeerInfo
 	Addrs() []string
 }

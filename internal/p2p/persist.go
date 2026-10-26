@@ -59,8 +59,8 @@ func SaveAddrs(path string, addrs []string) error {
 }
 
 type tmpFile interface {
-	Write([]byte) (int, error)
-	Chmod(os.FileMode) error
+	Write(p []byte) (int, error)
+	Chmod(mode os.FileMode) error
 	Sync() error
 	Close() error
 }

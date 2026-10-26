@@ -21,7 +21,7 @@ var (
 
 // UTXOView is a read-only view of the unspent outputs.
 type UTXOView interface {
-	Lookup(OutPoint) (TxOut, bool)
+	Lookup(op OutPoint) (TxOut, bool)
 }
 
 // UTXODelta is the net effect of a block: outputs removed from and added to the set.
