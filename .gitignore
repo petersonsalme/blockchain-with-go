@@ -17,3 +17,6 @@
 # Local data directories and databases
 data/
 *.db
+
+# goreleaser output
+dist/
