@@ -13,7 +13,7 @@ This is a personal learning project and a pilot for AI-agent tooling. Changes ma
 ## Checklist
 
 - [ ] `go test ./...` passes
-- [ ] `gofmt -s -l .` reports nothing
+- [ ] `golangci-lint run ./...` reports nothing (it also checks gofumpt and goimports)
 - [ ] `go build -o /dev/null ./cmd/bwg` succeeds
 - [ ] Dependencies still point inward (`domain` imports nothing internal; `chain` does not import `server` or `net/http`)
 - [ ] No global state added; dependencies are injected through constructors
@@ -25,7 +25,7 @@ This is a personal learning project and a pilot for AI-agent tooling. Changes ma
 Run from the repository root, without a package path, after `go clean -testcache`:
 
 ```
-go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --timeout-coefficient 20 --diff <base>
+go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --timeout-coefficient 20 -E 'storagetest|consensustest' --diff <base>
 ```
 
 Paste the output below. Zero `LIVED` or `NOT COVERED` mutants on the changed lines; `TIMED OUT` does not count as killed.
