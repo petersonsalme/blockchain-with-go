@@ -68,7 +68,7 @@ Everything else (HTTP handlers and DTOs, logging, docs, README, CLI, build files
    - CI quality gates (`.github/workflows/go-ci.yml`), local equivalents:
      - Tests with race detector and coverage profile: `go test -race -covermode=atomic -coverprofile=coverage.out ./...`
      - Coverage floor: `scripts/check-coverage.sh coverage.out 90.0` (fails when total statement coverage is below **90.0%**; excludes, by explicit import path, the contract suites `internal/consensus/consensustest` and `internal/storage/storagetest`, which only run from adapter tests, and the generated `client`, exercised by `internal/server/contract_test.go`). Reference measurement: 94,6% at `450f42e`, without the two contract suites.
-     - Lint: `golangci-lint run ./...` (golangci-lint v2.15.0, default linters)
+     - Lint: `golangci-lint run ./...` (golangci-lint v2.15.0; the linter set, formatters and exclusions live in `.golangci.yml`, every exclusion carries its reason; a new `//nolint` needs one too)
      - Vulnerabilities: `go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...`
    - Mutation testing (gremlins v0.6.0) — two supported forms:
      - Per package: `go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --timeout-coefficient 20 ./internal/<package>` (or `./pkg/wallet`)

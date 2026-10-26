@@ -1,75 +1,84 @@
 version: "2"
 linters:
   enable:
-    - nlreturn
-    - wsl_v5
-    - whitespace
+    # Formatting and readability
+    - decorder
+    - dupword
+    - embeddedstructfieldcheck
+    - funcorder
     - godot
-    - gosec
-    - errorlint
-    - forcetypeassert
-    - nilerr
-    - modernize
-    - intrange
-    - perfsprint
-    - unconvert
-    - unparam
+    - grouper
+    - misspell
+    - nlreturn
+    - tagalign
+    - whitespace
+    - wsl_v5
+    # Correctness and errors
     - copyloopvar
+    - durationcheck
+    - errchkjson
+    - errorlint
+    - exhaustive
+    - fatcontext
+    - forcetypeassert
+    - makezero
+    - nilerr
+    - nilnesserr
+    - nilnil
+    - noinlineerr
+    - reassign
+    - recvcheck
+    - unconvert
+    - wastedassign
+    # Security
+    - gosec
+    # Resources and contexts
+    - bodyclose
+    - containedctx
+    - contextcheck
+    - noctx
+    - rowserrcheck
+    - sqlclosecheck
+    # Idioms and modernization
+    - canonicalheader
+    - dogsled
+    - errname
+    - exptostd
+    - iface
+    - importas
+    - inamedparam
+    - intrange
+    - iotamixing
+    - mirror
+    - modernize
+    - nakedret
+    - perfsprint
+    - prealloc
+    - predeclared
+    - usestdlibvars
+    # Structure and complexity
+    - gochecknoglobals
+    - gochecknoinits
+    - goconst
+    - gocyclo
+    - godoclint
+    - godox
+    - maintidx
+    - nestif
+    # Linter hygiene
+    - gocritic
+    - nolintlint
+    - revive
+    - unparam
+    # Tests
+    - ginkgolinter
     - testifylint
     - thelper
     - tparallel
     - usetesting
-    - misspell
-    - revive
-    - gocritic
+    # Logging and encoding
     - sloglint
-    - nestif
-    - rowserrcheck
-    - sqlclosecheck
-    - durationcheck
-    - nilnesserr
-    - makezero
-    - reassign
-    - exhaustive
-    - iface
-    - decorder
-    - grouper
-    - godox
-    - importas
-    - iotamixing
-    - nakedret
-    - mirror
-    - tagalign
-    - nolintlint
-    - wastedassign
-    - dogsled
-    - canonicalheader
-    - fatcontext
-    - exptostd
-    - bodyclose
-    - noctx
-    - contextcheck
-    - errchkjson
-    - recvcheck
-    - predeclared
-    - nilnil
-    - ginkgolinter
-    - usestdlibvars
-    - prealloc
-    - funcorder
-    - embeddedstructfieldcheck
-    - inamedparam
-    - errname
-    - dupword
-    - godoclint
-    - gochecknoinits
-    - goconst
-    - noinlineerr
-    - gocyclo
-    - maintidx
-    - containedctx
     - tagliatelle
-    - gochecknoglobals
   settings:
     nlreturn:
       # Same threshold as wsl_v5's branch-max-lines: a return in a block of up to 2 lines needs no blank line.
