@@ -40,7 +40,8 @@ func merkleLeaf(tx *Transaction) [sha256.Size]byte {
 }
 
 func merkleNode(left, right [sha256.Size]byte) [sha256.Size]byte {
-	data := []byte{merkleNodePrefix}
+	data := make([]byte, 0, 1+len(left)+len(right))
+	data = append(data, merkleNodePrefix)
 	data = append(data, left[:]...)
 	data = append(data, right[:]...)
 
