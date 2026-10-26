@@ -775,7 +775,7 @@ func (s *Service) ReplaceChain(ctx context.Context, candidate []*domain.Block) (
 
 	forkContracts, err := vm.BuildState(local[:fork])
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("chain: fork at height %d: %w", fork, err)
 	}
 
 	// The shared prefix is the local one, whatever else the candidate carries there.
