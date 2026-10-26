@@ -69,7 +69,7 @@ var _ = Describe("DiffUTXO", func() {
 		Expect(d.Created).To(Equal(map[domain.OutPoint]domain.TxOut{fresh: to[fresh], moved: to[moved]}))
 	})
 
-	It("takes from to to when applied, over 300 random pairs of sets", func() {
+	It("takes the from-set to the to-set when applied, over 300 random pairs of sets", func() {
 		pool := make([]domain.OutPoint, 12)
 		for i := range pool {
 			pool[i] = domain.OutPoint{TxID: "tx" + strconv.Itoa(i/3), Index: uint32(i % 3)}
