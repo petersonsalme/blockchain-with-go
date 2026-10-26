@@ -24,6 +24,7 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus/poa"
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus/pow"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
+	"github.com/petersonsalme/blockchain-with-go/internal/explorer"
 	"github.com/petersonsalme/blockchain-with-go/internal/server"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/bolt"
@@ -391,6 +392,7 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		MiningTimeout: server.ParseMiningTimeout(os.Getenv(server.MiningTimeoutEnvVar)),
 		RateLimit:     server.ParseRateLimit(os.Getenv(server.RateLimitEnvVar)),
 		Logger:        logger,
+		Explorer:      explorer.Files(),
 	})
 	if err != nil {
 		return err

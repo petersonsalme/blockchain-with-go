@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -67,6 +68,8 @@ type Config struct {
 	Now func() time.Time
 	// P2P serves the /p2p routes; nil makes them answer 404 p2p_disabled.
 	P2P Peers
+	// Explorer holds the files served read-only at /explorer/; nil leaves the route unregistered (404).
+	Explorer fs.FS
 }
 
 // Server is the HTTP adapter over a Chain.
@@ -79,6 +82,7 @@ type Server struct {
 	metrics       *metrics
 	events        *hub
 	p2p           Peers
+	explorer      fs.FS
 }
 
 // ErrNilService is returned by NewServer when svc is nil.
@@ -110,7 +114,7 @@ func NewServer(svc Chain, cfg Config) (*Server, error) {
 		now = time.Now
 	}
 
-	return &Server{chain: svc, miningTimeout: timeout, limiter: limiter, logger: logger, now: now, metrics: newMetrics(), events: newHub(), p2p: cfg.P2P}, nil
+	return &Server{chain: svc, miningTimeout: timeout, limiter: limiter, logger: logger, now: now, metrics: newMetrics(), events: newHub(), p2p: cfg.P2P, explorer: cfg.Explorer}, nil
 }
 
 // ParseMiningTimeout reads a MINING_TIMEOUT value: a Go duration or integer seconds.
@@ -166,6 +170,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/p2p/hello", methodNotAllowed("POST"))
 	mux.Handle("/p2p/peers", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/legacy/bpm", methodNotAllowed("POST"))
+
+	if s.explorer != nil {
+		mux.HandleFunc("GET "+explorerPrefix, handleExplorer(s.explorer))
+	}
 
 	var h http.Handler = mux
 	if s.limiter != nil {
