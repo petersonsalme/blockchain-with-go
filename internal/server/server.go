@@ -173,7 +173,6 @@ func (s *Server) Handler() http.Handler {
 
 	if s.explorer != nil {
 		mux.HandleFunc("GET "+explorerPrefix, handleExplorer(s.explorer))
-		mux.Handle(explorerPrefix, methodNotAllowed("GET, HEAD"))
 	}
 
 	var h http.Handler = mux
