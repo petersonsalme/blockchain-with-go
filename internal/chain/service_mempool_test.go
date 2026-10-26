@@ -143,7 +143,7 @@ var _ = Describe("Service mempool", func() {
 
 	Describe("MinePending", func() {
 		It("mines an empty block from an empty pool", func() {
-			blk, err := svc.MinePending(context.Background())
+			blk, err := minePending(svc)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(blk.Transactions).To(BeEmpty())
 			Expect(blk.Transactions).NotTo(BeNil())
@@ -156,7 +156,7 @@ var _ = Describe("Service mempool", func() {
 			}
 
 			order := ids(svc.Pending())
-			blk, err := svc.MinePending(context.Background())
+			blk, err := minePending(svc)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(ids(blk.Transactions)).To(Equal(order))
 			Expect(svc.Pending()).To(BeEmpty())
@@ -186,7 +186,7 @@ var _ = Describe("Service mempool", func() {
 			_, err := dsvc.Mine(context.Background(), df.tx())
 			Expect(err).To(MatchError(ErrStateDiverged))
 			Expect(dsvc.Submit(spendOp(0, 9))).NotTo(Succeed())
-			_, err = dsvc.MinePending(context.Background())
+			_, err = minePending(dsvc)
 			Expect(err).To(MatchError(ErrStateDiverged))
 		})
 
@@ -198,7 +198,7 @@ var _ = Describe("Service mempool", func() {
 			Expect(rsvc.Submit(rf.tx()[0])).To(Succeed())
 			before := ids(rsvc.Pending())
 
-			_, err := rsvc.MinePending(context.Background())
+			_, err := minePending(rsvc)
 			Expect(err).To(MatchError(ErrInvalidBlock))
 			Expect(ids(rsvc.Pending())).To(Equal(before))
 
@@ -213,7 +213,7 @@ var _ = Describe("Service mempool", func() {
 			Expect(rsvc.Submit(rf.tx()[0])).To(Succeed())
 			rr.armed.Store(true)
 
-			_, err := rsvc.MinePending(context.Background())
+			_, err := minePending(rsvc)
 			Expect(err).To(MatchError("all failed"))
 			Expect(rsvc.Pending()).To(HaveLen(1))
 		})
@@ -231,7 +231,7 @@ var _ = Describe("Service mempool", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(ids(svc.Pending())).To(Equal([]string{survivor.ID}))
 
-			blk, err := svc.MinePending(context.Background())
+			blk, err := minePending(svc)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(ids(blk.Transactions)).To(Equal([]string{survivor.ID}))
 		})
@@ -274,7 +274,7 @@ var _ = Describe("Service mempool", func() {
 			good := spendOp(1, 9)
 			Expect(svc.Submit(good)).To(Succeed())
 
-			blk, err := svc.MinePending(context.Background())
+			blk, err := minePending(svc)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(ids(blk.Transactions)).To(Equal([]string{good.ID}))
 			Expect(svc.Pending()).To(BeEmpty())
@@ -285,7 +285,7 @@ var _ = Describe("Service mempool", func() {
 			forged.Outputs[0].Amount = 8 // signed over 9
 			Expect(pool.Add(forged, 2)).To(Succeed())
 
-			blk, err := svc.MinePending(context.Background())
+			blk, err := minePending(svc)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(blk.Transactions).To(BeEmpty())
 			Expect(svc.Pending()).To(BeEmpty())
@@ -309,14 +309,14 @@ var _ = Describe("Service mempool", func() {
 				go func() {
 					defer wg.Done()
 
-					_, err := rsvc.MinePending(context.Background())
+					_, err := minePending(rsvc)
 					errs <- err
 				}()
 
 				wg.Wait()
 				Expect(<-errs).NotTo(HaveOccurred())
 
-				_, err := rsvc.MinePending(context.Background())
+				_, err := minePending(rsvc)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(rsvc.Pending()).To(BeEmpty())
 			}
@@ -339,7 +339,7 @@ var _ = Describe("Service mempool", func() {
 			It("seals a block within MAX_BLOCK_BYTES for any pool content with "+name, func() {
 				c := mk()
 				base, bf := funded(memory.New(), c)
-				empty, err := base.MinePending(context.Background())
+				empty, err := minePending(base)
 				Expect(err).NotTo(HaveOccurred())
 				emptySize, err := empty.Size()
 				Expect(err).NotTo(HaveOccurred())
@@ -359,7 +359,7 @@ var _ = Describe("Service mempool", func() {
 
 					order := ids(psvc.Pending())
 
-					blk, err := psvc.MinePending(context.Background())
+					blk, err := minePending(psvc)
 					Expect(err).NotTo(HaveOccurred(), "limit %d", limit)
 					Expect(domain.ValidateSize(blk, domain.MaxBlockBytes())).To(Succeed(), "limit %d", limit)
 
@@ -407,7 +407,7 @@ var _ = Describe("Service mempool", func() {
 				}
 				GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(widest(pending[:count])+slack))
 
-				blk, err := svc.MinePending(context.Background())
+				blk, err := minePending(svc)
 				Expect(err).NotTo(HaveOccurred())
 
 				if slack < 0 {
@@ -463,7 +463,7 @@ var _ = Describe("Service mempool", func() {
 			Expect(ids(svc.Pending())).To(Equal([]string{best.ID, cheap.ID}))
 			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(empty+mempool.Size(best)))
 
-			blk, err := svc.MinePending(context.Background())
+			blk, err := minePending(svc)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(ids(blk.Transactions)).To(Equal([]string{best.ID}))
 			Expect(ids(svc.Pending())).To(Equal([]string{cheap.ID}))
@@ -509,7 +509,7 @@ var _ = Describe("Service mempool", func() {
 			Expect(ids(svc.Pending())).To(Equal([]string{best.ID, mid.ID, last.ID}))
 			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(empty+2*mempool.Size(best)+1))
 
-			blk, err := svc.MinePending(context.Background())
+			blk, err := minePending(svc)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(ids(blk.Transactions)).To(Equal([]string{best.ID, last.ID}))
 		})
@@ -549,7 +549,7 @@ var _ = Describe("Service mempool", func() {
 				defer GinkgoRecover()
 				defer close(done)
 
-				_, err := gsvc.MinePending(context.Background())
+				_, err := minePending(gsvc)
 				Expect(err).NotTo(HaveOccurred())
 			}()
 

@@ -54,7 +54,7 @@ var _ = Describe("Service with a miner address", func() {
 			}
 
 			It("MinePending pays Subsidy to the miner in an empty block", func() {
-				b, err := svc.MinePending(context.Background())
+				b, err := minePending(svc)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(b.Transactions).To(HaveLen(1))
 				expectCoinbase(b, domain.Subsidy(b.Index))
@@ -92,7 +92,7 @@ var _ = Describe("Service with a miner address", func() {
 			It("keeps the repository UTXO equal to the replay of the chain and reindexes to the same set", func() {
 				_, err := svc.Mine(context.Background(), f.tx())
 				Expect(err).NotTo(HaveOccurred())
-				_, err = svc.MinePending(context.Background())
+				_, err = minePending(svc)
 				Expect(err).NotTo(HaveOccurred())
 
 				blocks, _ := repo.All()
@@ -104,7 +104,7 @@ var _ = Describe("Service with a miner address", func() {
 			It("another node accepts the mined chain through ReplaceChain", func() {
 				_, err := svc.Mine(context.Background(), f.tx())
 				Expect(err).NotTo(HaveOccurred())
-				_, err = svc.MinePending(context.Background())
+				_, err = minePending(svc)
 				Expect(err).NotTo(HaveOccurred())
 
 				blocks, _ := repo.All()
@@ -132,7 +132,7 @@ var _ = Describe("Service with a miner address", func() {
 
 			It("rejects the block when the miner address is invalid and changes nothing", func() {
 				bad, _ := funded(be.open(), engineCases[0].new(), WithMinerAddress("not-an-address"))
-				_, err := bad.MinePending(context.Background())
+				_, err := minePending(bad)
 				Expect(err).To(MatchError(domain.ErrInvalidOutput))
 
 				tip, _ := bad.Tip()
@@ -142,7 +142,7 @@ var _ = Describe("Service with a miner address", func() {
 			It("seals within MAX_BLOCK_BYTES counting the coinbase", func() {
 				c := engineCases[0].new()
 				base, _ := funded(be.open(), c, WithMinerAddress(miner.Address()))
-				empty, err := base.MinePending(context.Background())
+				empty, err := minePending(base)
 				Expect(err).NotTo(HaveOccurred())
 				emptySize, err := empty.Size()
 				Expect(err).NotTo(HaveOccurred())
@@ -160,7 +160,7 @@ var _ = Describe("Service with a miner address", func() {
 						Expect(psvc.Submit(spend(pf.owner, pf.ops[i], out))).To(Succeed())
 					}
 
-					blk, err := psvc.MinePending(context.Background())
+					blk, err := minePending(psvc)
 
 					Expect(err).NotTo(HaveOccurred(), "limit %d", limit)
 					Expect(domain.ValidateSize(blk, domain.MaxBlockBytes())).To(Succeed(), "limit %d", limit)
@@ -193,7 +193,7 @@ var _ = Describe("Service with a miner address", func() {
 					Expect(err).NotTo(HaveOccurred())
 					GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(widest+slack))
 
-					blk, err := svc.MinePending(context.Background())
+					blk, err := minePending(svc)
 
 					Expect(err).NotTo(HaveOccurred())
 
@@ -214,7 +214,7 @@ var _ = Describe("Service with a miner address", func() {
 
 			It("without the option blocks carry no coinbase", func() {
 				plain, _ := funded(be.open(), engineCases[0].new())
-				b, err := plain.MinePending(context.Background())
+				b, err := minePending(plain)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(b.Transactions).To(BeEmpty())
 			})

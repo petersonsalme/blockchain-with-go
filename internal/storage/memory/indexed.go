@@ -216,8 +216,8 @@ func (ix *index) snapshotStep(p storage.Pruning, chain []*domain.Block, t int) {
 	}
 
 	set := domain.UTXOSet(cloneOuts(ix.utxos))
-	for h := t; h > s; h-- {
-		set.Revert(ix.undo[h])
+	for i := range t - s {
+		set.Revert(ix.undo[t-i])
 	}
 
 	hash := chain[s].Hash

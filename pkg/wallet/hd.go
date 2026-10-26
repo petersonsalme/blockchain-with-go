@@ -26,7 +26,7 @@ func parsePath(path string) ([]uint32, error) {
 		return nil, nil
 	}
 
-	indices := make([]uint32, 0, len(segs)-1)
+	indices := make([]uint32, 0, len(segs))
 	for _, seg := range segs[1:] {
 		if seg == "" {
 			return nil, fmt.Errorf("%w: empty segment", ErrInvalidPath)

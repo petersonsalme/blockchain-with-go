@@ -240,3 +240,31 @@ func (f *failingWrites) Reorg(h int, bs []*domain.Block, ds []domain.UTXODelta) 
 
 	return f.IndexedRepository.Reorg(h, bs, ds)
 }
+
+// mineTimeout bounds minePending. Mining fits the block in a loop that always ends, but a
+// broken loop would spin forever; failing fast keeps the suite and mutation runs from hanging.
+const mineTimeout = 10 * time.Second
+
+// minePending runs svc.MinePending and fails the spec instead of hanging when it does not return.
+func minePending(svc *Service) (*domain.Block, error) {
+	type result struct {
+		blk *domain.Block
+		err error
+	}
+
+	done := make(chan result, 1)
+
+	go func() {
+		blk, err := svc.MinePending(context.Background())
+		done <- result{blk, err}
+	}()
+
+	select {
+	case r := <-done:
+		return r.blk, r.err
+	case <-time.After(mineTimeout):
+		Fail("MinePending did not return within " + mineTimeout.String())
+
+		return nil, nil
+	}
+}
