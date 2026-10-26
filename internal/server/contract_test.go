@@ -90,7 +90,7 @@ var fakeLocal = p2p.Hello{Version: 1, NodeID: idA, GenesisHash: zeroHash, Height
 
 // contractCases returns one case per declared (operation, status) pair.
 func contractCases() []contractCase {
-	real := func(cfg Config, opts ...chain.Option) (http.Handler, *bank) {
+	realServer := func(cfg Config, opts ...chain.Option) (http.Handler, *bank) {
 		funds := newBank()
 		svc, err := funds.service(memory.New(), pow.NewProofOfWork(1), opts...)
 		Expect(err).NotTo(HaveOccurred())
@@ -107,7 +107,7 @@ func contractCases() []contractCase {
 	}
 	plain := func(target string) func() (http.Handler, string, string) {
 		return func() (http.Handler, string, string) {
-			h, _ := real(Config{})
+			h, _ := realServer(Config{})
 			return h, target, ""
 		}
 	}
@@ -125,14 +125,14 @@ func contractCases() []contractCase {
 	limited := func(target string) func() (http.Handler, string, string) {
 		return func() (http.Handler, string, string) {
 			now := time.Unix(fixedNow, 0)
-			h, _ := real(Config{RateLimit: 1, Now: func() time.Time { return now }})
+			h, _ := realServer(Config{RateLimit: 1, Now: func() time.Time { return now }})
 
 			return h, target, ""
 		}
 	}
 	generator := func(err error) func() (http.Handler, string, string) {
 		return func() (http.Handler, string, string) {
-			h, funds := real(Config{}, chain.WithGenerator(func(context.Context, consensus.Consensus, []*domain.Block, []domain.Transaction) (*domain.Block, error) {
+			h, funds := realServer(Config{}, chain.WithGenerator(func(context.Context, consensus.Consensus, []*domain.Block, []domain.Transaction) (*domain.Block, error) {
 				return nil, err
 			}))
 
@@ -141,7 +141,7 @@ func contractCases() []contractCase {
 	}
 	mineWith := func(block *domain.Block, err error) func() (http.Handler, string, string) {
 		return func() (http.Handler, string, string) {
-			h, _ := real(Config{}, chain.WithGenerator(func(context.Context, consensus.Consensus, []*domain.Block, []domain.Transaction) (*domain.Block, error) {
+			h, _ := realServer(Config{}, chain.WithGenerator(func(context.Context, consensus.Consensus, []*domain.Block, []domain.Transaction) (*domain.Block, error) {
 				return block, err
 			}))
 
@@ -150,7 +150,7 @@ func contractCases() []contractCase {
 	}
 	post := func(body func(*bank) string, opts ...chain.Option) func() (http.Handler, string, string) {
 		return func() (http.Handler, string, string) {
-			h, funds := real(Config{}, opts...)
+			h, funds := realServer(Config{}, opts...)
 			return h, "/", body(funds)
 		}
 	}
@@ -164,7 +164,7 @@ func contractCases() []contractCase {
 	// p2pPost serves cfg over a real chain and sends a valid POST /p2p/hello body.
 	p2pPost := func(cfg Config) func() (http.Handler, string, string) {
 		return func() (http.Handler, string, string) {
-			h, _ := real(cfg)
+			h, _ := realServer(cfg)
 			return h, "/p2p/hello", helloBody(idB, 7)
 		}
 	}
@@ -186,7 +186,7 @@ func contractCases() []contractCase {
 		})},
 		{method: "POST", route: "/", status: 429, serve: func() (http.Handler, string, string) {
 			now := time.Unix(fixedNow, 0)
-			h, funds := real(Config{RateLimit: 1, Now: func() time.Time { return now }})
+			h, funds := realServer(Config{RateLimit: 1, Now: func() time.Time { return now }})
 
 			return h, "/", funds.payload()
 		}, warmup: 1},
@@ -206,7 +206,7 @@ func contractCases() []contractCase {
 		{method: "GET", route: "/block/{ref}", status: 500, serve: brokenAt("/block/0")},
 
 		{method: "GET", route: "/tx/{id}", status: 200, serve: func() (http.Handler, string, string) {
-			h, funds := real(Config{})
+			h, funds := realServer(Config{})
 			return h, "/tx/" + funds.txid, ""
 		}},
 		{method: "GET", route: "/tx/{id}", status: 400, specInvalid: true, serve: plain("/tx/xyz")},
@@ -215,7 +215,7 @@ func contractCases() []contractCase {
 		{method: "GET", route: "/tx/{id}", status: 500, serve: brokenAt("/tx/" + zeroHash)},
 
 		{method: "GET", route: "/tx/{id}/proof", status: 200, serve: func() (http.Handler, string, string) {
-			h, funds := real(Config{})
+			h, funds := realServer(Config{})
 			return h, "/tx/" + funds.txid + "/proof", ""
 		}},
 		{method: "GET", route: "/tx/{id}/proof", status: 400, specInvalid: true, serve: plain("/tx/xyz/proof")},
@@ -224,14 +224,14 @@ func contractCases() []contractCase {
 		{method: "GET", route: "/tx/{id}/proof", status: 500, serve: brokenAt("/tx/" + zeroHash + "/proof")},
 
 		{method: "GET", route: "/balance/{addr}", status: 200, serve: func() (http.Handler, string, string) {
-			h, funds := real(Config{})
+			h, funds := realServer(Config{})
 			return h, "/balance/" + funds.owner.Address(), ""
 		}},
 		{method: "GET", route: "/balance/{addr}", status: 400, serve: plain("/balance/bad")},
 		{method: "GET", route: "/balance/{addr}", status: 429, serve: limited("/balance/bad"), warmup: 1},
 
 		{method: "GET", route: "/contracts/{id}", status: 200, serve: func() (http.Handler, string, string) {
-			h, funds := real(Config{})
+			h, funds := realServer(Config{})
 			id := deployCounter(h, funds)
 
 			return h, "/contracts/" + id, ""
@@ -248,34 +248,34 @@ func contractCases() []contractCase {
 		{method: "GET", route: "/metrics", status: 429, serve: limited("/metrics"), warmup: 1},
 
 		{method: "POST", route: "/legacy/bpm", status: 410, serve: func() (http.Handler, string, string) {
-			h, _ := real(Config{})
+			h, _ := realServer(Config{})
 			return h, "/legacy/bpm", `{"BPM":70}`
 		}},
 		{method: "POST", route: "/legacy/bpm", status: 429, serve: limitedPost("/legacy/bpm"), warmup: 1},
 
 		{method: "POST", route: "/tx", status: 202, serve: func() (http.Handler, string, string) {
-			h, funds := real(Config{})
+			h, funds := realServer(Config{})
 			return h, "/tx", txBody(funds.tx(newWallet().Address(), 42))
 		}},
 		{method: "POST", route: "/tx", status: 400, specInvalid: true, serve: func() (http.Handler, string, string) {
-			h, _ := real(Config{})
+			h, _ := realServer(Config{})
 			return h, "/tx", "{}"
 		}},
 		{method: "POST", route: "/tx", status: 409, serve: func() (http.Handler, string, string) {
-			h, funds := real(Config{})
+			h, funds := realServer(Config{})
 			return h, "/tx", txBody(funds.tx(newWallet().Address(), 42))
 		}, warmup: 1},
 		{method: "POST", route: "/tx", status: 413, serve: func() (http.Handler, string, string) {
-			h, funds := real(Config{})
+			h, funds := realServer(Config{})
 			return h, "/tx", strings.TrimSuffix(txBody(funds.tx(newWallet().Address(), 42)), "}") + `,"Pad":"` + strings.Repeat("a", int(maxRequestBodyBytes())) + `"}`
 		}},
 		{method: "POST", route: "/tx", status: 422, serve: func() (http.Handler, string, string) {
-			h, funds := real(Config{})
+			h, funds := realServer(Config{})
 			return h, "/tx", txBody(funds.tx(newWallet().Address(), bankAmount+1))
 		}},
 		{method: "POST", route: "/tx", status: 429, serve: func() (http.Handler, string, string) {
 			now := time.Unix(fixedNow, 0)
-			h, funds := real(Config{RateLimit: 1, Now: func() time.Time { return now }})
+			h, funds := realServer(Config{RateLimit: 1, Now: func() time.Time { return now }})
 
 			return h, "/tx", txBody(funds.tx(newWallet().Address(), 42))
 		}, warmup: 1},

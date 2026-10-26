@@ -55,7 +55,7 @@ var _ = Describe("Execute", func() {
 	// Each program leaves its answer in storage[0] so success is observable.
 	// SSTORE pops the key first, then the value.
 	out := func(body ...any) []byte { return asm(append(body, 0, vm.OpSSTORE)...) }
-	max := ^uint64(0)
+	maxWord := ^uint64(0)
 
 	cases := []vmCase{
 		{name: "STOP halts at zero cost", code: asm(vm.OpSTOP, 1), gas: 5, writes: map[uint64]uint64{}, used: 0},
@@ -67,12 +67,12 @@ var _ = Describe("Execute", func() {
 		{name: "DUP underflow", code: asm(vm.OpDUP), gas: 5, used: 1, wantErr: vm.ErrStackUnderflow},
 		{name: "SWAP", code: out(3, 10, vm.OpSWAP, vm.OpSUB), gas: 50, writes: map[uint64]uint64{0: 7}, used: 25},
 		{name: "SWAP underflow", code: asm(1, vm.OpSWAP), gas: 5, used: 2, wantErr: vm.ErrStackUnderflow},
-		{name: "ADD wraps", code: out(max, 2, vm.OpADD), gas: 50, writes: map[uint64]uint64{0: 1}, used: 24},
+		{name: "ADD wraps", code: out(maxWord, 2, vm.OpADD), gas: 50, writes: map[uint64]uint64{0: 1}, used: 24},
 		{name: "ADD underflow", code: asm(1, vm.OpADD), gas: 5, used: 2, wantErr: vm.ErrStackUnderflow},
 		{name: "SUB is a-b with b on top", code: out(10, 3, vm.OpSUB), gas: 50, writes: map[uint64]uint64{0: 7}, used: 24},
-		{name: "SUB wraps", code: out(0, 1, vm.OpSUB), gas: 50, writes: map[uint64]uint64{0: max}, used: 24},
+		{name: "SUB wraps", code: out(0, 1, vm.OpSUB), gas: 50, writes: map[uint64]uint64{0: maxWord}, used: 24},
 		{name: "SUB underflow", code: asm(1, vm.OpSUB), gas: 5, used: 2, wantErr: vm.ErrStackUnderflow},
-		{name: "MUL wraps", code: out(max, 2, vm.OpMUL), gas: 50, writes: map[uint64]uint64{0: max - 1}, used: 24},
+		{name: "MUL wraps", code: out(maxWord, 2, vm.OpMUL), gas: 50, writes: map[uint64]uint64{0: maxWord - 1}, used: 24},
 		{name: "MUL underflow", code: asm(vm.OpMUL), gas: 5, used: 1, wantErr: vm.ErrStackUnderflow},
 		{name: "LT true", code: out(1, 2, vm.OpLT), gas: 50, writes: map[uint64]uint64{0: 1}, used: 24},
 		{name: "LT false when equal", code: out(2, 2, vm.OpLT), gas: 50, writes: map[uint64]uint64{0: 0}, used: 24},
@@ -185,7 +185,7 @@ var _ = Describe("Execute", func() {
 
 	Describe("CounterCode", func() {
 		It("increments storage[0] for 29 gas without touching the storage", func() {
-			for _, n := range []uint64{0, 1, 41, max} {
+			for _, n := range []uint64{0, 1, 41, maxWord} {
 				store := mapStorage{0: n}
 				res, err := vm.Execute(vm.CounterCode, nil, store, 29)
 				Expect(err).NotTo(HaveOccurred())
