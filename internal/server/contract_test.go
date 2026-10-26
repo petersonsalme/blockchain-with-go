@@ -327,6 +327,60 @@ func contractCases() []contractCase {
 		}, warmup: 1},
 	}
 
+	return append(cases, gossipContractCases(p2pPost)...)
+}
+
+// gossipContractCases returns one case per declared (operation, status) pair of the three gossip routes.
+func gossipContractCases(p2pPost func(Config) func() (http.Handler, string, string)) []contractCase {
+	limit := func() Config {
+		return Config{P2P: &fakePeers{}, RateLimit: 1, Now: func() time.Time { return time.Unix(fixedNow, 0) }}
+	}
+	// at serves cfg with the request path and body replaced.
+	at := func(cfg Config, path, body string) func() (http.Handler, string, string) {
+		return func() (http.Handler, string, string) {
+			h, _, _ := p2pPost(cfg)()
+			return h, path, body
+		}
+	}
+	oversized := func(body string) string {
+		return strings.TrimSuffix(body, "}") + `,"pad":"` + strings.Repeat("a", int(maxRequestBodyBytes())) + `"}`
+	}
+	fail := func(err error) Config { return Config{P2P: &fakePeers{gossipErr: err}} }
+	invalid := fmt.Errorf("%w: boom", p2p.ErrInvalidObject)
+
+	routes := []struct {
+		path, body string
+		extra      map[int]error // status to the error that produces it
+	}{
+		{"/p2p/inv", invBody(idB, p2p.InvItem{Type: p2p.InvTx, Hash: hashX}), map[int]error{400: p2p.ErrBadInv}},
+		{"/p2p/block", blockGossipBody(idB, domain.Block{Index: 1, Hash: hashX, PrevHash: hashY}), map[int]error{409: p2p.ErrNotOnTip, 422: invalid}},
+		{"/p2p/tx", txGossipBody(idB, sampleTx()), map[int]error{422: invalid}},
+	}
+
+	var cases []contractCase
+
+	for _, r := range routes {
+		add := func(status int, serve func() (http.Handler, string, string), warmup int) {
+			cases = append(cases, contractCase{method: "POST", route: r.path, status: status, serve: serve, warmup: warmup, specInvalid: status == 400})
+		}
+
+		add(200, at(Config{P2P: &fakePeers{accepted: true}}, r.path, r.body), 0)
+		add(400, at(Config{P2P: &fakePeers{}}, r.path, "{"), 0)
+		add(403, at(fail(p2p.ErrUnknownPeer), r.path, r.body), 0)
+		add(404, at(Config{}, r.path, r.body), 0)
+		add(413, at(Config{P2P: &fakePeers{}}, r.path, oversized(r.body)), 0)
+		add(429, at(limit(), r.path, r.body), 1)
+		add(500, at(fail(errors.New("boom")), r.path, r.body), 0)
+
+		for status, err := range r.extra {
+			if status == 400 {
+				continue // already covered by the malformed body
+			}
+
+			add(status, at(fail(err), r.path, r.body), 0)
+		}
+	}
+
 	return cases
 }
 

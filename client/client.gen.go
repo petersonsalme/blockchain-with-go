@@ -35,6 +35,42 @@ func (e ContractOpKind) Valid() bool {
 	}
 }
 
+// Defines values for GossipResponseStatus.
+const (
+	Accepted GossipResponseStatus = "accepted"
+	Known    GossipResponseStatus = "known"
+)
+
+// Valid indicates whether the value is a known member of the GossipResponseStatus enum.
+func (e GossipResponseStatus) Valid() bool {
+	switch e {
+	case Accepted:
+		return true
+	case Known:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InvItemType.
+const (
+	InvItemTypeBlock InvItemType = "block"
+	InvItemTypeTx    InvItemType = "tx"
+)
+
+// Valid indicates whether the value is a known member of the InvItemType enum.
+func (e InvItemType) Valid() bool {
+	switch e {
+	case InvItemTypeBlock:
+		return true
+	case InvItemTypeTx:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ProofStepSide.
 const (
 	Left  ProofStepSide = "left"
@@ -73,6 +109,12 @@ type Block struct {
 	Validator    string         `json:"Validator"`
 }
 
+// BlockGossipRequest defines model for blockGossipRequest.
+type BlockGossipRequest struct {
+	Block  Block  `json:"block"`
+	NodeId string `json:"node_id"`
+}
+
 // BlocksResponse defines model for blocksResponse.
 type BlocksResponse struct {
 	Blocks []Block `json:"Blocks"`
@@ -108,6 +150,14 @@ type ErrorResponse struct {
 	Error   string                  `json:"error"`
 }
 
+// GossipResponse defines model for gossipResponse.
+type GossipResponse struct {
+	Status GossipResponseStatus `json:"status"`
+}
+
+// GossipResponseStatus defines model for GossipResponse.Status.
+type GossipResponseStatus string
+
 // HealthResponse defines model for healthResponse.
 type HealthResponse struct {
 	Height int    `json:"height"`
@@ -130,6 +180,24 @@ type Hello struct {
 	// TipHash 64 lowercase hex characters.
 	TipHash string `json:"tip_hash"`
 	Version int    `json:"version"`
+}
+
+// InvItem defines model for invItem.
+type InvItem struct {
+	// Hash 64 lowercase hex characters; the block hash or the transaction ID.
+	Hash string      `json:"hash"`
+	Type InvItemType `json:"type"`
+}
+
+// InvItemType defines model for InvItem.Type.
+type InvItemType string
+
+// InvRequest defines model for invRequest.
+type InvRequest struct {
+	Items []InvItem `json:"items"`
+
+	// NodeId 32 lowercase hex characters; the sender's id from the handshake.
+	NodeId string `json:"node_id"`
 }
 
 // MempoolResponse defines model for mempoolResponse.
@@ -205,6 +273,12 @@ type Transaction struct {
 	Contract *ContractOp `json:"contract,omitempty"`
 }
 
+// TxGossipRequest defines model for txGossipRequest.
+type TxGossipRequest struct {
+	NodeId string      `json:"node_id"`
+	Tx     Transaction `json:"tx"`
+}
+
 // TxIn defines model for txIn.
 type TxIn struct {
 	OutIndex  uint32 `json:"OutIndex"`
@@ -231,6 +305,11 @@ type Utxo struct {
 	Amount uint64 `json:"amount"`
 	Index  uint32 `json:"index"`
 	Txid   string `json:"txid"`
+}
+
+// WantResponse defines model for wantResponse.
+type WantResponse struct {
+	Want []InvItem `json:"want"`
 }
 
 // BadRequest defines model for BadRequest.
@@ -265,8 +344,17 @@ type WriteBlockJSONRequestBody = Message
 // Deprecated: this type has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 type LegacyBpmJSONRequestBody LegacyBpmJSONBody
 
+// P2pBlockJSONRequestBody defines body for P2pBlock for application/json ContentType.
+type P2pBlockJSONRequestBody = BlockGossipRequest
+
 // P2pHelloJSONRequestBody defines body for P2pHello for application/json ContentType.
 type P2pHelloJSONRequestBody = Hello
+
+// P2pInvJSONRequestBody defines body for P2pInv for application/json ContentType.
+type P2pInvJSONRequestBody = InvRequest
+
+// P2pTxJSONRequestBody defines body for P2pTx for application/json ContentType.
+type P2pTxJSONRequestBody = TxGossipRequest
 
 // SubmitTxJSONRequestBody defines body for SubmitTx for application/json ContentType.
 type SubmitTxJSONRequestBody = Transaction
@@ -439,6 +527,24 @@ type ClientInterface interface {
 	// Corresponds with POST /mine (the `MinePending` operationId).
 	MinePending(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// P2pBlockWithBody Send a block a peer asked for (gossip)
+	//
+	// A connected peer sends a block after the node wanted it in answer to an inv (ADR-0018). The block is relayed to the other peers only after it was appended to the chain, so it must extend the current tip and pass the same checks as a mined block. The block uses the Go field names of `GET /blocks`.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /p2p/block (the `P2pBlock` operationId).
+	P2pBlockWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// P2pBlock Send a block a peer asked for (gossip)
+	//
+	// A connected peer sends a block after the node wanted it in answer to an inv (ADR-0018). The block is relayed to the other peers only after it was appended to the chain, so it must extend the current tip and pass the same checks as a mined block. The block uses the Go field names of `GET /blocks`.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /p2p/block (the `P2pBlock` operationId).
+	P2pBlock(ctx context.Context, body P2pBlockJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// P2pHelloWithBody Peer handshake
 	//
 	// A peer sends its hello; the node checks it (ADR-0013), registers the sender as an inbound peer and answers its own hello. The body must hold exactly the hello fields; an unknown field is rejected.
@@ -457,10 +563,46 @@ type ClientInterface interface {
 	// Corresponds with POST /p2p/hello (the `P2pHello` operationId).
 	P2pHello(ctx context.Context, body P2pHelloJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// P2pInvWithBody Announce objects by hash (gossip)
+	//
+	// A connected peer announces 1 to 1000 block or transaction hashes (ADR-0018); the node answers the items it wants, those neither seen recently nor known to the ledger, in request order. `node_id` is the sender's id from the handshake; it is not authentication. The body must hold exactly these fields.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /p2p/inv (the `P2pInv` operationId).
+	P2pInvWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// P2pInv Announce objects by hash (gossip)
+	//
+	// A connected peer announces 1 to 1000 block or transaction hashes (ADR-0018); the node answers the items it wants, those neither seen recently nor known to the ledger, in request order. `node_id` is the sender's id from the handshake; it is not authentication. The body must hold exactly these fields.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /p2p/inv (the `P2pInv` operationId).
+	P2pInv(ctx context.Context, body P2pInvJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetP2PPeers List the connected peers and the known addresses
 	//
 	// Corresponds with GET /p2p/peers (the `GetP2PPeers` operationId).
 	GetP2PPeers(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// P2pTxWithBody Send a transaction a peer asked for (gossip)
+	//
+	// A connected peer sends a transaction after the node wanted it in answer to an inv (ADR-0018). The transaction is relayed to the other peers only after the pool admitted it. It uses the Go field names of the mined transaction (`Contract`, not `contract`).
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /p2p/tx (the `P2pTx` operationId).
+	P2pTxWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// P2pTx Send a transaction a peer asked for (gossip)
+	//
+	// A connected peer sends a transaction after the node wanted it in answer to an inv (ADR-0018). The transaction is relayed to the other peers only after the pool admitted it. It uses the Go field names of the mined transaction (`Contract`, not `contract`).
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /p2p/tx (the `P2pTx` operationId).
+	P2pTx(ctx context.Context, body P2pTxJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// SubmitTxWithBody Admit one signed transaction into the mempool
 	//
@@ -723,6 +865,44 @@ func (c *Client) MinePending(ctx context.Context, reqEditors ...RequestEditorFn)
 	return c.Client.Do(req)
 }
 
+// P2pBlockWithBody Send a block a peer asked for (gossip)
+//
+// A connected peer sends a block after the node wanted it in answer to an inv (ADR-0018). The block is relayed to the other peers only after it was appended to the chain, so it must extend the current tip and pass the same checks as a mined block. The block uses the Go field names of `GET /blocks`.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /p2p/block (the `P2pBlock` operationId).
+func (c *Client) P2pBlockWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewP2pBlockRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// P2pBlock Send a block a peer asked for (gossip)
+//
+// A connected peer sends a block after the node wanted it in answer to an inv (ADR-0018). The block is relayed to the other peers only after it was appended to the chain, so it must extend the current tip and pass the same checks as a mined block. The block uses the Go field names of `GET /blocks`.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /p2p/block (the `P2pBlock` operationId).
+func (c *Client) P2pBlock(ctx context.Context, body P2pBlockJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewP2pBlockRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // P2pHelloWithBody Peer handshake
 //
 // A peer sends its hello; the node checks it (ADR-0013), registers the sender as an inbound peer and answers its own hello. The body must hold exactly the hello fields; an unknown field is rejected.
@@ -761,11 +941,87 @@ func (c *Client) P2pHello(ctx context.Context, body P2pHelloJSONRequestBody, req
 	return c.Client.Do(req)
 }
 
+// P2pInvWithBody Announce objects by hash (gossip)
+//
+// A connected peer announces 1 to 1000 block or transaction hashes (ADR-0018); the node answers the items it wants, those neither seen recently nor known to the ledger, in request order. `node_id` is the sender's id from the handshake; it is not authentication. The body must hold exactly these fields.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /p2p/inv (the `P2pInv` operationId).
+func (c *Client) P2pInvWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewP2pInvRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// P2pInv Announce objects by hash (gossip)
+//
+// A connected peer announces 1 to 1000 block or transaction hashes (ADR-0018); the node answers the items it wants, those neither seen recently nor known to the ledger, in request order. `node_id` is the sender's id from the handshake; it is not authentication. The body must hold exactly these fields.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /p2p/inv (the `P2pInv` operationId).
+func (c *Client) P2pInv(ctx context.Context, body P2pInvJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewP2pInvRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // GetP2PPeers List the connected peers and the known addresses
 //
 // Corresponds with GET /p2p/peers (the `GetP2PPeers` operationId).
 func (c *Client) GetP2PPeers(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetP2PPeersRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// P2pTxWithBody Send a transaction a peer asked for (gossip)
+//
+// A connected peer sends a transaction after the node wanted it in answer to an inv (ADR-0018). The transaction is relayed to the other peers only after the pool admitted it. It uses the Go field names of the mined transaction (`Contract`, not `contract`).
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /p2p/tx (the `P2pTx` operationId).
+func (c *Client) P2pTxWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewP2pTxRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// P2pTx Send a transaction a peer asked for (gossip)
+//
+// A connected peer sends a transaction after the node wanted it in answer to an inv (ADR-0018). The transaction is relayed to the other peers only after the pool admitted it. It uses the Go field names of the mined transaction (`Contract`, not `contract`).
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /p2p/tx (the `P2pTx` operationId).
+func (c *Client) P2pTx(ctx context.Context, body P2pTxJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewP2pTxRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1254,6 +1510,46 @@ func NewMinePendingRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewP2pBlockRequest calls the generic P2pBlock builder with application/json body
+func NewP2pBlockRequest(server string, body P2pBlockJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewP2pBlockRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewP2pBlockRequestWithBody constructs an http.Request for the P2pBlock method, with any body, and a specified content type
+func NewP2pBlockRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/p2p/block")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewP2pHelloRequest calls the generic P2pHello builder with application/json body
 func NewP2pHelloRequest(server string, body P2pHelloJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -1275,6 +1571,46 @@ func NewP2pHelloRequestWithBody(server string, contentType string, body io.Reade
 	}
 
 	operationPath := fmt.Sprintf("/p2p/hello")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewP2pInvRequest calls the generic P2pInv builder with application/json body
+func NewP2pInvRequest(server string, body P2pInvJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewP2pInvRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewP2pInvRequestWithBody constructs an http.Request for the P2pInv method, with any body, and a specified content type
+func NewP2pInvRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/p2p/inv")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -1317,6 +1653,46 @@ func NewGetP2PPeersRequest(server string) (*http.Request, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewP2pTxRequest calls the generic P2pTx builder with application/json body
+func NewP2pTxRequest(server string, body P2pTxJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewP2pTxRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewP2pTxRequestWithBody constructs an http.Request for the P2pTx method, with any body, and a specified content type
+func NewP2pTxRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/p2p/tx")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -1587,6 +1963,24 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /mine (the `MinePending` operationId).
 	MinePendingWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*MinePendingResponse, error)
 
+	// P2pBlockWithBodyWithResponse Send a block a peer asked for (gossip)
+	//
+	// A connected peer sends a block after the node wanted it in answer to an inv (ADR-0018). The block is relayed to the other peers only after it was appended to the chain, so it must extend the current tip and pass the same checks as a mined block. The block uses the Go field names of `GET /blocks`.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /p2p/block (the `P2pBlock` operationId).
+	P2pBlockWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*P2pBlockResponse, error)
+
+	// P2pBlockWithResponse Send a block a peer asked for (gossip)
+	//
+	// A connected peer sends a block after the node wanted it in answer to an inv (ADR-0018). The block is relayed to the other peers only after it was appended to the chain, so it must extend the current tip and pass the same checks as a mined block. The block uses the Go field names of `GET /blocks`.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /p2p/block (the `P2pBlock` operationId).
+	P2pBlockWithResponse(ctx context.Context, body P2pBlockJSONRequestBody, reqEditors ...RequestEditorFn) (*P2pBlockResponse, error)
+
 	// P2pHelloWithBodyWithResponse Peer handshake
 	//
 	// A peer sends its hello; the node checks it (ADR-0013), registers the sender as an inbound peer and answers its own hello. The body must hold exactly the hello fields; an unknown field is rejected.
@@ -1605,12 +1999,48 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /p2p/hello (the `P2pHello` operationId).
 	P2pHelloWithResponse(ctx context.Context, body P2pHelloJSONRequestBody, reqEditors ...RequestEditorFn) (*P2pHelloResponse, error)
 
+	// P2pInvWithBodyWithResponse Announce objects by hash (gossip)
+	//
+	// A connected peer announces 1 to 1000 block or transaction hashes (ADR-0018); the node answers the items it wants, those neither seen recently nor known to the ledger, in request order. `node_id` is the sender's id from the handshake; it is not authentication. The body must hold exactly these fields.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /p2p/inv (the `P2pInv` operationId).
+	P2pInvWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*P2pInvResponse, error)
+
+	// P2pInvWithResponse Announce objects by hash (gossip)
+	//
+	// A connected peer announces 1 to 1000 block or transaction hashes (ADR-0018); the node answers the items it wants, those neither seen recently nor known to the ledger, in request order. `node_id` is the sender's id from the handshake; it is not authentication. The body must hold exactly these fields.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /p2p/inv (the `P2pInv` operationId).
+	P2pInvWithResponse(ctx context.Context, body P2pInvJSONRequestBody, reqEditors ...RequestEditorFn) (*P2pInvResponse, error)
+
 	// GetP2PPeersWithResponse List the connected peers and the known addresses
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with GET /p2p/peers (the `GetP2PPeers` operationId).
 	GetP2PPeersWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetP2PPeersResponse, error)
+
+	// P2pTxWithBodyWithResponse Send a transaction a peer asked for (gossip)
+	//
+	// A connected peer sends a transaction after the node wanted it in answer to an inv (ADR-0018). The transaction is relayed to the other peers only after the pool admitted it. It uses the Go field names of the mined transaction (`Contract`, not `contract`).
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /p2p/tx (the `P2pTx` operationId).
+	P2pTxWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*P2pTxResponse, error)
+
+	// P2pTxWithResponse Send a transaction a peer asked for (gossip)
+	//
+	// A connected peer sends a transaction after the node wanted it in answer to an inv (ADR-0018). The transaction is relayed to the other peers only after the pool admitted it. It uses the Go field names of the mined transaction (`Contract`, not `contract`).
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /p2p/tx (the `P2pTx` operationId).
+	P2pTxWithResponse(ctx context.Context, body P2pTxJSONRequestBody, reqEditors ...RequestEditorFn) (*P2pTxResponse, error)
 
 	// SubmitTxWithBodyWithResponse Admit one signed transaction into the mempool
 	//
@@ -2459,6 +2889,110 @@ func (r MinePendingResponse) ContentType() string {
 	return ""
 }
 
+// P2pBlockResponse429Headers the declared response headers of an HTTP 429 response for P2pBlock
+type P2pBlockResponse429Headers struct {
+	RetryAfter int
+}
+
+type P2pBlockResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *GossipResponse
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ErrorResponse
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ErrorResponse
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *ErrorResponse
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ErrorResponse
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *ErrorResponse
+	// JSON422 the response for an HTTP 422 `application/json` response
+	JSON422 *ErrorResponse
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *RateLimited
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalError
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *P2pBlockResponse429Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r P2pBlockResponse) GetJSON200() *GossipResponse {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r P2pBlockResponse) GetJSON400() *ErrorResponse {
+	return r.JSON400
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r P2pBlockResponse) GetJSON403() *ErrorResponse {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r P2pBlockResponse) GetJSON404() *ErrorResponse {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r P2pBlockResponse) GetJSON409() *ErrorResponse {
+	return r.JSON409
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r P2pBlockResponse) GetJSON413() *ErrorResponse {
+	return r.JSON413
+}
+
+// GetJSON422 returns the response for an HTTP 422 `application/json` response
+func (r P2pBlockResponse) GetJSON422() *ErrorResponse {
+	return r.JSON422
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r P2pBlockResponse) GetJSON429() *RateLimited {
+	return r.JSON429
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r P2pBlockResponse) GetJSON500() *InternalError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r P2pBlockResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r P2pBlockResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r P2pBlockResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r P2pBlockResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // P2pHelloResponse429Headers the declared response headers of an HTTP 429 response for P2pHello
 type P2pHelloResponse429Headers struct {
 	RetryAfter int
@@ -2556,6 +3090,96 @@ func (r P2pHelloResponse) ContentType() string {
 	return ""
 }
 
+// P2pInvResponse429Headers the declared response headers of an HTTP 429 response for P2pInv
+type P2pInvResponse429Headers struct {
+	RetryAfter int
+}
+
+type P2pInvResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *WantResponse
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ErrorResponse
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ErrorResponse
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *ErrorResponse
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *ErrorResponse
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *RateLimited
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalError
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *P2pInvResponse429Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r P2pInvResponse) GetJSON200() *WantResponse {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r P2pInvResponse) GetJSON400() *ErrorResponse {
+	return r.JSON400
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r P2pInvResponse) GetJSON403() *ErrorResponse {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r P2pInvResponse) GetJSON404() *ErrorResponse {
+	return r.JSON404
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r P2pInvResponse) GetJSON413() *ErrorResponse {
+	return r.JSON413
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r P2pInvResponse) GetJSON429() *RateLimited {
+	return r.JSON429
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r P2pInvResponse) GetJSON500() *InternalError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r P2pInvResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r P2pInvResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r P2pInvResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r P2pInvResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // GetP2PPeersResponse429Headers the declared response headers of an HTTP 429 response for GetP2PPeers
 type GetP2PPeersResponse429Headers struct {
 	RetryAfter int
@@ -2612,6 +3236,103 @@ func (r GetP2PPeersResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetP2PPeersResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// P2pTxResponse429Headers the declared response headers of an HTTP 429 response for P2pTx
+type P2pTxResponse429Headers struct {
+	RetryAfter int
+}
+
+type P2pTxResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *GossipResponse
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ErrorResponse
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ErrorResponse
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *ErrorResponse
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *ErrorResponse
+	// JSON422 the response for an HTTP 422 `application/json` response
+	JSON422 *ErrorResponse
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *RateLimited
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalError
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *P2pTxResponse429Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r P2pTxResponse) GetJSON200() *GossipResponse {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r P2pTxResponse) GetJSON400() *ErrorResponse {
+	return r.JSON400
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r P2pTxResponse) GetJSON403() *ErrorResponse {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r P2pTxResponse) GetJSON404() *ErrorResponse {
+	return r.JSON404
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r P2pTxResponse) GetJSON413() *ErrorResponse {
+	return r.JSON413
+}
+
+// GetJSON422 returns the response for an HTTP 422 `application/json` response
+func (r P2pTxResponse) GetJSON422() *ErrorResponse {
+	return r.JSON422
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r P2pTxResponse) GetJSON429() *RateLimited {
+	return r.JSON429
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r P2pTxResponse) GetJSON500() *InternalError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r P2pTxResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r P2pTxResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r P2pTxResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r P2pTxResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -3057,6 +3778,36 @@ func (c *ClientWithResponses) MinePendingWithResponse(ctx context.Context, reqEd
 	return ParseMinePendingResponse(rsp)
 }
 
+// P2pBlockWithBodyWithResponse Send a block a peer asked for (gossip)
+//
+// A connected peer sends a block after the node wanted it in answer to an inv (ADR-0018). The block is relayed to the other peers only after it was appended to the chain, so it must extend the current tip and pass the same checks as a mined block. The block uses the Go field names of `GET /blocks`.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /p2p/block (the `P2pBlock` operationId).
+func (c *ClientWithResponses) P2pBlockWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*P2pBlockResponse, error) {
+	rsp, err := c.P2pBlockWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseP2pBlockResponse(rsp)
+}
+
+// P2pBlockWithResponse Send a block a peer asked for (gossip)
+//
+// A connected peer sends a block after the node wanted it in answer to an inv (ADR-0018). The block is relayed to the other peers only after it was appended to the chain, so it must extend the current tip and pass the same checks as a mined block. The block uses the Go field names of `GET /blocks`.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /p2p/block (the `P2pBlock` operationId).
+func (c *ClientWithResponses) P2pBlockWithResponse(ctx context.Context, body P2pBlockJSONRequestBody, reqEditors ...RequestEditorFn) (*P2pBlockResponse, error) {
+	rsp, err := c.P2pBlock(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseP2pBlockResponse(rsp)
+}
+
 // P2pHelloWithBodyWithResponse Peer handshake
 //
 // A peer sends its hello; the node checks it (ADR-0013), registers the sender as an inbound peer and answers its own hello. The body must hold exactly the hello fields; an unknown field is rejected.
@@ -3087,6 +3838,36 @@ func (c *ClientWithResponses) P2pHelloWithResponse(ctx context.Context, body P2p
 	return ParseP2pHelloResponse(rsp)
 }
 
+// P2pInvWithBodyWithResponse Announce objects by hash (gossip)
+//
+// A connected peer announces 1 to 1000 block or transaction hashes (ADR-0018); the node answers the items it wants, those neither seen recently nor known to the ledger, in request order. `node_id` is the sender's id from the handshake; it is not authentication. The body must hold exactly these fields.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /p2p/inv (the `P2pInv` operationId).
+func (c *ClientWithResponses) P2pInvWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*P2pInvResponse, error) {
+	rsp, err := c.P2pInvWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseP2pInvResponse(rsp)
+}
+
+// P2pInvWithResponse Announce objects by hash (gossip)
+//
+// A connected peer announces 1 to 1000 block or transaction hashes (ADR-0018); the node answers the items it wants, those neither seen recently nor known to the ledger, in request order. `node_id` is the sender's id from the handshake; it is not authentication. The body must hold exactly these fields.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /p2p/inv (the `P2pInv` operationId).
+func (c *ClientWithResponses) P2pInvWithResponse(ctx context.Context, body P2pInvJSONRequestBody, reqEditors ...RequestEditorFn) (*P2pInvResponse, error) {
+	rsp, err := c.P2pInv(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseP2pInvResponse(rsp)
+}
+
 // GetP2PPeersWithResponse List the connected peers and the known addresses
 //
 // Returns a wrapper object for the known response body format(s).
@@ -3098,6 +3879,36 @@ func (c *ClientWithResponses) GetP2PPeersWithResponse(ctx context.Context, reqEd
 		return nil, err
 	}
 	return ParseGetP2PPeersResponse(rsp)
+}
+
+// P2pTxWithBodyWithResponse Send a transaction a peer asked for (gossip)
+//
+// A connected peer sends a transaction after the node wanted it in answer to an inv (ADR-0018). The transaction is relayed to the other peers only after the pool admitted it. It uses the Go field names of the mined transaction (`Contract`, not `contract`).
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /p2p/tx (the `P2pTx` operationId).
+func (c *ClientWithResponses) P2pTxWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*P2pTxResponse, error) {
+	rsp, err := c.P2pTxWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseP2pTxResponse(rsp)
+}
+
+// P2pTxWithResponse Send a transaction a peer asked for (gossip)
+//
+// A connected peer sends a transaction after the node wanted it in answer to an inv (ADR-0018). The transaction is relayed to the other peers only after the pool admitted it. It uses the Go field names of the mined transaction (`Contract`, not `contract`).
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /p2p/tx (the `P2pTx` operationId).
+func (c *ClientWithResponses) P2pTxWithResponse(ctx context.Context, body P2pTxJSONRequestBody, reqEditors ...RequestEditorFn) (*P2pTxResponse, error) {
+	rsp, err := c.P2pTx(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseP2pTxResponse(rsp)
 }
 
 // SubmitTxWithBodyWithResponse Admit one signed transaction into the mempool
@@ -3865,6 +4676,101 @@ func ParseMinePendingResponse(rsp *http.Response) (*MinePendingResponse, error) 
 	return response, nil
 }
 
+// ParseP2pBlockResponse parses an HTTP response from a P2pBlockWithResponse call
+func ParseP2pBlockResponse(rsp *http.Response) (*P2pBlockResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &P2pBlockResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest GossipResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest RateLimited
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers P2pBlockResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
 // ParseP2pHelloResponse parses an HTTP response from a P2pHelloWithResponse call
 func ParseP2pHelloResponse(rsp *http.Response) (*P2pHelloResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -3953,6 +4859,87 @@ func ParseP2pHelloResponse(rsp *http.Response) (*P2pHelloResponse, error) {
 	return response, nil
 }
 
+// ParseP2pInvResponse parses an HTTP response from a P2pInvWithResponse call
+func ParseP2pInvResponse(rsp *http.Response) (*P2pInvResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &P2pInvResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest WantResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest RateLimited
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers P2pInvResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
 // ParseGetP2PPeersResponse parses an HTTP response from a GetP2PPeersWithResponse call
 func ParseGetP2PPeersResponse(rsp *http.Response) (*GetP2PPeersResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -3993,6 +4980,94 @@ func ParseGetP2PPeersResponse(rsp *http.Response) (*GetP2PPeersResponse, error) 
 	switch {
 	case rsp.StatusCode == 429:
 		var headers GetP2PPeersResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseP2pTxResponse parses an HTTP response from a P2pTxWithResponse call
+func ParseP2pTxResponse(rsp *http.Response) (*P2pTxResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &P2pTxResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest GossipResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest RateLimited
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers P2pTxResponse429Headers
 		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
 			var value int
 			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {

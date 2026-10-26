@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -25,7 +26,36 @@ type fakePeers struct {
 	err   error
 	peers []p2p.PeerInfo
 	addrs []string
+
+	// gossip: canned answers, the arguments the handlers passed and the announcements.
+	want         []p2p.InvItem
+	gossipErr    error
+	accepted     bool
+	gotFrom      string
+	gotItems     []p2p.InvItem
+	gotBlock     *domain.Block
+	gotTx        domain.Transaction
+	announcedBlk []*domain.Block
+	announcedTx  []domain.Transaction
 }
+
+func (f *fakePeers) Inv(from string, items []p2p.InvItem) ([]p2p.InvItem, error) {
+	f.gotFrom, f.gotItems = from, items
+	return f.want, f.gossipErr
+}
+
+func (f *fakePeers) ReceiveBlock(_ context.Context, from string, b *domain.Block) (bool, error) {
+	f.gotFrom, f.gotBlock = from, b
+	return f.accepted, f.gossipErr
+}
+
+func (f *fakePeers) ReceiveTx(from string, tx domain.Transaction) (bool, error) {
+	f.gotFrom, f.gotTx = from, tx
+	return f.accepted, f.gossipErr
+}
+
+func (f *fakePeers) AnnounceBlock(b *domain.Block)    { f.announcedBlk = append(f.announcedBlk, b) }
+func (f *fakePeers) AnnounceTx(tx domain.Transaction) { f.announcedTx = append(f.announcedTx, tx) }
 
 func (f *fakePeers) Accept(h p2p.Hello) (p2p.Hello, error) {
 	f.got, f.calls = h, f.calls+1

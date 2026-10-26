@@ -49,11 +49,16 @@ type Chain interface {
 	Contract(id string) (code []byte, storage map[uint64]uint64, ok bool)
 }
 
-// Peers is the peer-to-peer port behind POST /p2p/hello and GET /p2p/peers (ADR-0013); *p2p.Node satisfies it.
+// Peers is the peer-to-peer port behind the /p2p routes (ADR-0013 handshake, ADR-0018 gossip); *p2p.Node satisfies it.
 type Peers interface {
 	Accept(hello p2p.Hello) (p2p.Hello, error)
 	Peers() []p2p.PeerInfo
 	Addrs() []string
+	Inv(from string, items []p2p.InvItem) ([]p2p.InvItem, error)
+	ReceiveBlock(ctx context.Context, from string, b *domain.Block) (bool, error)
+	ReceiveTx(from string, tx domain.Transaction) (bool, error)
+	AnnounceBlock(b *domain.Block)
+	AnnounceTx(tx domain.Transaction)
 }
 
 // Config holds the Server settings.
@@ -169,6 +174,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/events", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/p2p/hello", methodNotAllowed("POST"))
 	mux.Handle("/p2p/peers", methodNotAllowed("GET, HEAD"))
+	mux.Handle("/p2p/inv", methodNotAllowed("POST"))
+	mux.Handle("/p2p/block", methodNotAllowed("POST"))
+	mux.Handle("/p2p/tx", methodNotAllowed("POST"))
 	mux.Handle("/legacy/bpm", methodNotAllowed("POST"))
 
 	if s.explorer != nil {
@@ -223,6 +231,9 @@ func (s *Server) routes() []route {
 		{"GET /events", s.handleEvents},
 		{"POST /p2p/hello", s.handleP2PHello},
 		{"GET /p2p/peers", s.handleP2PPeers},
+		{"POST /p2p/inv", s.handleP2PInv},
+		{"POST /p2p/block", s.handleP2PBlock},
+		{"POST /p2p/tx", s.handleP2PTx},
 		{"POST /legacy/bpm", s.handleLegacyBPM},
 	}
 }
@@ -530,6 +541,10 @@ func (s *Server) mineAndRespond(w http.ResponseWriter, r *http.Request, mine fun
 	s.metrics.observeMining(s.now().Sub(start))
 	s.events.publish(eventBlock, newBlock)
 
+	if s.p2p != nil {
+		s.p2p.AnnounceBlock(newBlock)
+	}
+
 	respondWithJSON(w, http.StatusCreated, newBlock)
 }
 
@@ -576,6 +591,11 @@ func (s *Server) handleSubmitTx(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.events.publish(eventTx, tx)
+
+	if s.p2p != nil {
+		s.p2p.AnnounceTx(tx)
+	}
+
 	respondWithJSON(w, http.StatusAccepted, submitResponse{ID: tx.ID})
 }
 
