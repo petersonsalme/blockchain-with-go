@@ -51,6 +51,19 @@ func WithLogger(l *slog.Logger) Option {
 	}
 }
 
+// WithSyncLedger turns initial block download and fork resolution on; nil keeps it off.
+func WithSyncLedger(l SyncLedger) Option { return func(n *Node) { n.sync = l } }
+
+// WithBanDuration sets how long a misbehaving peer stays banned; a value <= 0
+// keeps DefaultBanDuration.
+func WithBanDuration(d time.Duration) Option {
+	return func(n *Node) {
+		if d > 0 {
+			n.banFor = d
+		}
+	}
+}
+
 // Node answers handshakes on behalf of the local chain.
 type Node struct {
 	chain      ChainView
@@ -64,6 +77,10 @@ type Node struct {
 	addrFile string
 	log      *slog.Logger
 	now      func() time.Time
+
+	sync        SyncLedger
+	banFor      time.Duration
+	syncTimeout time.Duration
 
 	ledger  Ledger
 	maxSeen int
@@ -89,7 +106,7 @@ func NewNode(c ChainView, b *Book, nodeID, listenAddr string, opts ...Option) (*
 	n := &Node{
 		chain: c, book: b, nodeID: nodeID, listenAddr: listenAddr, version: ProtocolVersion,
 		client: newClient(), interval: 30 * time.Second, log: slog.New(slog.DiscardHandler), now: time.Now,
-		maxSeen: DefaultMaxSeen, queue: make(chan relay, relayQueueSize),
+		maxSeen: DefaultMaxSeen, banFor: DefaultBanDuration, syncTimeout: SyncAttemptTimeout, queue: make(chan relay, relayQueueSize),
 	}
 	for _, o := range opts {
 		o(n)

@@ -51,6 +51,11 @@ func (n *Node) Round(ctx context.Context) {
 	n.renew(ctx, local)
 	n.dial(ctx, local)
 	n.collect(ctx)
+
+	if n.sync != nil {
+		n.Sync(ctx)
+	}
+
 	n.book.Expire(n.now().Add(-3 * n.interval))
 
 	if n.addrFile != "" {
@@ -185,8 +190,21 @@ func (n *Node) fetchAddrs(ctx context.Context, addr string) ([]string, error) {
 	return resp.Addrs, nil
 }
 
+// statusError is a response with a status other than 200.
+type statusError struct {
+	method, url string
+	code        int
+}
+
+func (e *statusError) Error() string { return fmt.Sprintf("%s %s: status %d", e.method, e.url, e.code) }
+
 // do sends one request and decodes a 200 JSON response of at most maxResponseBytes into out.
 func (n *Node) do(ctx context.Context, method, url string, body []byte, out any) error {
+	return n.doMax(ctx, method, url, body, out, maxResponseBytes)
+}
+
+// doMax is do with a response bound of limit bytes.
+func (n *Node) doMax(ctx context.Context, method, url string, body []byte, out any, limit int) error {
 	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -204,15 +222,15 @@ func (n *Node) do(ctx context.Context, method, url string, body []byte, out any)
 	defer func() { _ = resp.Body.Close() }() // read-only response body
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%s %s: status %d", method, url, resp.StatusCode)
+		return &statusError{method: method, url: url, code: resp.StatusCode}
 	}
 
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, int64(limit)+1))
 	if err != nil {
 		return err
 	}
 
-	if len(raw) > maxResponseBytes {
+	if len(raw) > limit {
 		return errors.New("response too large")
 	}
 
