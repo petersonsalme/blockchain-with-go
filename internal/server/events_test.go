@@ -266,7 +266,7 @@ func (w *spyWriter) snapshot() (deadlines []time.Time, flushes int, body string)
 // serveEvents runs handleEvents on w in the background and returns a channel closed when it returns.
 func serveEvents(srv *Server, w http.ResponseWriter, ctx context.Context) <-chan struct{} {
 	done := make(chan struct{})
-	req := httptest.NewRequest(http.MethodGet, "/events", nil).WithContext(ctx)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/events", nil).WithContext(ctx)
 
 	go func() { defer close(done); srv.handleEvents(w, req) }()
 
@@ -413,7 +413,7 @@ func TestEventStreamOutlivesServerWriteTimeout(t *testing.T) {
 func TestShutdownEndsEventStreams(t *testing.T) {
 	srv := newEventsServer(t)
 
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	l, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -485,7 +485,7 @@ var _ = Describe("GET /events", func() {
 		return st
 	}
 	post := func(path, body string) (int, []byte) {
-		resp, err := http.Post(ts.URL+path, "application/json", strings.NewReader(body))
+		resp, err := postURL(ts.URL+path, "application/json", strings.NewReader(body))
 		Expect(err).NotTo(HaveOccurred())
 
 		defer func() { _ = resp.Body.Close() }()
@@ -602,7 +602,7 @@ var _ = Describe("GET /events", func() {
 	})
 
 	It("answers other methods with 405 and Allow", func() {
-		resp, err := http.Post(ts.URL+"/events", "application/json", nil)
+		resp, err := postURL(ts.URL+"/events", "application/json", nil)
 		Expect(err).NotTo(HaveOccurred())
 
 		defer func() { _ = resp.Body.Close() }()
@@ -611,3 +611,14 @@ var _ = Describe("GET /events", func() {
 		Expect(resp.Header.Get("Allow")).To(Equal("GET, HEAD"))
 	})
 })
+
+func postURL(url, contentType string, body io.Reader) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", contentType)
+
+	return http.DefaultClient.Do(req)
+}

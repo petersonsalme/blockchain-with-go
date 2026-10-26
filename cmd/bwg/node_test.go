@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -28,7 +29,7 @@ import (
 func freePort(t *testing.T) string {
 	t.Helper()
 
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	l, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +59,7 @@ func TestRunServesAndShutsDownGracefully(t *testing.T) {
 		err  error
 	)
 	for range 100 {
-		resp, err = http.Get(url)
+		resp, err = getURL(url)
 		if err == nil {
 			break
 		}
@@ -223,7 +224,7 @@ func TestBootstrapLoadsDotEnvAndRuns(t *testing.T) {
 
 	up := false
 	for i := 0; i < 100 && !up; i++ {
-		if resp, err := http.Get(url); err == nil {
+		if resp, err := getURL(url); err == nil {
 			_ = resp.Body.Close() // response body of a test request; close error is irrelevant
 			up = true
 		} else {
@@ -460,7 +461,7 @@ func TestRunServesAndShutsDownGracefullyWithDataDir(t *testing.T) {
 		err  error
 	)
 	for range 100 {
-		resp, err = http.Get(url)
+		resp, err = getURL(url)
 		if err == nil {
 			break
 		}
@@ -627,4 +628,24 @@ func TestBuildServiceMinerAddress(t *testing.T) {
 			t.Fatalf("run = %v, want error citing MINER_ADDRESS", err)
 		}
 	})
+}
+
+func getURL(url string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return http.DefaultClient.Do(req)
+}
+
+func postURL(url, contentType string, body io.Reader) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", contentType)
+
+	return http.DefaultClient.Do(req)
 }

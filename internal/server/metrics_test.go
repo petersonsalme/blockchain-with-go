@@ -57,7 +57,7 @@ func realChain(t *testing.T) (*chain.Service, *bank) {
 }
 
 func do(h http.Handler, method, target, body string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(method, target, strings.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), method, target, strings.NewReader(body))
 	req.RemoteAddr = "192.0.2.1:1234"
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)

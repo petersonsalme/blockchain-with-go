@@ -284,7 +284,7 @@ type peersBody struct {
 func getPeers(t *testing.T, base string) peersBody {
 	t.Helper()
 
-	resp, err := http.Get(base + "/p2p/peers")
+	resp, err := getURL(base + "/p2p/peers")
 	if err != nil {
 		t.Fatal(err)
 	}

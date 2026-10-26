@@ -228,7 +228,7 @@ func mineFirstBlock(t *testing.T) []domain.Block {
 
 	body, _ := json.Marshal(map[string]any{"Transactions": []domain.Transaction{tx}})
 
-	resp, err := http.Post(ts.URL+"/", "application/json", strings.NewReader(string(body)))
+	resp, err := postURL(ts.URL+"/", "application/json", strings.NewReader(string(body)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func mineFirstBlock(t *testing.T) []domain.Block {
 		t.Fatalf("POST / = %d, want 201", resp.StatusCode)
 	}
 
-	resp, err = http.Get(ts.URL + "/")
+	resp, err = getURL(ts.URL + "/")
 	if err != nil {
 		t.Fatal(err)
 	}

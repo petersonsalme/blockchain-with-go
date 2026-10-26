@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -81,7 +82,7 @@ func TestRequestLogging(t *testing.T) {
 			var rec *httptest.ResponseRecorder
 
 			serve := func() {
-				req := httptest.NewRequest(tc.method, tc.path, nil)
+				req := httptest.NewRequestWithContext(context.Background(), tc.method, tc.path, nil)
 				req.RemoteAddr = "192.0.2.1:1234"
 				rec = httptest.NewRecorder()
 				h.ServeHTTP(rec, req)
@@ -126,7 +127,7 @@ func TestRequestLoggingStatusRecorder(t *testing.T) {
 	serve := func(h http.HandlerFunc) logRecord {
 		var buf bytes.Buffer
 		logRequests(slog.New(slog.NewJSONHandler(&buf, nil)), h).
-			ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+			ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil))
 
 		logs := decodeLog(t, &buf)
 		if len(logs) != 1 {
@@ -180,7 +181,7 @@ func TestNilLoggerDiscards(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	srv.Handler().ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health", nil))
 
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", rec.Code)

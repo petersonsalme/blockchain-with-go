@@ -51,7 +51,7 @@ func TestShutdownCancelsMiningAndDrainsRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	l, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestShutdownCancelsMiningAndDrainsRequests(t *testing.T) {
 		ch := make(chan result, 1)
 
 		go func() {
-			req, err := http.NewRequest(method, base+path, strings.NewReader(body))
+			req, err := http.NewRequestWithContext(context.Background(), method, base+path, strings.NewReader(body))
 			if err != nil {
 				ch <- result{err: err}
 				return

@@ -405,7 +405,7 @@ var _ = Describe("OpenAPI contract", func() {
 				h, target, body := c.serve()
 
 				newReq := func() *http.Request {
-					req := httptest.NewRequest(c.method, target, strings.NewReader(body))
+					req := httptest.NewRequestWithContext(context.Background(), c.method, target, strings.NewReader(body))
 					if c.cancelAfter > 0 {
 						ctx, cancel := context.WithTimeout(req.Context(), c.cancelAfter)
 						DeferCleanup(cancel)
@@ -665,7 +665,7 @@ func deployCounter(h http.Handler, funds *bank) string {
 
 	for _, step := range []struct{ path, body string }{{"/tx", string(body)}, {"/mine", ""}} {
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, step.path, strings.NewReader(step.body)))
+		h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodPost, step.path, strings.NewReader(step.body)))
 		Expect(rec.Code).To(BeNumerically("<", 300), rec.Body.String())
 	}
 

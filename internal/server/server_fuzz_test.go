@@ -46,7 +46,7 @@ func FuzzWriteBlockBody(f *testing.F) {
 		}
 
 		rec := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body)))
+		srv.Handler().ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/", bytes.NewReader(body)))
 
 		switch rec.Code {
 		case http.StatusCreated, http.StatusBadRequest, http.StatusRequestEntityTooLarge:
