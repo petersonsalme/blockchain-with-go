@@ -39,9 +39,11 @@ func WriteSnapshotFile(w io.Writer, headers []*domain.Block, s Snapshot) error {
 	for op, o := range s.UTXOs {
 		f.UTXOs = append(f.UTXOs, fileUTXO{TxID: op.TxID, Index: op.Index, Address: o.Address, Amount: o.Amount})
 	}
+
 	slices.SortFunc(f.UTXOs, func(a, b fileUTXO) int {
 		return cmp.Or(strings.Compare(a.TxID, b.TxID), cmp.Compare(a.Index, b.Index))
 	})
+
 	return json.NewEncoder(w).Encode(f)
 }
 
@@ -54,21 +56,27 @@ func ReadSnapshotFile(r io.Reader) ([]*domain.Block, Snapshot, error) {
 	if err := json.NewDecoder(r).Decode(&f); err != nil {
 		return nil, Snapshot{}, fmt.Errorf("%w: %v", ErrInvalidSnapshot, err)
 	}
+
 	if len(f.Headers) == 0 || slices.Contains(f.Headers, nil) {
 		return nil, Snapshot{}, fmt.Errorf("%w: no headers", ErrInvalidSnapshot)
 	}
+
 	if f.Height != len(f.Headers)-1 {
 		return nil, Snapshot{}, fmt.Errorf("%w: height %d does not match %d headers", ErrInvalidSnapshot, f.Height, len(f.Headers))
 	}
+
 	if f.BlockHash != f.Headers[f.Height].Hash {
 		return nil, Snapshot{}, fmt.Errorf("%w: blockHash is not the hash of the last header", ErrInvalidSnapshot)
 	}
+
 	set := make(domain.UTXOSet, len(f.UTXOs))
 	for _, u := range f.UTXOs {
 		set[domain.OutPoint{TxID: u.TxID, Index: u.Index}] = domain.TxOut{Amount: u.Amount, Address: u.Address}
 	}
+
 	if f.Hash != SnapshotHash(f.BlockHash, set) {
 		return nil, Snapshot{}, fmt.Errorf("%w: hash does not match the contents", ErrInvalidSnapshot)
 	}
+
 	return f.Headers, Snapshot{Height: f.Height, BlockHash: f.BlockHash, Hash: f.Hash, UTXOs: set}, nil
 }

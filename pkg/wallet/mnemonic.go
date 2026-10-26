@@ -43,7 +43,9 @@ func MnemonicFromEntropy(entropy []byte) (string, error) {
 		if bitPos < entBits {
 			return int((entropy[bitPos/8] >> (7 - (bitPos % 8))) & 1)
 		}
+
 		csPos := bitPos - entBits
+
 		return int((hash[0] >> (7 - csPos)) & 1)
 	}
 
@@ -53,6 +55,7 @@ func MnemonicFromEntropy(entropy []byte) (string, error) {
 		for j := 0; j < 11; j++ {
 			idx = (idx << 1) | getBit(i*11+j)
 		}
+
 		words[i] = englishWords[idx]
 	}
 
@@ -62,6 +65,7 @@ func MnemonicFromEntropy(entropy []byte) (string, error) {
 // NewMnemonic generates a random BIP-39 mnemonic with 12 or 24 words.
 func NewMnemonic(words int) (string, error) {
 	var size int
+
 	switch words {
 	case 12:
 		size = 16
@@ -91,6 +95,7 @@ func MnemonicToSeed(mnemonic, passphrase string) ([]byte, error) {
 	if err := ValidateMnemonic(m); err != nil {
 		return nil, err
 	}
+
 	return pbkdf2.Key(sha512.New, m, []byte("mnemonic"+norm.NFKD.String(passphrase)), 2048, 64)
 }
 
@@ -108,6 +113,7 @@ func mnemonicToEntropy(mnemonic string) ([]byte, error) {
 		if !found {
 			return nil, fmt.Errorf("%w: unknown word %q", ErrInvalidMnemonic, w)
 		}
+
 		indices[i] = idx
 	}
 
@@ -119,6 +125,7 @@ func mnemonicToEntropy(mnemonic string) ([]byte, error) {
 	totalBytes := (totalBits + 7) / 8
 
 	data := make([]byte, totalBytes)
+
 	for i, idx := range indices {
 		for j := 0; j < 11; j++ {
 			bit := (idx >> (10 - j)) & 1
@@ -133,6 +140,7 @@ func mnemonicToEntropy(mnemonic string) ([]byte, error) {
 	hash := sha256.Sum256(entropy)
 
 	mnemonicCS := data[entropyBytes] >> (8 - csBits)
+
 	expectedCS := hash[0] >> (8 - csBits)
 	if mnemonicCS != expectedCS {
 		return nil, fmt.Errorf("%w: checksum mismatch", ErrInvalidMnemonic)

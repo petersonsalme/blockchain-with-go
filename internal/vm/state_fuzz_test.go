@@ -17,9 +17,12 @@ func FuzzBuildStateMatchesIncremental(f *testing.F) {
 	f.Add([]byte{1, 0, 0, 1, 2, 255, 0, 3, 1})
 	f.Add([]byte{})
 	f.Fuzz(func(t *testing.T, data []byte) {
-		var blocks []*domain.Block
-		var cur []domain.Transaction
-		var ids []string
+		var (
+			blocks []*domain.Block
+			cur    []domain.Transaction
+			ids    []string
+		)
+
 		for _, b := range data {
 			switch {
 			case b == 255: // seal the block
@@ -33,12 +36,14 @@ func FuzzBuildStateMatchesIncremental(f *testing.F) {
 				cur = append(cur, callTx(ids[int(b)%len(ids)], 29))
 			}
 		}
+
 		blocks = append(blocks, blockOf(cur...))
 
 		built, err := vm.BuildState(blocks)
 		if err != nil {
 			t.Fatalf("BuildState: %v", err)
 		}
+
 		again, err := vm.BuildState(blocks)
 		if err != nil || !reflect.DeepEqual(built, again) {
 			t.Fatalf("BuildState not deterministic: %v", err)
@@ -50,8 +55,10 @@ func FuzzBuildStateMatchesIncremental(f *testing.F) {
 			if err != nil {
 				t.Fatalf("block %d: %v", i, err)
 			}
+
 			inc.Apply(delta)
 		}
+
 		if !reflect.DeepEqual(built, inc) {
 			t.Fatalf("BuildState %v != incremental %v", built, inc)
 		}

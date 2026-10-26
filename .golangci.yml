@@ -1,8 +1,31 @@
 version: "2"
 linters:
+  enable:
+    - nlreturn
+    - wsl_v5
+    - whitespace
+    - godot
+  settings:
+    nlreturn:
+      # Same threshold as wsl_v5's branch-max-lines: a return in a block of up to 2 lines needs no blank line.
+      block-size: 3
+    wsl_v5:
+      enable:
+        - leading-whitespace
+        - trailing-whitespace
   exclusions:
     rules:
       # Ginkgo/Gomega contract suites use dot imports by convention.
       - path: internal/(consensus/consensustest|storage/storagetest)/
         linters: [staticcheck]
         text: "ST1001"
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    gofumpt:
+      module-path: github.com/petersonsalme/blockchain-with-go
+    goimports:
+      local-prefixes:
+        - github.com/petersonsalme/blockchain-with-go

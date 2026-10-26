@@ -18,8 +18,10 @@ const maxResponseBytes = 1 << 20
 func (n *Node) Run(ctx context.Context) {
 	ticker := time.NewTicker(n.interval)
 	defer ticker.Stop()
+
 	for {
 		n.Round(ctx)
+
 		select {
 		case <-ctx.Done():
 			return
@@ -38,10 +40,12 @@ func (n *Node) Round(ctx context.Context) {
 		n.log.Error("p2p: cannot build the local hello", "error", err)
 		return
 	}
+
 	n.renew(ctx, local)
 	n.dial(ctx, local)
 	n.collect(ctx)
 	n.book.Expire(n.now().Add(-3 * n.interval))
+
 	if n.addrFile != "" {
 		if err := SaveAddrs(n.addrFile, n.book.Addrs()); err != nil {
 			n.log.Error("p2p: cannot save peers", "path", n.addrFile, "error", err)
@@ -51,11 +55,13 @@ func (n *Node) Round(ctx context.Context) {
 
 func (n *Node) outbound() []PeerInfo {
 	var out []PeerInfo
+
 	for _, p := range n.book.Peers() {
 		if !p.Inbound {
 			out = append(out, p)
 		}
 	}
+
 	return out
 }
 
@@ -66,13 +72,17 @@ func (n *Node) renew(ctx context.Context, local Hello) {
 		if ctx.Err() != nil {
 			return
 		}
+
 		remote, err := n.handshake(ctx, p.Addr, local)
 		if err != nil {
 			n.log.Warn("p2p: peer dropped", "addr", p.Addr, "error", err)
 			n.book.Disconnect(p.NodeID)
+
 			continue
 		}
+
 		n.book.Disconnect(p.NodeID) // the peer may have restarted with a new identity
+
 		if err := n.book.Connect(remote, false); err != nil {
 			n.log.Warn("p2p: peer dropped", "addr", p.Addr, "error", err)
 		}
@@ -86,18 +96,22 @@ func (n *Node) dial(ctx context.Context, local Hello) {
 		if count >= n.book.MaxOutbound() || ctx.Err() != nil {
 			return
 		}
+
 		if addr == n.listenAddr {
 			continue
 		}
+
 		remote, err := n.handshake(ctx, addr, local)
 		if err != nil {
 			n.log.Warn("p2p: dial failed", "addr", addr, "error", err)
 			continue
 		}
+
 		if err := n.book.Connect(remote, false); err != nil {
 			n.log.Warn("p2p: dial failed", "addr", addr, "error", err)
 			continue
 		}
+
 		count++
 	}
 }
@@ -108,11 +122,13 @@ func (n *Node) collect(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+
 		addrs, err := n.fetchAddrs(ctx, p.Addr)
 		if err != nil {
 			n.log.Warn("p2p: cannot fetch peers", "addr", p.Addr, "error", err)
 			continue
 		}
+
 		for _, a := range addrs {
 			if norm, err := NormalizeAddr(a); err == nil && norm != n.listenAddr {
 				n.book.AddAddrs(norm)
@@ -127,14 +143,18 @@ func (n *Node) handshake(ctx context.Context, addr string, local Hello) (Hello, 
 	if err != nil {
 		return Hello{}, err
 	}
+
 	var remote Hello
 	if err := n.do(ctx, http.MethodPost, addr+"/p2p/hello", body, &remote); err != nil {
 		return Hello{}, err
 	}
+
 	if err := Check(local, remote); err != nil {
 		return Hello{}, err
 	}
+
 	remote.ListenAddr = addr // an outbound peer is known by the address we dialled
+
 	return remote, nil
 }
 
@@ -145,6 +165,7 @@ func (n *Node) fetchAddrs(ctx context.Context, addr string) ([]string, error) {
 	if err := n.do(ctx, http.MethodGet, addr+"/p2p/peers", nil, &resp); err != nil {
 		return nil, err
 	}
+
 	return resp.Addrs, nil
 }
 
@@ -154,23 +175,30 @@ func (n *Node) do(ctx context.Context, method, url string, body []byte, out any)
 	if err != nil {
 		return err
 	}
+
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+
 	resp, err := n.client.Do(req)
 	if err != nil {
 		return err
 	}
+
 	defer func() { _ = resp.Body.Close() }() // read-only response body
+
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("%s %s: status %d", method, url, resp.StatusCode)
 	}
+
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
 		return err
 	}
+
 	if len(raw) > maxResponseBytes {
 		return errors.New("response too large")
 	}
+
 	return json.Unmarshal(raw, out)
 }

@@ -10,6 +10,7 @@ func BlockWork(b *Block) *big.Int {
 	if b == nil {
 		return new(big.Int)
 	}
+
 	return new(big.Int).Lsh(big.NewInt(1), uint(max(b.Difficulty, 0)))
 }
 
@@ -19,5 +20,6 @@ func ChainWork(blocks []*Block) *big.Int {
 	for _, b := range blocks {
 		sum.Add(sum, BlockWork(b))
 	}
+
 	return sum
 }

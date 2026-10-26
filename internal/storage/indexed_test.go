@@ -13,6 +13,7 @@ func tx(salt int64, ins []domain.OutPoint, outs ...domain.TxOut) domain.Transact
 	for _, op := range ins {
 		t.Inputs = append(t.Inputs, domain.TxIn{PrevTxID: op.TxID, OutIndex: op.Index})
 	}
+
 	return t
 }
 
@@ -38,10 +39,12 @@ func TestIndexTxs(t *testing.T) {
 	if len(got) != len(want) {
 		t.Fatalf("got %d entries, want %d", len(got), len(want))
 	}
+
 	for i := range want {
 		if got[i].TxID != want[i].TxID || got[i].Pos != want[i].Pos || len(got[i].Addrs) != len(want[i].Addrs) {
 			t.Fatalf("entry %d: got %+v, want %+v", i, got[i], want[i])
 		}
+
 		for j := range want[i].Addrs {
 			if got[i].Addrs[j] != want[i].Addrs[j] {
 				t.Fatalf("entry %d: got %v, want %v", i, got[i].Addrs, want[i].Addrs)

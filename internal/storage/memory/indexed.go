@@ -49,30 +49,38 @@ func cloneOuts(m map[domain.OutPoint]domain.TxOut) map[domain.OutPoint]domain.Tx
 	for op, o := range m {
 		out[op] = o
 	}
+
 	return out
 }
 
 func (ix index) clone() index {
 	c := newIndex()
+
 	c.utxos = domain.UTXOSet(cloneOuts(ix.utxos))
 	for a, outs := range ix.addrutxo {
 		m := make(map[domain.OutPoint]uint64, len(outs))
 		for op, amount := range outs {
 			m[op] = amount
 		}
+
 		c.addrutxo[a] = m
 	}
+
 	for h, d := range ix.undo {
 		c.undo[h] = domain.UTXODelta{Spent: cloneOuts(d.Spent), Created: cloneOuts(d.Created)}
 	}
+
 	for id, h := range ix.txs {
 		c.txs[id] = h
 	}
+
 	for a, entries := range ix.addrtx {
 		c.addrtx[a] = append([]addrEntry(nil), entries...)
 	}
+
 	c.tip, c.hasTip = ix.tip, ix.hasTip
 	c.snap, c.prunedBelow = ix.snap, ix.prunedBelow
+
 	return c
 }
 
@@ -83,6 +91,7 @@ func holds(set domain.UTXOSet, outs map[domain.OutPoint]domain.TxOut) bool {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -93,6 +102,7 @@ func intersects(set domain.UTXOSet, outs map[domain.OutPoint]domain.TxOut) bool 
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -101,7 +111,9 @@ func (ix *index) apply(b *domain.Block, d domain.UTXODelta) error {
 	if !holds(ix.utxos, d.Spent) || intersects(ix.utxos, d.Created) {
 		return storage.ErrUTXOConflict
 	}
+
 	ix.applyDelta(d)
+
 	ix.undo[b.Index] = domain.UTXODelta{Spent: cloneOuts(d.Spent), Created: cloneOuts(d.Created)}
 	for _, t := range storage.IndexTxs(b, d) {
 		ix.txs[t.TxID] = b.Index
@@ -109,7 +121,9 @@ func (ix *index) apply(b *domain.Block, d domain.UTXODelta) error {
 			ix.addrtx[a] = append(ix.addrtx[a], addrEntry{height: b.Index, pos: t.Pos, txid: t.TxID})
 		}
 	}
+
 	ix.tip, ix.hasTip = b.Index, true
+
 	return nil
 }
 
@@ -120,9 +134,11 @@ func (ix *index) revert(b *domain.Block) error {
 	if !holds(ix.utxos, d.Created) || intersects(ix.utxos, d.Spent) {
 		return storage.ErrUTXOConflict
 	}
+
 	ix.revertDelta(d)
 	delete(ix.undo, b.Index)
 	ix.dropTxs(b, d)
+
 	return nil
 }
 
@@ -130,6 +146,7 @@ func (ix *index) revert(b *domain.Block) error {
 func (ix *index) dropTxs(b *domain.Block, d domain.UTXODelta) {
 	for _, t := range storage.IndexTxs(b, d) {
 		delete(ix.txs, t.TxID)
+
 		for _, a := range t.Addrs {
 			kept := ix.addrtx[a][:0]
 			for _, e := range ix.addrtx[a] {
@@ -137,6 +154,7 @@ func (ix *index) dropTxs(b *domain.Block, d domain.UTXODelta) {
 					kept = append(kept, e)
 				}
 			}
+
 			if len(kept) == 0 {
 				delete(ix.addrtx, a)
 			} else {
@@ -158,6 +176,7 @@ func (ix *index) applyDelta(d domain.UTXODelta) {
 	for op, o := range d.Spent {
 		ix.dropOut(op, o)
 	}
+
 	for op, o := range d.Created {
 		ix.putOut(op, o)
 	}
@@ -168,6 +187,7 @@ func (ix *index) revertDelta(d domain.UTXODelta) {
 	for op, o := range d.Created {
 		ix.dropOut(op, o)
 	}
+
 	for op, o := range d.Spent {
 		ix.putOut(op, o)
 	}
@@ -178,12 +198,14 @@ func (ix *index) putOut(op domain.OutPoint, o domain.TxOut) {
 	if ix.addrutxo[o.Address] == nil {
 		ix.addrutxo[o.Address] = map[domain.OutPoint]uint64{}
 	}
+
 	ix.addrutxo[o.Address][op] = o.Amount
 }
 
 func (ix *index) dropOut(op domain.OutPoint, o domain.TxOut) {
 	delete(ix.utxos, op)
 	delete(ix.addrutxo[o.Address], op)
+
 	if len(ix.addrutxo[o.Address]) == 0 {
 		delete(ix.addrutxo, o.Address)
 	}
@@ -197,15 +219,19 @@ func (ix *index) snapshotStep(p storage.Pruning, chain []*domain.Block, t int) {
 	if !ok || s < ix.prunedBelow {
 		return
 	}
+
 	set := domain.UTXOSet(cloneOuts(ix.utxos))
 	for h := t; h > s; h-- {
 		set.Revert(ix.undo[h])
 	}
+
 	hash := chain[s].Hash
 	ix.snap = &storage.Snapshot{Height: s, BlockHash: hash, Hash: storage.SnapshotHash(hash, set), UTXOs: set}
+
 	if p.KeepBlocks == 0 {
 		return
 	}
+
 	for h := ix.prunedBelow; h <= s; h++ {
 		ix.dropTxs(chain[h], ix.undo[h])
 		delete(ix.undo, h)
@@ -213,6 +239,7 @@ func (ix *index) snapshotStep(p storage.Pruning, chain []*domain.Block, t int) {
 		header.Transactions = []domain.Transaction{}
 		chain[h] = &header
 	}
+
 	ix.prunedBelow = s + 1
 }
 
@@ -241,20 +268,24 @@ func (r *Repository) Commit(b *domain.Block, d domain.UTXODelta) error {
 	if !r.current() {
 		return storage.ErrIndexStale
 	}
+
 	if n := len(r.blocks); n > 0 {
 		last := r.blocks[n-1]
 		if b.Index != last.Index+1 || b.PrevHash != last.Hash {
 			return storage.ErrConflict
 		}
 	}
+
 	if err := r.idx.apply(b, d); err != nil {
 		return err
 	}
+
 	r.blocks = append(r.blocks, b)
 	r.byHash[b.Hash] = b
 	pruned := r.idx.prunedBelow
 	r.idx.snapshotStep(r.pruning, r.blocks, b.Index)
 	r.rehash(r.blocks, pruned, r.idx.prunedBelow)
+
 	return nil
 }
 
@@ -272,6 +303,7 @@ func (r *Repository) Reorg(height int, blocks []*domain.Block, deltas []domain.U
 			return ErrNilBlock
 		}
 	}
+
 	if len(deltas) != len(blocks) {
 		return storage.ErrConflict
 	}
@@ -282,9 +314,11 @@ func (r *Repository) Reorg(height int, blocks []*domain.Block, deltas []domain.U
 	if err := r.checkSplice(height, blocks); err != nil {
 		return err
 	}
+
 	if height < r.idx.prunedBelow {
 		return storage.ErrReorgTooDeep
 	}
+
 	if !r.current() {
 		return storage.ErrIndexStale
 	}
@@ -295,6 +329,7 @@ func (r *Repository) Reorg(height int, blocks []*domain.Block, deltas []domain.U
 			return err
 		}
 	}
+
 	ix.dropSnapshotFrom(height)
 	// The cap limit forces append to copy; the pruning below edits only this copy.
 	chain := append(r.blocks[:height:height], blocks...)
@@ -302,6 +337,7 @@ func (r *Repository) Reorg(height int, blocks []*domain.Block, deltas []domain.U
 		if err := ix.apply(b, deltas[i]); err != nil {
 			return err
 		}
+
 		ix.snapshotStep(r.pruning, chain, b.Index)
 	}
 
@@ -310,6 +346,7 @@ func (r *Repository) Reorg(height int, blocks []*domain.Block, deltas []domain.U
 	r.blocks = chain
 	r.rehash(chain, pruned, ix.prunedBelow)
 	r.idx = ix
+
 	return nil
 }
 
@@ -321,6 +358,7 @@ func (r *Repository) TxHeight(txid string) (int, error) {
 	if !ok {
 		return 0, storage.ErrNotFound
 	}
+
 	return h, nil
 }
 
@@ -329,10 +367,12 @@ func (r *Repository) TxsByAddress(addr string) ([]string, error) {
 	defer r.mu.RUnlock()
 
 	entries := r.idx.addrtx[addr]
+
 	out := make([]string, len(entries))
 	for i, e := range entries {
 		out[i] = e.txid
 	}
+
 	return out, nil
 }
 
@@ -352,20 +392,25 @@ func (r *Repository) Reindex() error {
 	ix := newIndex()
 	ix.snap, ix.prunedBelow = r.idx.snap, r.idx.prunedBelow
 	from := 0
+
 	if ix.prunedBelow > 0 {
 		ix.applyDelta(domain.UTXODelta{Created: cloneOuts(ix.snap.UTXOs)})
 		from = ix.prunedBelow
 	}
+
 	for _, b := range r.blocks[from:] {
 		d, err := domain.BlockDelta(ix.utxos, b, b.Index == 0)
 		if err != nil {
 			return err
 		}
+
 		if err := ix.apply(b, d); err != nil {
 			return err
 		}
 	}
+
 	r.idx = ix
+
 	return nil
 }
 
@@ -377,8 +422,10 @@ func (r *Repository) Snapshot() (storage.Snapshot, error) {
 	if r.idx.snap == nil {
 		return storage.Snapshot{}, storage.ErrNotFound
 	}
+
 	snap := *r.idx.snap
 	snap.UTXOs = domain.UTXOSet(cloneOuts(snap.UTXOs))
+
 	return snap, nil
 }
 
@@ -397,9 +444,11 @@ func (r *Repository) UTXOsByAddress(addr string) ([]storage.AddressUTXO, error) 
 	for op, amount := range r.idx.addrutxo[addr] {
 		out = append(out, storage.AddressUTXO{OutPoint: op, Amount: amount})
 	}
+
 	slices.SortFunc(out, func(a, b storage.AddressUTXO) int {
 		return cmp.Or(strings.Compare(a.OutPoint.TxID, b.OutPoint.TxID), cmp.Compare(a.OutPoint.Index, b.OutPoint.Index))
 	})
+
 	return out, nil
 }
 
@@ -411,16 +460,20 @@ func (r *Repository) ForkState(height int) (domain.UTXOSet, error) {
 	if height < 0 || height > len(r.blocks) {
 		return nil, storage.ErrConflict
 	}
+
 	if height < r.idx.prunedBelow {
 		return nil, storage.ErrReorgTooDeep
 	}
+
 	if !r.current() {
 		return nil, storage.ErrIndexStale
 	}
+
 	set := domain.UTXOSet(cloneOuts(r.idx.utxos))
 	for h := len(r.blocks); h > height; h-- {
 		set.Revert(r.idx.undo[h-1])
 	}
+
 	return set, nil
 }
 
@@ -432,17 +485,21 @@ func (r *Repository) Restore(headers []*domain.Block, set domain.UTXOSet) error 
 	if len(r.blocks) > 0 {
 		return storage.ErrConflict
 	}
+
 	if err := storage.CheckHeaders(headers); err != nil {
 		return err
 	}
+
 	ix := newIndex()
 	ix.applyDelta(domain.UTXODelta{Created: cloneOuts(set)})
+
 	s := len(headers) - 1
 	ix.snap = &storage.Snapshot{Height: s, BlockHash: headers[s].Hash, Hash: storage.SnapshotHash(headers[s].Hash, set), UTXOs: domain.UTXOSet(cloneOuts(set))}
 	ix.prunedBelow = s + 1
 	ix.tip, ix.hasTip = s, true
 
 	blocks := make([]*domain.Block, len(headers))
+
 	byHash := make(map[string]*domain.Block, len(headers))
 	for i, h := range headers {
 		header := *h
@@ -450,6 +507,8 @@ func (r *Repository) Restore(headers []*domain.Block, set domain.UTXOSet) error 
 		blocks[i] = &header
 		byHash[header.Hash] = &header
 	}
+
 	r.blocks, r.byHash, r.idx = blocks, byHash, ix
+
 	return nil
 }

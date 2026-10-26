@@ -30,6 +30,7 @@ var _ = Describe("Bolt IndexedRepository", func() {
 	open := func() *bolt.Repository {
 		repo, err := bolt.Open(dbPath)
 		Expect(err).NotTo(HaveOccurred())
+
 		return repo
 	}
 
@@ -38,27 +39,34 @@ var _ = Describe("Bolt IndexedRepository", func() {
 		for i, b := range mainChain {
 			Expect(repo.Commit(b, mainDelta[i])).To(Succeed())
 		}
+
 		Expect(repo.Reorg(2, altChain[2:], altDeltas[2:])).To(Succeed())
 		spent := altChain[3].Transactions[0]
 		id := spent.CalculateHash()
 		height, err := repo.TxHeight(id)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(repo.Close()).To(Succeed())
+
 		before := dumpBuckets(dbPath, indexBucketNames...)
 
 		reopened := open()
+
 		DeferCleanup(func() { _ = reopened.Close() })
+
 		current, err := reopened.IndexCurrent()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(current).To(BeTrue())
+
 		got, err := reopened.TxHeight(id)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got).To(Equal(height))
+
 		for op, o := range altDeltas[4].Created {
 			found, ok := reopened.Lookup(op)
 			Expect(ok).To(BeTrue())
 			Expect(found).To(Equal(o))
 		}
+
 		ids, err := reopened.TxsByAddress(spent.Outputs[0].Address)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ids).To(ContainElement(id))
@@ -71,8 +79,10 @@ var _ = Describe("Bolt IndexedRepository", func() {
 		for i, b := range mainChain {
 			Expect(repo.Commit(b, mainDelta[i])).To(Succeed())
 		}
+
 		Expect(repo.Reorg(2, altChain[2:], altDeltas[2:])).To(Succeed())
 		Expect(repo.Close()).To(Succeed())
+
 		before := dumpBuckets(dbPath, indexBucketNames...)
 		for _, name := range indexBucketNames {
 			Expect(before[name]).NotTo(BeEmpty(), name)
@@ -94,6 +104,7 @@ var _ = Describe("Bolt IndexedRepository", func() {
 					return err
 				}
 			}
+
 			return nil
 		})).To(Succeed())
 		Expect(legacy.Close()).To(Succeed())
@@ -102,13 +113,17 @@ var _ = Describe("Bolt IndexedRepository", func() {
 		for _, b := range mainChain {
 			Expect(repo.Append(b)).To(Succeed())
 		}
+
 		Expect(repo.Close()).To(Succeed())
 
 		reopened := open()
+
 		DeferCleanup(func() { _ = reopened.Close() })
+
 		current, err := reopened.IndexCurrent()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(current).To(BeFalse())
+
 		_, err = reopened.TxHeight(mainChain[0].Transactions[0].CalculateHash())
 		Expect(err).To(HaveOccurred())
 
@@ -116,6 +131,7 @@ var _ = Describe("Bolt IndexedRepository", func() {
 		current, err = reopened.IndexCurrent()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(current).To(BeTrue())
+
 		h, err := reopened.TxHeight(mainChain[3].Transactions[0].CalculateHash())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(h).To(Equal(3))
@@ -126,7 +142,9 @@ var _ = Describe("Bolt IndexedRepository", func() {
 		for i, b := range mainChain[:3] {
 			Expect(repo.Commit(b, mainDelta[i])).To(Succeed())
 		}
+
 		Expect(repo.Close()).To(Succeed())
+
 		before := dumpBuckets(dbPath, append([]string{"blocks", "hashes"}, indexBucketNames...)...)
 
 		repo = open()
@@ -145,13 +163,16 @@ var _ = Describe("Bolt IndexedRepository", func() {
 		for i, b := range mainChain {
 			Expect(repo.Commit(b, mainDelta[i])).To(Succeed())
 		}
+
 		Expect(repo.Close()).To(Succeed())
+
 		raw, err := bbolt.Open(dbPath, 0o600, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(raw.Update(func(tx *bbolt.Tx) error {
 			return tx.Bucket([]byte("undo")).Put([]byte{0, 0, 0, 0, 0, 0, 0, 2}, []byte("{["))
 		})).To(Succeed())
 		Expect(raw.Close()).To(Succeed())
+
 		before := dumpBuckets(dbPath, append([]string{"blocks", "hashes"}, indexBucketNames...)...)
 
 		repo = open()
@@ -167,6 +188,7 @@ var _ = Describe("Bolt IndexedRepository", func() {
 			for _, op := range ops {
 				m[op] = domain.TxOut{Amount: 1, Address: "x"}
 			}
+
 			return m
 		}
 		a0, a1, a2 := domain.OutPoint{TxID: "a", Index: 0}, domain.OutPoint{TxID: "a", Index: 1}, domain.OutPoint{TxID: "a", Index: 2}

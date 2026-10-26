@@ -39,6 +39,7 @@ func FuzzWriteBlockBody(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, body []byte) {
 		fake := &fuzzChain{}
+
 		srv, err := NewServer(fake, Config{})
 		if err != nil {
 			t.Fatal(err)
@@ -52,9 +53,11 @@ func FuzzWriteBlockBody(f *testing.F) {
 		default:
 			t.Fatalf("status %d outside {201, 400, 413}", rec.Code)
 		}
+
 		if !json.Valid(rec.Body.Bytes()) {
 			t.Fatalf("response body is not valid JSON: %q", rec.Body.String())
 		}
+
 		if wantMined := rec.Code == http.StatusCreated; (fake.mined == 1) != wantMined || fake.mined > 1 {
 			t.Fatalf("status %d but Mine called %d times", rec.Code, fake.mined)
 		}

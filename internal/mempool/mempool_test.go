@@ -21,6 +21,7 @@ func mkTx(id, prev string, idx uint32, pad int) domain.Transaction {
 	for range pad {
 		addr += "x"
 	}
+
 	return domain.Transaction{
 		ID:        id,
 		Inputs:    []domain.TxIn{{PrevTxID: prev, OutIndex: idx}},
@@ -34,6 +35,7 @@ func ids(txs []domain.Transaction) []string {
 	for i, t := range txs {
 		out[i] = t.ID
 	}
+
 	return out
 }
 
@@ -47,6 +49,7 @@ func sameSize(n int) []domain.Transaction {
 	for i := range txs {
 		txs[i] = mkTx(fmt.Sprintf("t%03d", i), fmt.Sprintf("p%03d", i), 0, 10)
 	}
+
 	return txs
 }
 
@@ -65,6 +68,7 @@ var _ = Describe("Pool", func() {
 				for i := range mempool.DefaultMaxTxs + 1 {
 					_ = p.Add(mkTx(fmt.Sprintf("t%d", i), fmt.Sprintf("p%d", i), 0, 0), uint64(i))
 				}
+
 				Expect(p.Len()).To(Equal(mempool.DefaultMaxTxs))
 			}
 		})
@@ -75,6 +79,7 @@ var _ = Describe("Pool", func() {
 			p := mempool.New(10)
 			big := mkTx("big", "p1", 0, 200)   // large fee, low rate
 			small := mkTx("small", "p2", 0, 0) // small fee, high rate
+
 			Expect(p.Add(big, 1000)).To(Succeed())
 			Expect(p.Add(small, 500)).To(Succeed())
 			Expect(ids(p.Select(1 << 20))).To(Equal([]string{"small", "big"}))
@@ -85,6 +90,7 @@ var _ = Describe("Pool", func() {
 			for _, id := range []string{"c", "a", "b"} {
 				Expect(p.Add(mkTx(id, "p"+id, 0, 0), 10)).To(Succeed())
 			}
+
 			Expect(ids(p.Select(1 << 20))).To(Equal([]string{"a", "b", "c"}))
 		})
 
@@ -128,15 +134,18 @@ var _ = Describe("Pool", func() {
 
 		It("gives the same output whatever the Add order", func() {
 			txs := sameSize(20)
+
 			fees := make([]uint64, len(txs))
 			for i := range fees {
 				fees[i] = uint64(i % 4)
 			}
+
 			build := func(order []int) []string {
 				p := mempool.New(100)
 				for _, i := range order {
 					Expect(p.Add(txs[i], fees[i])).To(Succeed())
 				}
+
 				return ids(p.Select(1 << 20))
 			}
 			order := rand.New(rand.NewPCG(1, 2)).Perm(len(txs))
@@ -153,6 +162,7 @@ var _ = Describe("Pool", func() {
 			big := mkTx("big", "p1", 0, 300)
 			s1 := mkTx("s1", "p2", 0, 0)
 			s2 := mkTx("s2", "p3", 0, 0)
+
 			Expect(p.Add(big, 1_000_000)).To(Succeed()) // ranks first
 			Expect(p.Add(s1, 10)).To(Succeed())
 			Expect(p.Add(s2, 5)).To(Succeed())
@@ -179,6 +189,7 @@ var _ = Describe("Pool", func() {
 
 	Describe("Add", func() {
 		var p *mempool.Pool
+
 		BeforeEach(func() { p = mempool.New(2) })
 
 		It("rejects a duplicate ID and leaves the pool unchanged", func() {
@@ -200,6 +211,7 @@ var _ = Describe("Pool", func() {
 		It("detects a conflict on any input, not only the first", func() {
 			two := mkTx("two", "p1", 0, 0)
 			two.Inputs = append(two.Inputs, domain.TxIn{PrevTxID: "p2", OutIndex: 0})
+
 			Expect(p.Add(mkTx("a", "p2", 0, 0), 1)).To(Succeed())
 			Expect(p.Add(two, 1)).To(MatchError(mempool.ErrConflict))
 		})
@@ -281,8 +293,11 @@ var _ = Describe("Pool", func() {
 	Describe("invariants", func() {
 		It("holds for random Add/Remove/Prune sequences", func() {
 			rng := rand.New(rand.NewPCG(42, 7))
+
 			const maxTxs = 8
+
 			p := mempool.New(maxTxs)
+
 			for step := range 3000 {
 				switch rng.IntN(5) {
 				case 0, 1, 2:
@@ -290,6 +305,7 @@ var _ = Describe("Pool", func() {
 					if rng.IntN(3) == 0 { // a second input on index 5, never equal to the first
 						tx.Inputs = append(tx.Inputs, domain.TxIn{PrevTxID: fmt.Sprintf("p%d", rng.IntN(25)), OutIndex: 5})
 					}
+
 					_ = p.Add(tx, uint64(rng.IntN(500)))
 				case 3:
 					p.Remove(fmt.Sprintf("t%d", rng.IntN(40)))
@@ -299,16 +315,21 @@ var _ = Describe("Pool", func() {
 						v[domain.OutPoint{TxID: fmt.Sprintf("p%d", i)}] = rng.IntN(4) != 0
 						v[domain.OutPoint{TxID: fmt.Sprintf("p%d", i), Index: 1}] = rng.IntN(4) != 0
 					}
+
 					p.Prune(&domain.Block{Transactions: []domain.Transaction{{ID: fmt.Sprintf("t%d", rng.IntN(40))}}}, v)
 				}
+
 				Expect(p.Len()).To(BeNumerically("<=", maxTxs), "step %d", step)
 
 				all := p.Select(math.MaxInt)
 				Expect(all).To(HaveLen(p.Len()))
+
 				seenID := map[string]bool{}
 				seenOp := map[domain.OutPoint]bool{}
+
 				for _, tx := range all {
 					Expect(seenID[tx.ID]).To(BeFalse())
+
 					seenID[tx.ID] = true
 					for _, in := range tx.Inputs {
 						op := domain.OutPoint{TxID: in.PrevTxID, Index: in.OutIndex}
@@ -316,12 +337,15 @@ var _ = Describe("Pool", func() {
 						seenOp[op] = true
 					}
 				}
+
 				budget := rng.IntN(800)
 				sel := p.Select(budget)
+
 				sum := 0
 				for _, tx := range sel {
 					sum += mempool.Size(tx)
 				}
+
 				Expect(sum).To(BeNumerically("<=", budget))
 				// selection is a subsequence of the full order
 				pos := 0
@@ -329,6 +353,7 @@ var _ = Describe("Pool", func() {
 					for pos < len(all) && all[pos].ID != tx.ID {
 						pos++
 					}
+
 					Expect(pos).To(BeNumerically("<", len(all)))
 					pos++
 				}
@@ -337,11 +362,13 @@ var _ = Describe("Pool", func() {
 
 		It("is safe under concurrent use", func() {
 			p := mempool.New(16)
+
 			var wg sync.WaitGroup
 			for g := range 8 {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
+
 					for i := range 200 {
 						id := fmt.Sprintf("g%dt%d", g, i)
 						_ = p.Add(mkTx(id, fmt.Sprintf("p%d", i%30), 0, 0), uint64(i))
@@ -352,6 +379,7 @@ var _ = Describe("Pool", func() {
 					}
 				}()
 			}
+
 			wg.Wait()
 			Expect(p.Len()).To(BeNumerically("<=", 16))
 		})

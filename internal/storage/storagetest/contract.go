@@ -47,6 +47,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 	It("appends in order and returns the last block", func() {
 		a := &domain.Block{Index: 0, Hash: "h0"}
 		b := &domain.Block{Index: 1, PrevHash: "h0", Hash: "h1"}
+
 		Expect(repo.Append(a)).To(Succeed())
 		lastA, err := repo.Last()
 		Expect(err).NotTo(HaveOccurred())
@@ -119,20 +120,26 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 
 	It("keeps the chain linked under concurrent Append and All", func() {
 		const writers, perWriter = 8, 30
+
 		var wg sync.WaitGroup
 		for w := 0; w < writers; w++ {
 			wg.Add(2)
+
 			go func() {
 				defer GinkgoRecover()
 				defer wg.Done()
+
 				for i, attempts := 0, 0; i < perWriter; attempts++ {
 					Expect(attempts).To(BeNumerically("<", 2000), "writer starved: valid appends keep being rejected")
+
 					last, err := repo.Last()
 					if err != nil {
 						Expect(repo.Append(&domain.Block{Hash: "h0"})).To(Or(Succeed(), MatchError(storage.ErrConflict)))
 						continue
 					}
+
 					next := &domain.Block{Index: last.Index + 1, PrevHash: last.Hash, Hash: fmt.Sprintf("h%d", last.Index+1)}
+
 					err = repo.Append(next)
 					if err == nil {
 						i++
@@ -144,20 +151,25 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 			go func() {
 				defer GinkgoRecover()
 				defer wg.Done()
+
 				for i := 0; i < perWriter; i++ {
 					_, err := repo.All()
 					Expect(err).NotTo(HaveOccurred())
+
 					_, _ = repo.Last()
 				}
 			}()
 		}
+
 		wg.Wait()
 
 		all, err := repo.All()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(all).To(HaveLen(writers*perWriter + 1))
+
 		for i, b := range all {
 			Expect(b.Index).To(Equal(i))
+
 			if i > 0 {
 				Expect(b.PrevHash).To(Equal(all[i-1].Hash))
 			}
@@ -169,11 +181,13 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 
 		BeforeEach(func() {
 			blocks = nil
+
 			for i := 0; i < 5; i++ {
 				b := &domain.Block{Index: i, Hash: fmt.Sprintf("h%d", i)}
 				if i > 0 {
 					b.PrevHash = blocks[i-1].Hash
 				}
+
 				Expect(repo.Append(b)).To(Succeed())
 				blocks = append(blocks, b)
 			}
@@ -197,6 +211,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 			b, err := repo.ByHash("unknown")
 			Expect(b).To(BeNil())
 			Expect(err).To(MatchError(storage.ErrNotFound))
+
 			for _, h := range []int{-1, 5, 100} {
 				b, err := repo.ByHeight(h)
 				Expect(b).To(BeNil())
@@ -217,6 +232,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 				got, err := repo.Range(from, limit)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(got).To(HaveLen(count))
+
 				for i, b := range got {
 					Expect(b.Index).To(Equal(blocks[first+i].Index))
 					Expect(b.Hash).To(Equal(blocks[first+i].Hash))
@@ -247,6 +263,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 		It("returns a Range copy that caller edits do not affect", func() {
 			got, err := repo.Range(0, 2)
 			Expect(err).NotTo(HaveOccurred())
+
 			got[0] = nil
 			again, err := repo.Range(0, 2)
 			Expect(err).NotTo(HaveOccurred())
@@ -266,6 +283,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 			got, err := repo.Range(0, 100)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(got).To(HaveLen(len(blocks)))
+
 			for i, b := range got {
 				Expect(b.Index).To(Equal(blocks[i].Index))
 				Expect(b.Hash).To(Equal(blocks[i].Hash))
@@ -275,9 +293,11 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 		It("keeps the lookups consistent under concurrent Append", func() {
 			var wg sync.WaitGroup
 			wg.Add(2)
+
 			go func() {
 				defer GinkgoRecover()
 				defer wg.Done()
+
 				for i := 5; i < 100; i++ {
 					prev, err := repo.Last()
 					Expect(err).NotTo(HaveOccurred())
@@ -287,9 +307,11 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 			go func() {
 				defer GinkgoRecover()
 				defer wg.Done()
+
 				for i := 0; i < 100; i++ {
 					page, err := repo.Range(0, 1000)
 					Expect(err).NotTo(HaveOccurred())
+
 					for j, b := range page {
 						Expect(b.Index).To(Equal(j))
 						byHash, err := repo.ByHash(b.Hash)
@@ -299,6 +321,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 					}
 				}
 			}()
+
 			wg.Wait()
 		})
 	})
@@ -311,8 +334,10 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 				out = append(out, b)
 				prev = b.Hash
 			}
+
 			return out
 		}
+
 		var chain []*domain.Block
 
 		BeforeEach(func() {
@@ -326,6 +351,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 			all, err := repo.All()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(all).To(HaveLen(len(want)))
+
 			for i, w := range want {
 				Expect(all[i].Index).To(Equal(w.Index))
 				Expect(all[i].PrevHash).To(Equal(w.PrevHash))
@@ -338,6 +364,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(byHash.Index).To(Equal(w.Index))
 			}
+
 			last, err := repo.Last()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(last.Hash).To(Equal(want[len(want)-1].Hash))
@@ -346,6 +373,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 			window, err := repo.Range(0, 1000)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(window).To(HaveLen(len(want)))
+
 			for i, w := range want {
 				Expect(window[i].Hash).To(Equal(w.Hash))
 			}
@@ -359,6 +387,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 				Expect(repo.ReplaceFrom(height, fork)).To(Succeed())
 
 				expectChain(append(append([]*domain.Block(nil), old[:height]...), fork...))
+
 				for _, removed := range old[height:] {
 					_, err := repo.ByHash(removed.Hash)
 					Expect(err).To(MatchError(storage.ErrNotFound))
@@ -388,6 +417,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 		DescribeTable("rejects and leaves the repository as it was",
 			func(height int, mk func() []*domain.Block, want rejection) {
 				blocks := mk()
+
 				err := repo.ReplaceFrom(height, blocks)
 				if want == conflict {
 					Expect(err).To(MatchError(storage.ErrConflict))
@@ -395,7 +425,9 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 					Expect(err).To(HaveOccurred())
 					Expect(err).NotTo(MatchError(storage.ErrConflict))
 				}
+
 				expectChain(chain)
+
 				for _, b := range blocks {
 					if b != nil {
 						_, err := repo.ByHash(b.Hash)
@@ -415,36 +447,43 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 			Entry("broken PrevHash in the middle", 1, func() []*domain.Block {
 				bs := link("n", 1, 4, "h0")
 				bs[2].PrevHash = "other"
+
 				return bs
 			}, conflict),
 			Entry("broken PrevHash in the last block", 1, func() []*domain.Block {
 				bs := link("n", 1, 3, "h0")
 				bs[2].PrevHash = "other"
+
 				return bs
 			}, conflict),
 			Entry("skipped Index in the last block", 1, func() []*domain.Block {
 				bs := link("n", 1, 3, "h0")
 				bs[2].Index = 4
+
 				return bs
 			}, conflict),
 			Entry("repeated Index in the last block", 1, func() []*domain.Block {
 				bs := link("n", 1, 3, "h0")
 				bs[2].Index = 2
+
 				return bs
 			}, conflict),
 			Entry("nil in the middle", 1, func() []*domain.Block {
 				bs := link("n", 1, 3, "h0")
 				bs[1] = nil
+
 				return bs
 			}, nilBlock),
 			Entry("nil first", 1, func() []*domain.Block {
 				bs := link("n", 1, 3, "h0")
 				bs[0] = nil
+
 				return bs
 			}, nilBlock),
 			Entry("nil last", 1, func() []*domain.Block {
 				bs := link("n", 1, 3, "h0")
 				bs[2] = nil
+
 				return bs
 			}, nilBlock),
 			Entry("nil with an invalid height", 0, func() []*domain.Block { return []*domain.Block{nil} }, nilBlock),
@@ -462,6 +501,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 			nilErr := empty.ReplaceFrom(1, []*domain.Block{nil})
 			Expect(nilErr).To(HaveOccurred())
 			Expect(nilErr).NotTo(MatchError(storage.ErrConflict))
+
 			all, err := empty.All()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(all).To(BeEmpty())
@@ -469,24 +509,31 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 
 		It("shows readers either the old or the new chain under concurrent ReplaceFrom and Append", func() {
 			const rounds = 150
+
 			stop := make(chan struct{})
+
 			var readers, writers sync.WaitGroup
 			for r := 0; r < 4; r++ {
 				readers.Add(1)
+
 				go func() {
 					defer GinkgoRecover()
 					defer readers.Done()
+
 					for {
 						select {
 						case <-stop:
 							return
 						default:
 						}
+
 						all, err := repo.All()
 						Expect(err).NotTo(HaveOccurred())
 						Expect(len(all)).To(BeNumerically(">=", 2))
+
 						for i, b := range all {
 							Expect(b.Index).To(Equal(i))
+
 							if i > 0 {
 								Expect(b.PrevHash).To(Equal(all[i-1].Hash))
 							}
@@ -494,10 +541,13 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 					}
 				}()
 			}
+
 			writers.Add(2)
+
 			go func() {
 				defer GinkgoRecover()
 				defer writers.Done()
+
 				for i := 0; i < rounds; i++ {
 					tag := fmt.Sprintf("v%d-", i)
 					Expect(repo.ReplaceFrom(2, link(tag, 2, 1+i%4, "h1"))).To(Succeed())
@@ -506,21 +556,23 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 			go func() {
 				defer GinkgoRecover()
 				defer writers.Done()
+
 				for i := 0; i < rounds; i++ {
 					last, err := repo.Last()
 					Expect(err).NotTo(HaveOccurred())
+
 					err = repo.Append(&domain.Block{Index: last.Index + 1, PrevHash: last.Hash, Hash: fmt.Sprintf("a%d-%d", i, last.Index+1)})
 					if err != nil {
 						Expect(err).To(MatchError(storage.ErrConflict))
 					}
 				}
 			}()
+
 			writers.Wait()
 			close(stop)
 			readers.Wait()
 		})
 	})
-
 }
 
 // indexedWorld builds chains of real transactions together with the delta of each block.
@@ -540,6 +592,7 @@ func (w *indexedWorld) forkAt(height int) *indexedWorld {
 		f.deltas = append(f.deltas, w.deltas[i])
 		f.set.Apply(w.deltas[i])
 	}
+
 	return f
 }
 
@@ -549,6 +602,7 @@ func (w *indexedWorld) mine(tag string, txs ...domain.Transaction) {
 	if len(w.blocks) > 0 {
 		b.PrevHash = w.blocks[len(w.blocks)-1].Hash
 	}
+
 	d, err := domain.BlockDelta(w.set, b, b.Index == 0)
 	Expect(err).NotTo(HaveOccurred())
 	w.set.Apply(d)
@@ -561,7 +615,9 @@ func indexedTx(salt int64, ins []domain.OutPoint, outs ...domain.TxOut) domain.T
 	for _, op := range ins {
 		tx.Inputs = append(tx.Inputs, domain.TxIn{PrevTxID: op.TxID, OutIndex: op.Index})
 	}
+
 	tx.ID = tx.CalculateHash()
+
 	return tx
 }
 
@@ -581,6 +637,7 @@ func newIndexedFixture() *indexedFixture {
 	mk := func() string {
 		w, err := wallet.New()
 		Expect(err).NotTo(HaveOccurred())
+
 		return w.Address()
 	}
 	f := &indexedFixture{addrA: mk(), addrB: mk(), addrC: mk()}
@@ -612,6 +669,7 @@ func newIndexedFixture() *indexedFixture {
 			f.outpoints = append(f.outpoints, spend(tx, uint32(i)))
 		}
 	}
+
 	return f
 }
 
@@ -628,30 +686,38 @@ func (f *indexedFixture) observe(repo storage.IndexedRepository) indexedState {
 	st := indexedState{utxos: map[domain.OutPoint]domain.TxOut{}, heights: map[string]int{}, byAddr: map[string][]string{}}
 	all, err := repo.All()
 	Expect(err).NotTo(HaveOccurred())
+
 	for _, b := range all {
 		st.hashes = append(st.hashes, b.Hash)
 	}
+
 	for _, op := range f.outpoints {
 		if o, ok := repo.Lookup(op); ok {
 			st.utxos[op] = o
 		}
 	}
+
 	for _, id := range f.txids {
 		h, err := repo.TxHeight(id)
 		if err != nil {
 			Expect(err).To(MatchError(storage.ErrNotFound))
+
 			h = -1
 		}
+
 		st.heights[id] = h
 	}
+
 	for _, a := range []string{f.addrA, f.addrB, f.addrC} {
 		ids, err := repo.TxsByAddress(a)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ids).NotTo(BeNil())
 		st.byAddr[a] = ids
 	}
+
 	st.current, err = repo.IndexCurrent()
 	Expect(err).NotTo(HaveOccurred())
+
 	return st
 }
 
@@ -678,6 +744,7 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 	fresh := func(w *indexedWorld) storage.IndexedRepository {
 		r := newRepo()
 		commitAll(r, w.blocks, w.deltas)
+
 		return r
 	}
 
@@ -686,9 +753,11 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 			st := fx.observe(repo)
 			Expect(st.current).To(BeTrue())
 			Expect(st.utxos).To(BeEmpty())
+
 			for _, h := range st.heights {
 				Expect(h).To(Equal(-1))
 			}
+
 			for _, ids := range st.byAddr {
 				Expect(ids).To(BeEmpty())
 			}
@@ -708,8 +777,10 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 				if i > 0 {
 					b.Hash = b.CalculateHash()
 				}
+
 				out[i] = b
 			}
+
 			return out
 		}
 		copySet := func(src domain.UTXOSet) domain.UTXOSet {
@@ -717,21 +788,25 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 			for op, o := range src {
 				set[op] = o
 			}
+
 			return set
 		}
 		expectEmpty := func(r storage.IndexedRepository) {
 			all, err := r.All()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(all).To(BeEmpty())
+
 			_, err = r.Snapshot()
 			Expect(err).To(MatchError(storage.ErrNotFound))
 			below, err := r.PrunedBelow()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(below).To(BeZero())
+
 			for _, op := range fx.outpoints {
 				_, ok := r.Lookup(op)
 				Expect(ok).To(BeFalse())
 			}
+
 			for _, a := range []string{fx.addrA, fx.addrB, fx.addrC} {
 				owned, err := r.UTXOsByAddress(a)
 				Expect(err).NotTo(HaveOccurred())
@@ -747,18 +822,22 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 			all, err := repo.All()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(all).To(HaveLen(5))
+
 			for i, b := range all {
 				Expect(b.Hash).To(Equal(headers[i].Hash))
 				Expect(b.PrevHash).To(Equal(headers[i].PrevHash))
 				Expect(b.MerkleRoot).To(Equal(headers[i].MerkleRoot))
 				Expect(b.Transactions).To(BeEmpty())
+
 				if i == 0 {
 					continue
 				}
+
 				byHash, err := repo.ByHash(headers[i].Hash)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(byHash.Index).To(Equal(i))
 			}
+
 			last, err := repo.Last()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(last.Hash).To(Equal(headers[4].Hash))
@@ -769,9 +848,11 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 			Expect(snap.BlockHash).To(Equal(headers[4].Hash))
 			Expect(snap.Hash).To(Equal(storage.SnapshotHash(headers[4].Hash, set)))
 			Expect(snap.UTXOs).To(Equal(set))
+
 			below, err := repo.PrunedBelow()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(below).To(Equal(5))
+
 			current, err := repo.IndexCurrent()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(current).To(BeTrue())
@@ -781,11 +862,13 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 				Expect(ok).To(BeTrue())
 				Expect(got).To(Equal(o))
 			}
+
 			for _, a := range []string{fx.addrA, fx.addrB, fx.addrC} {
 				owned, err := repo.UTXOsByAddress(a)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(owned).To(Equal(expectedByAddr(set, a)))
 			}
+
 			state, err := repo.ForkState(5)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(state).To(Equal(set))
@@ -797,12 +880,15 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 			want := len(set)
 			Expect(repo.Restore(headers, set)).To(Succeed())
 			headers[2].Hash = "changed"
+
 			for op := range set {
 				delete(set, op)
 			}
+
 			last, err := repo.Last()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(last.Hash).NotTo(Equal("changed"))
+
 			snap, err := repo.Snapshot()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(snap.UTXOs).To(HaveLen(want))
@@ -817,6 +903,7 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 			for op = range set {
 				break
 			}
+
 			tx := indexedTx(99, []domain.OutPoint{op}, domain.TxOut{Amount: set[op].Amount, Address: fx.addrC})
 			next := &domain.Block{Index: 5, PrevHash: headers[4].Hash, Hash: "next", Transactions: []domain.Transaction{tx}}
 			d, err := domain.BlockDelta(set, next, false)
@@ -827,6 +914,7 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 			Expect(ok).To(BeFalse())
 			_, ok = repo.Lookup(spend(tx, 0))
 			Expect(ok).To(BeTrue())
+
 			h, err := repo.TxHeight(tx.CalculateHash())
 			Expect(err).NotTo(HaveOccurred())
 			Expect(h).To(Equal(5))
@@ -838,8 +926,10 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 			all, err := repo.All()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(all).To(HaveLen(1))
+
 			_, err = repo.Snapshot()
 			Expect(err).To(MatchError(storage.ErrNotFound))
+
 			for _, op := range fx.outpoints {
 				_, ok := repo.Lookup(op)
 				Expect(ok).To(BeFalse())
@@ -871,6 +961,7 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 				h[1].PrevHash = h[0].Hash
 				h[1].Hash = h[1].CalculateHash()
 				h[0].Nonce++
+
 				return h
 			}),
 		)
@@ -884,11 +975,13 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 			Expect(st.current).To(BeTrue())
 			Expect(st.hashes).To(Equal([]string{"m0", "m1", "m2", "m3"}))
 			Expect(st.utxos).To(Equal(map[domain.OutPoint]domain.TxOut(fx.main.set)))
+
 			for i, b := range fx.main.blocks {
 				for _, tx := range b.Transactions {
 					Expect(st.heights[tx.CalculateHash()]).To(Equal(i))
 				}
 			}
+
 			ids := func(i, j int) string { return fx.main.blocks[i].Transactions[j].CalculateHash() }
 			// A: receives g, spends it in t1 (change), receives t3, which t4 spends.
 			Expect(st.byAddr[fx.addrA]).To(Equal([]string{ids(0, 0), ids(1, 0), ids(2, 1), ids(3, 0)}))
@@ -903,9 +996,11 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 			last, err := repo.Last()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(last.Hash).To(Equal("m3"))
+
 			byHash, err := repo.ByHash("m1")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(byHash.Index).To(Equal(1))
+
 			byHeight, err := repo.ByHeight(2)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(byHeight.Hash).To(Equal("m2"))
@@ -917,6 +1012,7 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 				before := fx.observe(repo)
 
 				b, d := mk(fx)
+
 				err := repo.Commit(b, d)
 				if want == nil {
 					Expect(err).To(HaveOccurred())
@@ -925,7 +1021,9 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 				} else {
 					Expect(err).To(MatchError(want))
 				}
+
 				Expect(fx.observe(repo)).To(Equal(before))
+
 				if b != nil {
 					_, err := repo.ByHash(b.Hash)
 					Expect(err).To(MatchError(storage.ErrNotFound))
@@ -934,11 +1032,13 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 			Entry("wrong PrevHash", func(fx *indexedFixture) (*domain.Block, domain.UTXODelta) {
 				b := *fx.main.blocks[3]
 				b.PrevHash = "other"
+
 				return &b, fx.main.deltas[3]
 			}, storage.ErrConflict),
 			Entry("skipped Index", func(fx *indexedFixture) (*domain.Block, domain.UTXODelta) {
 				b := *fx.main.blocks[3]
 				b.Index = 4
+
 				return &b, fx.main.deltas[3]
 			}, storage.ErrConflict),
 			Entry("a delta that spends an absent output", func(fx *indexedFixture) (*domain.Block, domain.UTXODelta) {
@@ -946,6 +1046,7 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 					Spent:   map[domain.OutPoint]domain.TxOut{{TxID: "nope", Index: 0}: {Amount: 1, Address: fx.addrA}},
 					Created: map[domain.OutPoint]domain.TxOut{},
 				}
+
 				return fx.main.blocks[3], d
 			}, storage.ErrUTXOConflict),
 			Entry("a delta that spends an output with a different value", func(fx *indexedFixture) (*domain.Block, domain.UTXODelta) {
@@ -954,6 +1055,7 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 					o.Amount++
 					d.Spent[op] = o
 				}
+
 				return fx.main.blocks[3], d
 			}, storage.ErrUTXOConflict),
 			Entry("a delta that creates an existing output", func(fx *indexedFixture) (*domain.Block, domain.UTXODelta) {
@@ -961,6 +1063,7 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 				for op, o := range fx.main.deltas[2].Created {
 					d.Created[op] = o
 				}
+
 				return fx.main.blocks[3], d
 			}, storage.ErrUTXOConflict),
 			Entry("a nil block", func(fx *indexedFixture) (*domain.Block, domain.UTXODelta) {
@@ -1046,6 +1149,7 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 				before := fx.observe(repo)
 
 				blocks, deltas := mk(fx)
+
 				err := repo.Reorg(height, blocks, deltas)
 				if want == nil {
 					Expect(err).To(HaveOccurred())
@@ -1054,7 +1158,9 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 				} else {
 					Expect(err).To(MatchError(want))
 				}
+
 				Expect(fx.observe(repo)).To(Equal(before))
+
 				for _, b := range blocks {
 					if b != nil {
 						_, err := repo.ByHash(b.Hash)
@@ -1083,11 +1189,13 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 			Entry("first PrevHash is not chain[height-1]", 2, func(fx *indexedFixture) ([]*domain.Block, []domain.UTXODelta) {
 				b := *fx.alt.blocks[2]
 				b.PrevHash = "other"
+
 				return []*domain.Block{&b}, fx.alt.deltas[2:3]
 			}, storage.ErrConflict),
 			Entry("broken link in the middle", 2, func(fx *indexedFixture) ([]*domain.Block, []domain.UTXODelta) {
 				b := *fx.alt.blocks[3]
 				b.PrevHash = "other"
+
 				return []*domain.Block{fx.alt.blocks[2], &b}, fx.alt.deltas[2:]
 			}, storage.ErrConflict),
 			Entry("a nil block", 2, func(fx *indexedFixture) ([]*domain.Block, []domain.UTXODelta) {
@@ -1101,6 +1209,7 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 					Spent:   map[domain.OutPoint]domain.TxOut{{TxID: "nope"}: {Amount: 1, Address: fx.addrA}},
 					Created: map[domain.OutPoint]domain.TxOut{},
 				}
+
 				return fx.alt.blocks[2:], []domain.UTXODelta{fx.alt.deltas[2], fx.alt.deltas[3], bad}
 			}, storage.ErrUTXOConflict),
 			Entry("a delta that creates an output the set keeps", 2, func(fx *indexedFixture) ([]*domain.Block, []domain.UTXODelta) {
@@ -1108,6 +1217,7 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 				for op, o := range fx.main.deltas[1].Created {
 					keep.Created[op] = o
 				}
+
 				return fx.alt.blocks[2:3], []domain.UTXODelta{keep}
 			}, storage.ErrUTXOConflict),
 		)
@@ -1146,6 +1256,7 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 			for _, b := range fx.main.blocks {
 				Expect(repo.Append(b)).To(Succeed())
 			}
+
 			Expect(fx.observe(repo).current).To(BeFalse())
 
 			Expect(repo.Reindex()).To(Succeed())
@@ -1194,10 +1305,12 @@ func (w *indexedWorld) step(addrs []string, salt int64, tag string) {
 			ops = append(ops, op)
 		}
 	}
+
 	sort.Slice(ops, func(i, j int) bool {
 		if ops[i].TxID != ops[j].TxID {
 			return ops[i].TxID < ops[j].TxID
 		}
+
 		return ops[i].Index < ops[j].Index
 	})
 	Expect(ops).NotTo(BeEmpty())
@@ -1206,11 +1319,13 @@ func (w *indexedWorld) step(addrs []string, salt int64, tag string) {
 	half := in.Amount / 2
 	t1 := indexedTx(salt, []domain.OutPoint{ops[0]},
 		domain.TxOut{Amount: half, Address: addrs[salt%n]}, domain.TxOut{Amount: in.Amount - half, Address: addrs[(salt+1)%n]})
+
 	txs := []domain.Transaction{t1}
 	if salt%2 == 0 && half >= 2 {
 		txs = append(txs, indexedTx(salt+500, []domain.OutPoint{spend(t1, 0)},
 			domain.TxOut{Amount: half / 2, Address: addrs[(salt+2)%n]}, domain.TxOut{Amount: half - half/2, Address: addrs[salt%n]}))
 	}
+
 	w.mine(tag, txs...)
 	last := w.blocks[len(w.blocks)-1]
 	last.MerkleRoot = "mr" + last.Hash
@@ -1219,13 +1334,16 @@ func (w *indexedWorld) step(addrs []string, salt int64, tag string) {
 // prunedWorld returns a chain of n blocks over addrs: a genesis paying every address, then steps.
 func prunedWorld(addrs []string, n int, tag string, salt int64) *indexedWorld {
 	w := newIndexedWorld()
+
 	outs := make([]domain.TxOut, 0, 2*len(addrs))
 	for i := 0; i < 2*len(addrs); i++ {
 		outs = append(outs, domain.TxOut{Amount: 1_000_000_000, Address: addrs[i%len(addrs)]})
 	}
+
 	w.mine(tag, indexedTx(salt, nil, outs...))
 	w.blocks[0].MerkleRoot = "mr" + w.blocks[0].Hash
 	w.extend(addrs, n-1, tag, salt+1)
+
 	return w
 }
 
@@ -1251,37 +1369,46 @@ func viewOf(repo storage.IndexedRepository, addrs []string) prunedView {
 	v := prunedView{byAddr: map[string][]storage.AddressUTXO{}}
 	all, err := repo.All()
 	Expect(err).NotTo(HaveOccurred())
+
 	for _, b := range all {
 		v.hashes = append(v.hashes, b.Hash)
 		v.bodies = append(v.bodies, len(b.Transactions))
 	}
+
 	v.snapshot, v.snapshotErr = repo.Snapshot()
 	v.prunedBelow, err = repo.PrunedBelow()
 	Expect(err).NotTo(HaveOccurred())
+
 	for _, a := range addrs {
 		v.byAddr[a], err = repo.UTXOsByAddress(a)
 		Expect(err).NotTo(HaveOccurred())
 	}
+
 	v.tipState, err = repo.ForkState(len(all))
 	Expect(err).NotTo(HaveOccurred())
 	v.current, err = repo.IndexCurrent()
 	Expect(err).NotTo(HaveOccurred())
+
 	return v
 }
 
 func expectedByAddr(set domain.UTXOSet, addr string) []storage.AddressUTXO {
 	out := []storage.AddressUTXO{}
+
 	for op, o := range set {
 		if o.Address == addr {
 			out = append(out, storage.AddressUTXO{OutPoint: op, Amount: o.Amount})
 		}
 	}
+
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].OutPoint.TxID != out[j].OutPoint.TxID {
 			return out[i].OutPoint.TxID < out[j].OutPoint.TxID
 		}
+
 		return out[i].OutPoint.Index < out[j].OutPoint.Index
 	})
+
 	return out
 }
 
@@ -1300,6 +1427,7 @@ func checkAgainst(repo storage.IndexedRepository, w *indexedWorld, addrs []strin
 		Expect(snap.BlockHash).To(Equal(chain[snap.Height].Hash))
 		Expect(snap.UTXOs).To(Equal(set))
 		Expect(snap.Hash).To(Equal(storage.SnapshotHash(chain[snap.Height].Hash, set)))
+
 		if p.KeepBlocks > 0 {
 			Expect(pb).To(Equal(snap.Height + 1))
 		}
@@ -1307,6 +1435,7 @@ func checkAgainst(repo storage.IndexedRepository, w *indexedWorld, addrs []strin
 		Expect(err).To(MatchError(storage.ErrNotFound))
 		Expect(pb).To(BeZero())
 	}
+
 	if p.KeepBlocks == 0 {
 		Expect(pb).To(BeZero())
 	}
@@ -1317,11 +1446,14 @@ func checkAgainst(repo storage.IndexedRepository, w *indexedWorld, addrs []strin
 		Expect(got.Index).To(Equal(want.Index))
 		Expect(got.PrevHash).To(Equal(want.PrevHash))
 		Expect(got.Transactions).NotTo(BeNil())
+
 		if h < pb {
 			Expect(got.Transactions).To(BeEmpty())
 			return
 		}
+
 		Expect(got.Transactions).To(HaveLen(len(want.Transactions)))
+
 		for i := range want.Transactions {
 			Expect(got.Transactions[i].CalculateHash()).To(Equal(want.Transactions[i].CalculateHash()))
 		}
@@ -1332,6 +1464,7 @@ func checkAgainst(repo storage.IndexedRepository, w *indexedWorld, addrs []strin
 	ranged, err := repo.Range(0, len(chain)+1)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(ranged).To(HaveLen(len(chain)))
+
 	for h, want := range chain {
 		same(all[h], want, h)
 		same(ranged[h], want, h)
@@ -1341,6 +1474,7 @@ func checkAgainst(repo storage.IndexedRepository, w *indexedWorld, addrs []strin
 		byHash, err := repo.ByHash(want.Hash)
 		Expect(err).NotTo(HaveOccurred())
 		same(byHash, want, h)
+
 		for _, tx := range want.Transactions {
 			got, err := repo.TxHeight(tx.CalculateHash())
 			if h < pb {
@@ -1354,17 +1488,20 @@ func checkAgainst(repo storage.IndexedRepository, w *indexedWorld, addrs []strin
 
 	full, err := domain.BuildUTXOSet(chain)
 	Expect(err).NotTo(HaveOccurred())
+
 	for _, a := range addrs {
 		got, err := repo.UTXOsByAddress(a)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got).To(Equal(expectedByAddr(full, a)))
 	}
+
 	for h := 0; h <= len(chain); h++ {
 		got, err := repo.ForkState(h)
 		if h < pb {
 			Expect(err).To(MatchError(storage.ErrReorgTooDeep))
 			continue
 		}
+
 		Expect(err).NotTo(HaveOccurred())
 		want, err := domain.BuildUTXOSet(chain[:h])
 		Expect(err).NotTo(HaveOccurred())
@@ -1380,9 +1517,11 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 
 	BeforeEach(func() {
 		addrs = nil
+
 		for i := 0; i < 3; i++ {
 			w, err := wallet.New()
 			Expect(err).NotTo(HaveOccurred())
+
 			addrs = append(addrs, w.Address())
 		}
 	})
@@ -1397,6 +1536,7 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 		alt := w.forkAt(height)
 		alt.extend(addrs, n, tag, salt)
 		Expect(repo.Reorg(height, alt.blocks[height:], alt.deltas[height:])).To(Succeed())
+
 		return alt
 	}
 
@@ -1406,16 +1546,20 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 				repo := newRepo(p)
 				w := prunedWorld(addrs, 14, "m", 10)
 				lastS, has := 0, false
+
 				for t := range w.blocks {
 					Expect(repo.Commit(w.blocks[t], w.deltas[t])).To(Succeed())
+
 					if s := t - p.KeepBlocks; s >= 1 && s%p.SnapshotInterval == 0 {
 						lastS, has = s, true
 					}
+
 					snap, err := repo.Snapshot()
 					if !has {
 						Expect(err).To(MatchError(storage.ErrNotFound))
 						continue
 					}
+
 					Expect(err).NotTo(HaveOccurred())
 					set, err := domain.BuildUTXOSet(w.blocks[:lastS+1])
 					Expect(err).NotTo(HaveOccurred())
@@ -1423,14 +1567,17 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 					Expect(snap.BlockHash).To(Equal(w.blocks[lastS].Hash))
 					Expect(snap.Hash).To(Equal(storage.SnapshotHash(w.blocks[lastS].Hash, set)))
 					Expect(snap.UTXOs).To(Equal(set))
+
 					pb, err := repo.PrunedBelow()
 					Expect(err).NotTo(HaveOccurred())
+
 					if p.KeepBlocks > 0 {
 						Expect(pb).To(Equal(lastS + 1))
 					} else {
 						Expect(pb).To(BeZero())
 					}
 				}
+
 				checkAgainst(repo, w, addrs, p)
 			})
 
@@ -1440,10 +1587,12 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 				commit(repo, w, 0, 14)
 				snap, err := repo.Snapshot()
 				Expect(err).NotTo(HaveOccurred())
+
 				for op := range snap.UTXOs {
 					delete(snap.UTXOs, op)
 					break
 				}
+
 				snap.UTXOs[domain.OutPoint{TxID: "forged", Index: 7}] = domain.TxOut{Amount: 1}
 				again, err := repo.Snapshot()
 				Expect(err).NotTo(HaveOccurred())
@@ -1456,10 +1605,12 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 				Expect(err).NotTo(HaveOccurred())
 				fs, err := repo.ForkState(max(pb, 10))
 				Expect(err).NotTo(HaveOccurred())
+
 				for op := range fs {
 					delete(fs, op)
 					break
 				}
+
 				fs[domain.OutPoint{TxID: "forged", Index: 8}] = domain.TxOut{Amount: 1}
 				fs2, err := repo.ForkState(max(pb, 10))
 				Expect(err).NotTo(HaveOccurred())
@@ -1478,6 +1629,7 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 
 				pb, err := repo.PrunedBelow()
 				Expect(err).NotTo(HaveOccurred())
+
 				w = reorg(repo, w, max(pb, 6), 4, "a", 200)
 				checkAgainst(repo, w, addrs, p)
 
@@ -1487,6 +1639,7 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 
 				pb, err = repo.PrunedBelow()
 				Expect(err).NotTo(HaveOccurred())
+
 				w = reorg(repo, w, max(pb, 8), 2, "b", 400)
 				checkAgainst(repo, w, addrs, p)
 			})
@@ -1497,6 +1650,7 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 				commit(repo, w, 0, 14)
 				pb, err := repo.PrunedBelow()
 				Expect(err).NotTo(HaveOccurred())
+
 				w = reorg(repo, w, max(pb, 9), 3, "a", 200)
 				before := viewOf(repo, addrs)
 
@@ -1506,6 +1660,7 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 				// The rebuilt undo data still lets a Reorg run.
 				pb, err = repo.PrunedBelow()
 				Expect(err).NotTo(HaveOccurred())
+
 				w = reorg(repo, w, max(pb, 9), 2, "c", 600)
 				checkAgainst(repo, w, addrs, p)
 			})
@@ -1522,17 +1677,21 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 			pb, err := repo.PrunedBelow()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(pb).To(Equal(10)) // the Commit of height 11 stores the snapshot of 9
+
 			snap, err := repo.Snapshot()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(snap.Height).To(Equal(9))
+
 			b0, err := repo.ByHeight(0)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(b0.Transactions).NotTo(BeNil())
 			Expect(b0.Transactions).To(BeEmpty())
 			Expect(b0.MerkleRoot).To(Equal(w.blocks[0].MerkleRoot))
+
 			b9, err := repo.ByHeight(9)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(b9.Transactions).To(BeEmpty())
+
 			b10, err := repo.ByHeight(10)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(b10.Transactions).NotTo(BeEmpty())
@@ -1540,6 +1699,7 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 			Expect(err).To(MatchError(storage.ErrNotFound))
 			ids, err := repo.TxsByAddress(addrs[0])
 			Expect(err).NotTo(HaveOccurred())
+
 			for _, id := range ids {
 				h, err := repo.TxHeight(id)
 				Expect(err).NotTo(HaveOccurred())
@@ -1552,6 +1712,7 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 			w := prunedWorld(addrs, 12, "m", 10)
 			commit(repo, w, 0, 12)
 			before := viewOf(repo, addrs)
+
 			for _, h := range []int{1, 9} {
 				alt := w.forkAt(h)
 				alt.extend(addrs, 2, "a", 200)
@@ -1560,6 +1721,7 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 				_, err := repo.ForkState(h)
 				Expect(err).To(MatchError(storage.ErrReorgTooDeep))
 			}
+
 			Expect(viewOf(repo, addrs)).To(Equal(before))
 			// The first retained height is still a valid fork.
 			w = reorg(repo, w, 10, 2, "a", 200)
@@ -1585,6 +1747,7 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 			pb, err := repo.PrunedBelow()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(pb).To(Equal(9))
+
 			before := viewOf(repo, addrs)
 
 			// Blocks 9..11 store the snapshot of 10 and prune; block 12 is rejected.
@@ -1593,6 +1756,7 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 			bad := &domain.Block{Index: 12, PrevHash: alt.blocks[11].Hash, Hash: "bad12"}
 			ghost := domain.OutPoint{TxID: "ghost", Index: 0}
 			badDelta := domain.UTXODelta{Spent: map[domain.OutPoint]domain.TxOut{ghost: {Amount: 1, Address: addrs[0]}}}
+
 			blocks := append(append([]*domain.Block{}, alt.blocks[9:]...), bad)
 			deltas := append(append([]domain.UTXODelta{}, alt.deltas[9:]...), badDelta)
 			Expect(repo.Reorg(9, blocks, deltas)).To(MatchError(storage.ErrUTXOConflict))
@@ -1682,6 +1846,7 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 			repo := newRepo(storage.Pruning{})
 			w := prunedWorld(addrs, 3, "m", 10)
 			commit(repo, w, 0, 3)
+
 			for _, h := range []int{-1, 4} {
 				_, err := repo.ForkState(h)
 				Expect(err).To(MatchError(storage.ErrConflict))
@@ -1694,9 +1859,11 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 			commit(repo, w, 0, 3)
 			set, err := repo.ForkState(3)
 			Expect(err).NotTo(HaveOccurred())
+
 			for op := range set {
 				delete(set, op)
 			}
+
 			checkAgainst(repo, w, addrs, storage.Pruning{})
 		})
 
@@ -1718,8 +1885,11 @@ func PrunedChain(n int) ([]*domain.Block, []domain.UTXODelta) {
 	for i := range addrs {
 		w, err := wallet.New()
 		Expect(err).NotTo(HaveOccurred())
+
 		addrs[i] = w.Address()
 	}
+
 	w := prunedWorld(addrs, n, "m", 10)
+
 	return w.blocks, w.deltas
 }

@@ -14,6 +14,7 @@ import (
 
 func fileFixture() ([]*domain.Block, storage.Snapshot) {
 	var headers []*domain.Block
+
 	prev := ""
 	for i := 0; i < 3; i++ {
 		b := &domain.Block{Index: i, Timestamp: time.Unix(1_700_000_000+int64(i), 0).UTC(), MerkleRoot: "mr", PrevHash: prev, Transactions: []domain.Transaction{}}
@@ -21,42 +22,52 @@ func fileFixture() ([]*domain.Block, storage.Snapshot) {
 		prev = b.Hash
 		headers = append(headers, b)
 	}
+
 	set := domain.UTXOSet{
 		{TxID: "bb", Index: 0}: {Amount: 7, Address: "bob"},
 		{TxID: "aa", Index: 1}: {Amount: 9, Address: "alice"},
 		{TxID: "aa", Index: 0}: {Amount: 5, Address: "carol"},
 	}
 	last := headers[2].Hash
+
 	return headers, storage.Snapshot{Height: 2, BlockHash: last, Hash: storage.SnapshotHash(last, set), UTXOs: set}
 }
 
 func writeFixture(t *testing.T) ([]*domain.Block, storage.Snapshot, []byte) {
 	t.Helper()
+
 	headers, snap := fileFixture()
+
 	var buf bytes.Buffer
 	if err := storage.WriteSnapshotFile(&buf, headers, snap); err != nil {
 		t.Fatal(err)
 	}
+
 	return headers, snap, buf.Bytes()
 }
 
 func TestSnapshotFileRoundTrip(t *testing.T) {
 	headers, snap, data := writeFixture(t)
+
 	gotH, gotS, err := storage.ReadSnapshotFile(bytes.NewReader(data))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(gotH) != len(headers) {
 		t.Fatalf("headers = %d, want %d", len(gotH), len(headers))
 	}
+
 	for i := range headers {
 		if gotH[i].Hash != headers[i].Hash || gotH[i].Index != i || !gotH[i].Timestamp.Equal(headers[i].Timestamp) || gotH[i].CalculateHash() != headers[i].Hash {
 			t.Fatalf("header %d = %+v, want %+v", i, gotH[i], headers[i])
 		}
 	}
+
 	if gotS.Height != snap.Height || gotS.BlockHash != snap.BlockHash || gotS.Hash != snap.Hash || len(gotS.UTXOs) != len(snap.UTXOs) {
 		t.Fatalf("snapshot = %+v, want %+v", gotS, snap)
 	}
+
 	for op, o := range snap.UTXOs {
 		if gotS.UTXOs[op] != o {
 			t.Fatalf("utxo %v = %v, want %v", op, gotS.UTXOs[op], o)
@@ -66,6 +77,7 @@ func TestSnapshotFileRoundTrip(t *testing.T) {
 
 func TestSnapshotFileShapeAndOrder(t *testing.T) {
 	_, _, data := writeFixture(t)
+
 	var raw struct {
 		Height    int             `json:"height"`
 		BlockHash string          `json:"blockHash"`
@@ -81,9 +93,11 @@ func TestSnapshotFileShapeAndOrder(t *testing.T) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatal(err)
 	}
+
 	if raw.Height != 2 || raw.BlockHash == "" || raw.Hash == "" || len(raw.Headers) == 0 {
 		t.Fatalf("unexpected shape: %s", data)
 	}
+
 	want := []struct {
 		id  string
 		idx uint32
@@ -93,6 +107,7 @@ func TestSnapshotFileShapeAndOrder(t *testing.T) {
 	if len(raw.UTXOs) != len(want) {
 		t.Fatalf("utxos = %v", raw.UTXOs)
 	}
+
 	for i, w := range want {
 		u := raw.UTXOs[i]
 		if u.TxID != w.id || u.Index != w.idx || u.Address != w.a || u.Amount != w.n {
@@ -108,13 +123,17 @@ func TestReadSnapshotFileRejects(t *testing.T) {
 		if err := json.Unmarshal(data, &m); err != nil {
 			t.Fatal(err)
 		}
+
 		f(m)
+
 		out, err := json.Marshal(m)
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		return out
 	}
+
 	cases := map[string][]byte{
 		"invalid json": []byte("{not json"),
 		"empty":        nil,
@@ -132,6 +151,7 @@ func TestReadSnapshotFileRejects(t *testing.T) {
 			if !errors.Is(err, storage.ErrInvalidSnapshot) {
 				t.Fatalf("err = %v, want ErrInvalidSnapshot", err)
 			}
+
 			if h != nil || s.UTXOs != nil {
 				t.Fatalf("returned data with an error: %v %v", h, s)
 			}
@@ -144,23 +164,28 @@ func TestCheckHeaders(t *testing.T) {
 	if err := storage.CheckHeaders(good); err != nil {
 		t.Fatalf("good headers: %v", err)
 	}
+
 	unsealed := clone0(good)
 	unsealed[0].Hash = ""
 	unsealed[1].PrevHash = ""
 	unsealed[1].Hash = unsealed[1].CalculateHash()
 	unsealed[2].PrevHash = unsealed[1].Hash
+
 	unsealed[2].Hash = unsealed[2].CalculateHash()
 	if err := storage.CheckHeaders(unsealed); err != nil {
 		t.Fatalf("unsealed genesis: %v", err)
 	}
+
 	clone := func() []*domain.Block {
 		out := make([]*domain.Block, len(good))
 		for i, b := range good {
 			c := *b
 			out[i] = &c
 		}
+
 		return out
 	}
+
 	bad := map[string]func([]*domain.Block) []*domain.Block{
 		"empty":    func([]*domain.Block) []*domain.Block { return nil },
 		"nil":      func(h []*domain.Block) []*domain.Block { h[1] = nil; return h },
@@ -183,5 +208,6 @@ func clone0(in []*domain.Block) []*domain.Block {
 		c := *b
 		out[i] = &c
 	}
+
 	return out
 }

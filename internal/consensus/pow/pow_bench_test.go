@@ -16,6 +16,7 @@ func BenchmarkMineParallel(b *testing.B) {
 		for _, w := range []int{1, 2, 4, 8} {
 			b.Run(fmt.Sprintf("difficulty=%d/workers=%d", d, w), func(b *testing.B) {
 				prefix := strings.Repeat("0", d/4)
+
 				for i := 0; b.Loop(); i++ {
 					blk := &domain.Block{
 						Index:     i + 1,
@@ -25,6 +26,7 @@ func BenchmarkMineParallel(b *testing.B) {
 					if err := powpkg.MineParallel(context.Background(), blk, d, w); err != nil {
 						b.Fatalf("difficulty=%d workers=%d: %v", d, w, err)
 					}
+
 					if blk.Hash != blk.CalculateHash() || !strings.HasPrefix(blk.Hash, prefix) {
 						b.Fatalf("difficulty=%d workers=%d: invalid hash %s", d, w, blk.Hash)
 					}

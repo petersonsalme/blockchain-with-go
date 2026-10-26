@@ -17,6 +17,7 @@ import (
 // refLeaf computes the ADR-0009 leaf hash independently of the code under test.
 func refLeaf(tx domain.Transaction) []byte {
 	data := []byte{0x00}
+
 	data = append(data, tx.CalculateHash()...)
 	for _, in := range tx.Inputs {
 		for _, s := range []string{in.PublicKey, in.Signature} {
@@ -24,7 +25,9 @@ func refLeaf(tx domain.Transaction) []byte {
 			data = append(data, s...)
 		}
 	}
+
 	sum := sha256.Sum256(data)
+
 	return sum[:]
 }
 
@@ -34,27 +37,34 @@ func refRoot(txs []domain.Transaction) string {
 		sum := sha256.Sum256(nil)
 		return hex.EncodeToString(sum[:])
 	}
+
 	level := make([][]byte, len(txs))
 	for i, tx := range txs {
 		level[i] = refLeaf(tx)
 	}
+
 	for len(level) > 1 {
 		var next [][]byte
+
 		for i := 0; i < len(level); i += 2 {
 			if i+1 == len(level) {
 				next = append(next, level[i])
 				continue
 			}
+
 			sum := sha256.Sum256(slices.Concat([]byte{0x01}, level[i], level[i+1]))
 			next = append(next, sum[:])
 		}
+
 		level = next
 	}
+
 	return hex.EncodeToString(level[0])
 }
 
 func merkleTxs(n int) []domain.Transaction {
 	base := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+
 	txs := make([]domain.Transaction, n)
 	for i := range txs {
 		txs[i] = domain.Transaction{
@@ -69,6 +79,7 @@ func merkleTxs(n int) []domain.Transaction {
 		}
 		txs[i].ID = txs[i].CalculateHash()
 	}
+
 	return txs
 }
 
@@ -80,6 +91,7 @@ func cloneTxs(txs []domain.Transaction) []domain.Transaction {
 		out[i].Inputs = slices.Clone(tx.Inputs)
 		out[i].Outputs = slices.Clone(tx.Outputs)
 	}
+
 	return out
 }
 
@@ -199,6 +211,7 @@ var _ = Describe("Merkle tree", func() {
 				for i := range txs {
 					proof, err := domain.BuildMerkleProof(txs, i)
 					Expect(err).NotTo(HaveOccurred())
+
 					leaf := domain.MerkleLeafHash(&txs[i])
 					Expect(domain.VerifyMerkleProof(leaf, proof.Steps, root)).To(BeTrue(), "n=%d i=%d", n, i)
 
@@ -208,6 +221,7 @@ var _ = Describe("Merkle tree", func() {
 						if j == i {
 							continue
 						}
+
 						other := domain.MerkleLeafHash(&txs[j])
 						Expect(domain.VerifyMerkleProof(other, proof.Steps, root)).To(BeFalse(), "leaf n=%d i=%d j=%d", n, i, j)
 					}
@@ -253,6 +267,7 @@ var _ = Describe("Merkle tree", func() {
 				_, err := domain.BuildMerkleProof(txs, i)
 				Expect(err).To(HaveOccurred(), "i=%d", i)
 			}
+
 			_, err := domain.BuildMerkleProof(nil, 0)
 			Expect(err).To(HaveOccurred())
 		})

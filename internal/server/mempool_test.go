@@ -32,6 +32,7 @@ func (brokenChain) MinePending(context.Context) (*domain.Block, error) {
 func txBody(tx domain.Transaction) string {
 	b, err := json.Marshal(tx)
 	Expect(err).NotTo(HaveOccurred())
+
 	return string(b)
 }
 
@@ -45,16 +46,19 @@ var _ = Describe("Mempool routes", func() {
 
 	build := func(opts ...chain.Option) {
 		var err error
+
 		svc, err = funds.service(memory.New(), pow.NewProofOfWork(1), opts...)
 		Expect(err).NotTo(HaveOccurred())
 		srv, err := NewServer(svc, cfg)
 		Expect(err).NotTo(HaveOccurred())
+
 		router = srv.Handler()
 	}
 
 	do := func(method, path string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(method, path, nil))
+
 		return rec
 	}
 
@@ -64,6 +68,7 @@ var _ = Describe("Mempool routes", func() {
 		for i, tx := range txs {
 			ids[i] = tx.ID
 		}
+
 		return ids
 	}
 
@@ -73,12 +78,14 @@ var _ = Describe("Mempool routes", func() {
 		for _, tx := range txs {
 			Expect(svc.Submit(tx)).To(Succeed())
 		}
+
 		return txs[2].ID, txs[1].ID, txs[0].ID
 	}
 
 	BeforeEach(func() {
 		funds = newBank()
 		cfg = Config{}
+
 		build()
 	})
 
@@ -111,6 +118,7 @@ var _ = Describe("Mempool routes", func() {
 		rec := do(http.MethodGet, "/mempool")
 
 		Expect(rec.Code).To(Equal(http.StatusOK))
+
 		var body mempoolResponse
 		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 		Expect(txIDs(body.Transactions)).To(Equal([]string{fee90, fee50, fee10}))
@@ -122,12 +130,14 @@ var _ = Describe("Mempool routes", func() {
 		rec := do(http.MethodPost, "/mine")
 
 		Expect(rec.Code).To(Equal(http.StatusCreated))
+
 		var block domain.Block
 		Expect(json.Unmarshal(rec.Body.Bytes(), &block)).To(Succeed())
 		Expect(block.Index).To(Equal(1))
 		Expect(txIDs(block.Transactions)).To(Equal([]string{fee90, fee50, fee10}))
 
 		rec = do(http.MethodGet, "/mempool")
+
 		var body mempoolResponse
 		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 		Expect(body.Transactions).To(BeEmpty())
@@ -137,6 +147,7 @@ var _ = Describe("Mempool routes", func() {
 		rec := do(http.MethodPost, "/mine")
 
 		Expect(rec.Code).To(Equal(http.StatusCreated))
+
 		var block domain.Block
 		Expect(json.Unmarshal(rec.Body.Bytes(), &block)).To(Succeed())
 		Expect(block.Index).To(Equal(1))
@@ -175,6 +186,7 @@ var _ = Describe("Mempool routes", func() {
 
 		It("honours MiningTimeout", func() {
 			cfg = Config{MiningTimeout: 50 * time.Millisecond}
+
 			withGenerator(func(ctx context.Context, _ consensus.Consensus, _ []*domain.Block, _ []domain.Transaction) (*domain.Block, error) {
 				<-ctx.Done()
 				return nil, ctx.Err()
@@ -198,6 +210,7 @@ var _ = Describe("Mempool routes", func() {
 		postTx := func(body string) *httptest.ResponseRecorder {
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/tx", strings.NewReader(body)))
+
 			return rec
 		}
 
@@ -205,6 +218,7 @@ var _ = Describe("Mempool routes", func() {
 		errorCode := func(rec *httptest.ResponseRecorder) string {
 			var body errorResponse
 			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
+
 			return body.Code
 		}
 
@@ -214,6 +228,7 @@ var _ = Describe("Mempool routes", func() {
 			rec := postTx(txBody(tx))
 
 			Expect(rec.Code).To(Equal(http.StatusAccepted))
+
 			var body submitResponse
 			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 			Expect(body.ID).To(Equal(tx.ID))
@@ -235,6 +250,7 @@ var _ = Describe("Mempool routes", func() {
 			rec := postTx(txBody(tx))
 
 			Expect(rec.Code).To(Equal(http.StatusAccepted))
+
 			var body submitResponse
 			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 			Expect(body.ID).To(Equal(want))
@@ -261,6 +277,7 @@ var _ = Describe("Mempool routes", func() {
 
 		It("answers 409 mempool_full when a full pool cannot evict for the fee rate", func() {
 			build(chain.WithMempool(mempool.New(1)))
+
 			to := newWallet().Address()
 			Expect(postTx(txBody(funds.tx(to, 42))).Code).To(Equal(http.StatusAccepted))
 
@@ -321,6 +338,7 @@ var _ = Describe("Mempool routes", func() {
 
 		It("mines submitted transactions in fee-rate order", func() {
 			to := newWallet().Address()
+
 			txs := []domain.Transaction{funds.tx(to, 90), funds.tx(to, 50), funds.tx(to, 10)}
 			for _, tx := range txs {
 				Expect(postTx(txBody(tx)).Code).To(Equal(http.StatusAccepted))
@@ -329,6 +347,7 @@ var _ = Describe("Mempool routes", func() {
 			rec := do(http.MethodPost, "/mine")
 
 			Expect(rec.Code).To(Equal(http.StatusCreated))
+
 			var block domain.Block
 			Expect(json.Unmarshal(rec.Body.Bytes(), &block)).To(Succeed())
 			Expect(txIDs(block.Transactions)).To(Equal([]string{txs[2].ID, txs[1].ID, txs[0].ID}))
@@ -353,6 +372,7 @@ var _ = DescribeTable("respondWithSubmitError",
 		respondWithSubmitError(rec, err)
 
 		Expect(rec.Code).To(Equal(status))
+
 		var body errorResponse
 		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 		Expect(body.Code).To(Equal(code))

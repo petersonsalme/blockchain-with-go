@@ -147,6 +147,7 @@ func (p *ProofOfWork) workers() int {
 func (p *ProofOfWork) WithRetarget(interval int, target time.Duration) *ProofOfWork {
 	p.RetargetInterval = interval
 	p.TargetBlockTime = target
+
 	return p
 }
 
@@ -271,6 +272,7 @@ func MineParallel(ctx context.Context, b *domain.Block, difficulty, workers int)
 	found := make(chan domain.Block, workers)
 
 	var wg sync.WaitGroup
+
 	for i := 0; i < workers; i++ {
 		c := *b
 		c.Difficulty = difficulty
@@ -283,7 +285,9 @@ func MineParallel(ctx context.Context, b *domain.Block, difficulty, workers int)
 				if hash := c.CalculateHash(); solvesDifficulty(hash, difficulty) {
 					c.Hash = hash
 					found <- c
+
 					cancel()
+
 					return
 				}
 			}
@@ -320,11 +324,13 @@ func solvesDifficulty(hash string, difficulty int) bool {
 	}
 
 	zeros := 0
+
 	for _, octet := range raw {
 		if octet != 0 {
 			zeros += bits.LeadingZeros8(octet)
 			break
 		}
+
 		zeros += 8
 	}
 

@@ -48,12 +48,14 @@ func (s *Server) p2pEnabled(w http.ResponseWriter) bool {
 		respondWithJSON(w, http.StatusNotFound, errorResponse{Error: "peer-to-peer is not enabled on this node", Code: p2pDisabledCode})
 		return false
 	}
+
 	return true
 }
 
 // handleP2PHello runs the handshake for an inbound hello and answers the local hello.
 func (s *Server) handleP2PHello(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = r.Body.Close() }() // closing a server request body cannot fail usefully
+
 	if !s.p2pEnabled(w) {
 		return
 	}
@@ -61,17 +63,21 @@ func (s *Server) handleP2PHello(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes())
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
+
 	var remote p2p.Hello
+
 	err := dec.Decode(&remote)
 	if err == nil { // only whitespace may follow the hello
 		if _, tokErr := dec.Token(); !errors.Is(tokErr, io.EOF) {
 			err = errors.Join(errors.New("trailing data"), tokErr)
 		}
 	}
+
 	if err != nil {
 		if !respondIfTooLarge(w, err) {
 			respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid hello body", Code: "invalid_hello"})
 		}
+
 		return
 	}
 
@@ -83,9 +89,12 @@ func (s *Server) handleP2PHello(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+
 		respondWithJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+
 		return
 	}
+
 	respondWithJSON(w, http.StatusOK, local)
 }
 
@@ -94,7 +103,9 @@ func (s *Server) handleP2PPeers(w http.ResponseWriter, _ *http.Request) {
 	if !s.p2pEnabled(w) {
 		return
 	}
+
 	infos := s.p2p.Peers()
+
 	resp := peersResponse{Peers: make([]peerResponse, len(infos)), Addrs: append([]string{}, s.p2p.Addrs()...)}
 	for i, p := range infos {
 		resp.Peers[i] = peerResponse{
@@ -106,5 +117,6 @@ func (s *Server) handleP2PPeers(w http.ResponseWriter, _ *http.Request) {
 			LastSeen: p.LastSeen.UTC().Format(time.RFC3339),
 		}
 	}
+
 	respondWithJSON(w, http.StatusOK, resp)
 }

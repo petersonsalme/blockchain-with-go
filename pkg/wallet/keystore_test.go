@@ -17,12 +17,15 @@ var _ = Describe("Keystore", func() {
 		path string
 		w    *Wallet
 	)
+
 	const pw = "correct horse"
 
 	BeforeEach(func() {
 		dir = GinkgoT().TempDir()
 		path = filepath.Join(dir, "ks.json")
+
 		var err error
+
 		w, err = New()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(w.Save(path, pw)).To(Succeed())
@@ -31,12 +34,14 @@ var _ = Describe("Keystore", func() {
 	mutate := func(fn func(m map[string]any)) string {
 		raw, err := os.ReadFile(path)
 		Expect(err).NotTo(HaveOccurred())
+
 		var m map[string]any
 		Expect(json.Unmarshal(raw, &m)).To(Succeed())
 		fn(m)
 		out, _ := json.Marshal(m)
 		p := filepath.Join(dir, "mut.json")
 		Expect(os.WriteFile(p, out, 0o600)).To(Succeed())
+
 		return p
 	}
 	crypt := func(m map[string]any) map[string]any { return m["crypto"].(map[string]any) }
@@ -68,8 +73,10 @@ var _ = Describe("Keystore", func() {
 		err := w.Save(target, pw)
 
 		Expect(err).To(MatchError(ContainSubstring("replacing keystore")))
+
 		entries, _ := os.ReadDir(dir)
 		Expect(entries).To(HaveLen(2)) // the keystore saved in BeforeEach and the untouched target dir
+
 		_, statErr := os.Stat(filepath.Join(target, "keep"))
 		Expect(statErr).NotTo(HaveOccurred())
 	})
@@ -86,16 +93,20 @@ var _ = Describe("Keystore", func() {
 	It("uses fresh salt, nonce and ciphertext per save", func() {
 		p2 := filepath.Join(dir, "ks2.json")
 		Expect(w.Save(p2, pw)).To(Succeed())
+
 		read := func(p string) keystoreFile {
 			raw, _ := os.ReadFile(p)
+
 			var k keystoreFile
 			Expect(json.Unmarshal(raw, &k)).To(Succeed())
+
 			return k
 		}
 		a, b := read(path), read(p2)
 		Expect(a.Crypto.KDFParams.Salt).NotTo(Equal(b.Crypto.KDFParams.Salt))
 		Expect(a.Crypto.Nonce).NotTo(Equal(b.Crypto.Nonce))
 		Expect(a.Crypto.Ciphertxt).NotTo(Equal(b.Crypto.Ciphertxt))
+
 		l, err := Load(p2, pw)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(l.Address()).To(Equal(w.Address()))
@@ -105,18 +116,23 @@ var _ = Describe("Keystore", func() {
 		if s[0] == '0' {
 			return "1" + s[1:]
 		}
+
 		return "0" + s[1:]
 	}
 
 	DescribeTable("tampered files",
 		func(fn func(m map[string]any), wantWrongPw bool, wantInvalid bool) {
 			p := mutate(fn)
+
 			var err error
+
 			Expect(func() { _, err = Load(p, pw) }).NotTo(Panic())
 			Expect(err).To(HaveOccurred())
+
 			if wantWrongPw {
 				Expect(err).To(MatchError(ErrWrongPassword))
 			}
+
 			if wantInvalid {
 				Expect(err).To(MatchError(ErrInvalidKeystore))
 			}
@@ -162,8 +178,10 @@ var _ = Describe("Keystore", func() {
 			It("accepts N at lower boundary (2)", func() {
 				pN2 := filepath.Join(dir, "ks-n2.json")
 				origN := scryptN
+
 				scryptN = 2
 				defer func() { scryptN = origN }()
+
 				wN2, err := New()
 				Expect(err).NotTo(HaveOccurred())
 				Expect(wN2.Save(pN2, pw)).To(Succeed())
@@ -207,8 +225,10 @@ var _ = Describe("Keystore", func() {
 			It("accepts R at lower boundary (1)", func() {
 				pR1 := filepath.Join(dir, "ks-r1.json")
 				origR := scryptR
+
 				scryptR = 1
 				defer func() { scryptR = origR }()
+
 				wR1, err := New()
 				Expect(err).NotTo(HaveOccurred())
 				Expect(wR1.Save(pR1, pw)).To(Succeed())
@@ -226,8 +246,10 @@ var _ = Describe("Keystore", func() {
 			It("accepts R at upper boundary (maxScryptR = 32)", func() {
 				pR32 := filepath.Join(dir, "ks-r32.json")
 				origR := scryptR
+
 				scryptR = maxScryptR
 				defer func() { scryptR = origR }()
+
 				wR32, err := New()
 				Expect(err).NotTo(HaveOccurred())
 				Expect(wR32.Save(pR32, pw)).To(Succeed())
@@ -247,8 +269,10 @@ var _ = Describe("Keystore", func() {
 			It("accepts P at lower boundary (1)", func() {
 				pP1 := filepath.Join(dir, "ks-p1.json")
 				origP := scryptP
+
 				scryptP = 1
 				defer func() { scryptP = origP }()
+
 				wP1, err := New()
 				Expect(err).NotTo(HaveOccurred())
 				Expect(wP1.Save(pP1, pw)).To(Succeed())
@@ -266,8 +290,10 @@ var _ = Describe("Keystore", func() {
 			It("accepts P at upper boundary (maxScryptP = 16)", func() {
 				pP16 := filepath.Join(dir, "ks-p16.json")
 				origP := scryptP
+
 				scryptP = maxScryptP
 				defer func() { scryptP = origP }()
+
 				wP16, err := New()
 				Expect(err).NotTo(HaveOccurred())
 				Expect(wP16.Save(pP16, pw)).To(Succeed())

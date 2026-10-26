@@ -25,6 +25,7 @@ func TestPruningValidate(t *testing.T) {
 		if c.ok && err != nil {
 			t.Errorf("%s: unexpected %v", c.name, err)
 		}
+
 		if !c.ok && !errors.Is(err, storage.ErrInvalidPruning) {
 			t.Errorf("%s: got %v, want ErrInvalidPruning", c.name, err)
 		}

@@ -43,6 +43,7 @@ func BlockDelta(view UTXOView, b *Block, isGenesis bool) (UTXODelta, error) {
 
 	delta := UTXODelta{Spent: map[OutPoint]TxOut{}, Created: map[OutPoint]TxOut{}}
 	seen := map[OutPoint]bool{}
+
 	var fees, coinbaseOut uint64
 
 	for i := range b.Transactions {
@@ -51,6 +52,7 @@ func BlockDelta(view UTXOView, b *Block, isGenesis bool) (UTXODelta, error) {
 		if len(tx.Outputs) == 0 {
 			return UTXODelta{}, ErrInvalidOutput
 		}
+
 		coinbase := i == 0 && len(tx.Inputs) == 0 && !isGenesis
 		if len(tx.Inputs) == 0 && !isGenesis && !coinbase {
 			return UTXODelta{}, ErrMissingInputs
@@ -61,6 +63,7 @@ func BlockDelta(view UTXOView, b *Block, isGenesis bool) (UTXODelta, error) {
 			if o.Amount == 0 || wallet.ValidateAddress(o.Address) != nil || o.Amount > math.MaxUint64-out {
 				return UTXODelta{}, ErrInvalidOutput
 			}
+
 			out += o.Amount
 		}
 
@@ -69,6 +72,7 @@ func BlockDelta(view UTXOView, b *Block, isGenesis bool) (UTXODelta, error) {
 			if seen[op] {
 				return UTXODelta{}, ErrDoubleSpend
 			}
+
 			seen[op] = true
 
 			prev, ok := delta.Created[op]
@@ -83,6 +87,7 @@ func BlockDelta(view UTXOView, b *Block, isGenesis bool) (UTXODelta, error) {
 			if prev.Amount > math.MaxUint64-in {
 				return UTXODelta{}, ErrInsufficientInputs
 			}
+
 			in += prev.Amount
 		}
 
@@ -90,8 +95,10 @@ func BlockDelta(view UTXOView, b *Block, isGenesis bool) (UTXODelta, error) {
 			if out > in {
 				return UTXODelta{}, ErrInsufficientInputs
 			}
+
 			fees = addSat(fees, in-out)
 		}
+
 		if coinbase {
 			coinbaseOut = out
 		}
@@ -102,9 +109,11 @@ func BlockDelta(view UTXOView, b *Block, isGenesis bool) (UTXODelta, error) {
 			if _, exists := delta.Created[op]; exists || seen[op] {
 				return UTXODelta{}, ErrDoubleSpend
 			}
+
 			if _, exists := view.Lookup(op); exists {
 				return UTXODelta{}, ErrDoubleSpend
 			}
+
 			delta.Created[op] = o
 		}
 	}
@@ -121,6 +130,7 @@ func addSat(a, b uint64) uint64 {
 	if a > math.MaxUint64-b {
 		return math.MaxUint64
 	}
+
 	return a + b
 }
 
@@ -138,6 +148,7 @@ func (s UTXOSet) Apply(d UTXODelta) {
 	for op := range d.Spent {
 		delete(s, op)
 	}
+
 	for op, out := range d.Created {
 		s[op] = out
 	}
@@ -148,6 +159,7 @@ func (s UTXOSet) Revert(d UTXODelta) {
 	for op := range d.Created {
 		delete(s, op)
 	}
+
 	for op, out := range d.Spent {
 		s[op] = out
 	}
@@ -158,16 +170,19 @@ func (s UTXOSet) Revert(d UTXODelta) {
 // lacks or holds differently. Neither set is altered.
 func DiffUTXO(from, to UTXOSet) UTXODelta {
 	delta := UTXODelta{Spent: map[OutPoint]TxOut{}, Created: map[OutPoint]TxOut{}}
+
 	for op, out := range from {
 		if got, ok := to[op]; !ok || got != out {
 			delta.Spent[op] = out
 		}
 	}
+
 	for op, out := range to {
 		if got, ok := from[op]; !ok || got != out {
 			delta.Created[op] = out
 		}
 	}
+
 	return delta
 }
 
@@ -181,7 +196,9 @@ func BuildUTXOSet(blocks []*Block) (UTXOSet, error) {
 		if err != nil {
 			return nil, err
 		}
+
 		set.Apply(d)
 	}
+
 	return set, nil
 }

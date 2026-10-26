@@ -14,13 +14,16 @@ func LoadAddrs(path string) ([]string, error) {
 	if errors.Is(err, fs.ErrNotExist) {
 		return []string{}, nil
 	}
+
 	if err != nil {
 		return nil, err
 	}
+
 	addrs := []string{}
 	if err := json.Unmarshal(raw, &addrs); err != nil {
 		return nil, err
 	}
+
 	return addrs, nil
 }
 
@@ -30,23 +33,28 @@ func SaveAddrs(path string, addrs []string) error {
 	if addrs == nil {
 		addrs = []string{}
 	}
+
 	raw, err := json.Marshal(addrs)
 	if err != nil {
 		return err
 	}
+
 	f, err := os.CreateTemp(filepath.Dir(path), ".peers-*.tmp")
 	if err != nil {
 		return err
 	}
+
 	tmp := f.Name()
 	if err := writeAndClose(f, raw); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}
+
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}
+
 	return nil
 }
 
@@ -64,13 +72,16 @@ func writeAndClose(f tmpFile, raw []byte) error {
 		_ = f.Close()
 		return err
 	}
+
 	if err := f.Chmod(0o600); err != nil {
 		_ = f.Close()
 		return err
 	}
+
 	if err := f.Sync(); err != nil {
 		_ = f.Close()
 		return err
 	}
+
 	return f.Close()
 }

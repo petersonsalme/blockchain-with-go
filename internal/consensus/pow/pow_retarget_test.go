@@ -26,6 +26,7 @@ func history(n, d int, at func(i int) time.Duration) []*domain.Block {
 			h[i].Difficulty = d
 		}
 	}
+
 	return h
 }
 
@@ -40,7 +41,9 @@ func window(last, n int, span time.Duration) func(int) time.Duration {
 		if i < last-n {
 			return time.Duration(i) * time.Second
 		}
+
 		start := time.Duration(last-n) * time.Second
+
 		return start + span*time.Duration(i-(last-n))/time.Duration(n)
 	}
 }
@@ -48,23 +51,28 @@ func window(last, n int, span time.Duration) func(int) time.Duration {
 func pinRetargetEnv(interval, target string) {
 	for name, value := range map[string]string{powpkg.RetargetIntervalEnvVar: interval, powpkg.TargetBlockTimeEnvVar: target} {
 		previous, existed := os.LookupEnv(name)
+
 		DeferCleanup(func() {
 			if existed {
 				Expect(os.Setenv(name, previous)).To(Succeed())
 				return
 			}
+
 			Expect(os.Unsetenv(name)).To(Succeed())
 		})
+
 		if value == "" {
 			Expect(os.Unsetenv(name)).To(Succeed())
 			continue
 		}
+
 		Expect(os.Setenv(name, value)).To(Succeed())
 	}
 }
 
 var _ = Describe("ProofOfWork difficulty retargeting", func() {
 	const interval = 4
+
 	target := 10 * time.Second // per block; a window of 4 blocks targets 40s
 
 	Describe("ExpectedDifficulty", func() {
@@ -102,6 +110,7 @@ var _ = Describe("ProofOfWork difficulty retargeting", func() {
 				if n%interval == 0 {
 					continue
 				}
+
 				Expect(p.ExpectedDifficulty(history(n, 4, every(time.Millisecond)))).To(Equal(4), "height %d", n)
 			}
 		})
@@ -187,28 +196,35 @@ var _ = Describe("ProofOfWork difficulty retargeting", func() {
 		// stable difficulties are those with 4s <= 2^d <= 16s, that is 2..4.
 		simulate := func(initial int) (difficulties []int, spans []time.Duration) {
 			const window = 5
+
 			p := powpkg.New(initial).WithRetarget(window, 8*time.Second)
+
 			h := []*domain.Block{{Index: 0, Timestamp: epoch}}
 			for len(h) < 12*window {
 				d := p.ExpectedDifficulty(h)
 				last := h[len(h)-1]
 				h = append(h, &domain.Block{Index: last.Index + 1, Difficulty: d, Timestamp: last.Timestamp.Add(time.Second << d)})
 			}
+
 			for i := window + 1; i < len(h); i += window {
 				difficulties = append(difficulties, h[i].Difficulty)
 				spans = append(spans, h[i-1].Timestamp.Sub(h[i-1-window].Timestamp))
 			}
+
 			return difficulties, spans
 		}
 
 		DescribeTable("settles inside the dead band within K windows",
 			func(initial int) {
 				difficulties, spans := simulate(initial)
+
 				const k = 8
+
 				tail := difficulties[k:]
 				for _, d := range tail {
 					Expect(d).To(Equal(tail[0]))
 				}
+
 				for _, span := range spans[k:] {
 					Expect(span).To(BeNumerically(">=", 20*time.Second))
 					Expect(span).To(BeNumerically("<=", 80*time.Second))
@@ -232,6 +248,7 @@ var _ = Describe("ProofOfWork difficulty retargeting", func() {
 				prev := hist[len(hist)-1]
 				b := &domain.Block{Index: prev.Index + 1, Timestamp: prev.Timestamp.Add(time.Second), PrevHash: prev.Hash}
 				Expect(powpkg.MineWithContext(context.Background(), b, difficulty)).To(Succeed())
+
 				return b
 			}
 		})
@@ -261,20 +278,25 @@ var _ = Describe("ProofOfWork difficulty retargeting", func() {
 		It("checks the difficulty before the proof of work", func() {
 			hist = history(7, 3, every(time.Millisecond))
 			sealPrev(hist)
+
 			b := child(3)
+
 			b.Difficulty = 4
 			for b.Hash = b.CalculateHash(); zeroBits(b.Hash) >= 4; b.Nonce++ {
 				b.Hash = b.CalculateHash()
 			}
+
 			Expect(p.Verify(hist, b)).To(MatchError(consensus.ErrInvalidDifficulty))
 		})
 
 		It("still reports a bad proof of work for the expected difficulty", func() {
 			hist = history(7, 3, every(time.Millisecond))
 			sealPrev(hist)
+
 			b := child(3)
 			for b.Nonce++; zeroBits(b.CalculateHash()) >= 3; b.Nonce++ {
 			}
+
 			b.Hash = b.CalculateHash()
 			Expect(p.Verify(hist, b)).To(MatchError(consensus.ErrInvalidProofOfWork))
 		})
@@ -318,6 +340,7 @@ var _ = Describe("ProofOfWork difficulty retargeting", func() {
 		It("wires the three variables into NewProofOfWorkFromEnv", func() {
 			pinDifficultyEnv("3")
 			pinRetargetEnv("7", "3s")
+
 			p := powpkg.NewProofOfWorkFromEnv()
 			Expect(p.Difficulty).To(Equal(3))
 			Expect(p.RetargetInterval).To(Equal(7))

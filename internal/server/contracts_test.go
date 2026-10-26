@@ -23,6 +23,7 @@ var _ = DescribeTable("respondWithSubmitError for contract errors",
 		respondWithSubmitError(rec, fmt.Errorf("transaction 0: %w", err))
 
 		Expect(rec.Code).To(Equal(status))
+
 		var body errorResponse
 		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 		Expect(body.Code).To(Equal(code))
@@ -51,6 +52,7 @@ var _ = Describe("GET /contracts/{id} with a nil storage", func() {
 	It("answers an empty object, never null", func() {
 		srv, err := NewServer(nilStorageChain{}, Config{})
 		Expect(err).NotTo(HaveOccurred())
+
 		rec := httptest.NewRecorder()
 
 		srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/contracts/"+zeroHash, nil))
@@ -72,12 +74,14 @@ var _ = Describe("Contract routes", func() {
 		Expect(err).NotTo(HaveOccurred())
 		srv, err := NewServer(svc, Config{})
 		Expect(err).NotTo(HaveOccurred())
+
 		router = srv.Handler()
 	})
 
 	do := func(method, path, body string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(body)))
+
 		return rec
 	}
 
@@ -88,12 +92,15 @@ var _ = Describe("Contract routes", func() {
 		tx.Contract = op
 		tx.ID = tx.CalculateHash()
 		Expect(domain.SignInput(&tx, 0, funds.owner)).To(Succeed())
+
 		args, _ := json.Marshal(op.Args)
 		if op.Args == nil {
 			args = []byte("null")
 		}
+
 		raw, err := json.Marshal(tx)
 		Expect(err).NotTo(HaveOccurred())
+
 		var m map[string]json.RawMessage
 		Expect(json.Unmarshal(raw, &m)).To(Succeed())
 		delete(m, "Contract")
@@ -101,6 +108,7 @@ var _ = Describe("Contract routes", func() {
 			op.Kind, op.Code, op.Target, args, op.GasLimit))
 		out, err := json.Marshal(m)
 		Expect(err).NotTo(HaveOccurred())
+
 		return tx.ID, string(out)
 	}
 
@@ -109,6 +117,7 @@ var _ = Describe("Contract routes", func() {
 		rec := do(http.MethodPost, "/tx", body)
 		Expect(rec.Code).To(Equal(http.StatusAccepted), rec.Body.String())
 		Expect(do(http.MethodPost, "/mine", "").Code).To(Equal(http.StatusCreated))
+
 		return id
 	}
 
@@ -135,7 +144,9 @@ var _ = Describe("Contract routes", func() {
 			Expect(call(id, 29).Code).To(Equal(http.StatusAccepted))
 			Expect(do(http.MethodPost, "/mine", "").Code).To(Equal(http.StatusCreated))
 		}
+
 		rec = do(http.MethodGet, "/contracts/"+id, "")
+
 		var got contractBody
 		Expect(json.Unmarshal(rec.Body.Bytes(), &got)).To(Succeed())
 		Expect(got).To(Equal(contractBody{ID: id, Code: hex.EncodeToString(vm.CounterCode), Storage: map[string]uint64{"0": 3}}))

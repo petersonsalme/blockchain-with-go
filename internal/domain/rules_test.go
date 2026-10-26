@@ -34,12 +34,16 @@ var _ = Describe("Block rules", func() {
 	})
 
 	Describe("ValidateSize", func() {
-		var b *domain.Block
-		var size int
+		var (
+			b    *domain.Block
+			size int
+		)
 
 		BeforeEach(func() {
 			b = &domain.Block{Index: 1, Timestamp: time.Now(), Transactions: []domain.Transaction{}}
+
 			var err error
+
 			size, err = b.Size()
 			Expect(err).NotTo(HaveOccurred())
 		})
@@ -54,6 +58,7 @@ var _ = Describe("Block rules", func() {
 
 		It("rejects a block one byte over the limit", func() {
 			err := domain.ValidateSize(b, size-1)
+
 			var ve *domain.ValidationError
 			Expect(errors.As(err, &ve)).To(BeTrue())
 			Expect(ve.Code).To(Equal(domain.CodeBlockTooLarge))
@@ -100,8 +105,10 @@ var _ = Describe("Block rules", func() {
 	Describe("ValidateBlockRules", func() {
 		It("applies the configured size limit", func() {
 			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "10")
+
 			now := time.Now()
 			err := domain.ValidateBlockRules(&domain.Block{Timestamp: now}, &domain.Block{Timestamp: now}, now)
+
 			var ve *domain.ValidationError
 			Expect(errors.As(err, &ve)).To(BeTrue())
 			Expect(ve.Code).To(Equal(domain.CodeBlockTooLarge))
@@ -128,6 +135,7 @@ var _ = Describe("Block rules", func() {
 		It("rejects a missing root, citing expected and got", func() {
 			expected := b.MerkleRoot
 			b.MerkleRoot = ""
+
 			var ve *domain.ValidationError
 			Expect(errors.As(domain.ValidateMerkleRoot(b), &ve)).To(BeTrue())
 			Expect(ve.Code).To(Equal("merkle_root_mismatch"))
@@ -137,6 +145,7 @@ var _ = Describe("Block rules", func() {
 
 		It("rejects a transaction changed after the root was set", func() {
 			b.Transactions[1].Outputs[0].Amount++
+
 			var ve *domain.ValidationError
 			Expect(errors.As(domain.ValidateMerkleRoot(b), &ve)).To(BeTrue())
 			Expect(ve.Code).To(Equal(domain.CodeMerkleRootMismatch))

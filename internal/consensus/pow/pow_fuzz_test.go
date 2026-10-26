@@ -20,7 +20,9 @@ func cloneBlock(b domain.Block) domain.Block {
 		tx.Outputs = append([]domain.TxOut(nil), tx.Outputs...)
 		txs[i] = tx
 	}
+
 	b.Transactions = txs
+
 	return b
 }
 
@@ -36,6 +38,7 @@ func tamper(b *domain.Block, sel uint8) error {
 	for i := range b.Transactions {
 		txs = append(txs, &b.Transactions[i])
 	}
+
 	tx := func(pick uint8) *domain.Transaction { return txs[int(pick)%len(txs)] }
 
 	switch sel % 13 {
@@ -57,48 +60,56 @@ func tamper(b *domain.Block, sel uint8) error {
 		if len(txs) > 0 {
 			t := tx(sel / 13)
 			t.Timestamp = t.Timestamp.Add(time.Nanosecond)
+
 			return errTxEdit
 		}
 	case 7:
 		if len(txs) > 0 && len(tx(sel/13).Inputs) > 0 {
 			t := tx(sel / 13)
 			t.Inputs[int(sel/13)%len(t.Inputs)].PrevTxID += "x"
+
 			return errTxEdit
 		}
 	case 8:
 		if len(txs) > 0 && len(tx(sel/13).Inputs) > 0 {
 			t := tx(sel / 13)
 			t.Inputs[int(sel/13)%len(t.Inputs)].OutIndex++
+
 			return errTxEdit
 		}
 	case 9:
 		if len(txs) > 0 && len(tx(sel/13).Inputs) > 0 {
 			t := tx(sel / 13)
 			t.Inputs[int(sel/13)%len(t.Inputs)].Signature += "x"
+
 			return errTxEdit
 		}
 	case 10:
 		if len(txs) > 0 && len(tx(sel/13).Outputs) > 0 {
 			t := tx(sel / 13)
 			t.Outputs[int(sel/13)%len(t.Outputs)].Amount++
+
 			return errTxEdit
 		}
 	case 11:
 		if len(txs) > 0 && len(tx(sel/13).Outputs) > 0 {
 			t := tx(sel / 13)
 			t.Outputs[int(sel/13)%len(t.Outputs)].Address += "x"
+
 			return errTxEdit
 		}
 	case 12:
 		// A consistent hash carrying an (unreachable) difficulty the rule never expects.
 		b.Difficulty = 65
 		b.Hash = b.CalculateHash()
+
 		return consensus.ErrInvalidDifficulty
 	}
 
 	if sel%13 >= 6 && sel%13 <= 11 {
 		b.Nonce++
 	}
+
 	return consensus.ErrInvalidHash
 }
 
@@ -114,37 +125,45 @@ func FuzzVerifyTamper(f *testing.F) {
 	f.Fuzz(func(t *testing.T, index uint8, sec, nsec int64, prevHash string, diff, nTx, nIn, nOut uint8, s string, amount uint64, outIndex uint32, sel uint8) {
 		ts := time.Unix(sec%(1<<35), nsec%1_000_000_000).UTC()
 		prev := &domain.Block{Index: int(index), Hash: prevHash}
+
 		b := domain.Block{Index: int(index) + 1, Timestamp: ts, PrevHash: prevHash}
 		for i := 0; i < int(nTx%3); i++ {
 			tx := domain.Transaction{Timestamp: ts.Add(time.Duration(i))}
 			for j := 0; j < int(nIn%3); j++ {
 				tx.Inputs = append(tx.Inputs, domain.TxIn{PrevTxID: s + strings.Repeat("p", i), OutIndex: outIndex + uint32(j), Signature: s + strings.Repeat("g", j)})
 			}
+
 			for j := 0; j < int(nOut%3); j++ {
 				tx.Outputs = append(tx.Outputs, domain.TxOut{Amount: amount + uint64(j), Address: s})
 			}
+
 			b.Transactions = append(b.Transactions, tx)
 		}
 
 		if err := powpkg.MineWithContext(context.Background(), &b, int(diff%3)); err != nil {
 			t.Fatal(err)
 		}
+
 		p := powpkg.New(int(diff % 3))
 		if err := p.Verify([]*domain.Block{prev}, &b); err != nil {
 			t.Fatalf("mined block rejected: %v", err)
 		}
 
 		tampered := cloneBlock(b)
+
 		want := tamper(&tampered, sel)
 		if want == errTxEdit {
 			if err := p.Verify([]*domain.Block{prev}, &tampered); err != nil {
 				t.Fatalf("tamper %d: Verify = %v, want nil", sel%13, err)
 			}
+
 			if domain.ValidateMerkleRoot(&tampered) == nil {
 				t.Fatalf("tamper %d: ValidateMerkleRoot accepted an edited transaction", sel%13)
 			}
+
 			return
 		}
+
 		if err := p.Verify([]*domain.Block{prev}, &tampered); !errors.Is(err, want) {
 			t.Fatalf("tamper %d: Verify = %v, want %v", sel%13, err, want)
 		}

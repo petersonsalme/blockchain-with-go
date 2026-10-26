@@ -16,6 +16,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	err := newRootCmdWith(logger).ExecuteContext(ctx)
+
 	stop() // os.Exit skips deferred calls
 	finish(err, logger, os.Exit)
 }
@@ -37,6 +38,7 @@ func execute(ctx context.Context, logger *slog.Logger, args []string, stdout io.
 	root.SetArgs(args)
 	root.SetOut(stdout)
 	root.SetErr(stdout)
+
 	return root.ExecuteContext(ctx)
 }
 
@@ -49,6 +51,7 @@ func newRootCmd() *cobra.Command {
 func newRootCmdWith(logger *slog.Logger) *cobra.Command {
 	root := &cobra.Command{Use: "bwg", Short: "Blockchain node, wallet and miner", SilenceUsage: true}
 	root.AddCommand(newWalletCmd(), newMinerCmd(), newNodeCmd(logger))
+
 	return root
 }
 
@@ -57,5 +60,6 @@ func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
+
 	return fallback
 }

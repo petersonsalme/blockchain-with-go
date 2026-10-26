@@ -50,9 +50,11 @@ func (s *State) Apply(d Delta) {
 	if *s == nil {
 		*s = State{}
 	}
+
 	for id, code := range d.Deploys {
 		(*s)[id] = Contract{Code: code, Storage: map[uint64]uint64{}}
 	}
+
 	for id, writes := range d.Writes {
 		c := (*s)[id]
 		for k, v := range writes {
@@ -70,8 +72,10 @@ func BuildState(blocks []*domain.Block) (State, error) {
 		if err != nil {
 			return nil, fmt.Errorf("block %d: %w", i, err)
 		}
+
 		s.Apply(d)
 	}
+
 	return s, nil
 }
 
@@ -81,24 +85,29 @@ func BuildState(blocks []*domain.Block) (State, error) {
 // never alters view.
 func BlockDelta(view StateView, b *domain.Block) (Delta, error) {
 	var d Delta
+
 	for i := range b.Transactions {
 		tx := &b.Transactions[i]
 		if err := domain.ValidateContractOp(tx.Contract); err != nil {
 			return Delta{}, fmt.Errorf("transaction %d: %w", i, err)
 		}
+
 		if tx.Contract == nil {
 			continue
 		}
+
 		var err error
 		if tx.Contract.Kind == domain.ContractDeploy {
 			err = d.deploy(view, tx)
 		} else {
 			err = d.call(view, tx.Contract)
 		}
+
 		if err != nil {
 			return Delta{}, fmt.Errorf("transaction %d: %w", i, err)
 		}
 	}
+
 	return d, nil
 }
 
@@ -108,23 +117,30 @@ func (d *Delta) lookup(view StateView, id string) (code []byte, base map[uint64]
 	if code, ok = d.Deploys[id]; ok {
 		return code, nil, true
 	}
+
 	c, ok := view.Contract(id)
+
 	return c.Code, c.Storage, ok
 }
 
 func (d *Delta) deploy(view StateView, tx *domain.Transaction) error {
 	id := tx.CalculateHash()
+
 	code, _ := hex.DecodeString(tx.Contract.Code)
 	if err := ValidateCode(code); err != nil {
 		return err
 	}
+
 	if _, _, exists := d.lookup(view, id); exists {
 		return ErrContractExists
 	}
+
 	if d.Deploys == nil {
 		d.Deploys = map[string][]byte{}
 	}
+
 	d.Deploys[id] = code
+
 	return nil
 }
 
@@ -133,19 +149,24 @@ func (d *Delta) call(view StateView, op *domain.ContractOp) error {
 	if !ok {
 		return ErrUnknownContract
 	}
+
 	res, err := Execute(code, op.Args, layered{base: base, writes: d.Writes[op.Target]}, op.GasLimit)
 	if err != nil {
 		return err
 	}
+
 	if d.Writes == nil {
 		d.Writes = map[string]map[uint64]uint64{}
 	}
+
 	if d.Writes[op.Target] == nil {
 		d.Writes[op.Target] = map[uint64]uint64{}
 	}
+
 	for k, v := range res.Writes {
 		d.Writes[op.Target][k] = v
 	}
+
 	return nil
 }
 
@@ -158,5 +179,6 @@ func (l layered) Load(key uint64) uint64 {
 	if v, ok := l.writes[key]; ok {
 		return v
 	}
+
 	return l.base[key]
 }

@@ -23,6 +23,7 @@ func newWallet(seedByte byte) *wallet.Wallet {
 	seed[0] = seedByte
 	w, err := wallet.FromSeed(seed)
 	Expect(err).NotTo(HaveOccurred())
+
 	return w
 }
 
@@ -31,8 +32,10 @@ func newPoA(signer *wallet.Wallet, others ...*wallet.Wallet) *poa.ProofOfAuthori
 	for _, o := range others {
 		set = append(set, o.PublicKey())
 	}
+
 	p, err := poa.New(set, signer)
 	Expect(err).NotTo(HaveOccurred())
+
 	return p
 }
 
@@ -89,6 +92,7 @@ var _ = Describe("ProofOfAuthority", func() {
 			key := append(ed25519.PublicKey(nil), alice.PublicKey()...)
 			p, err := poa.New([]ed25519.PublicKey{key}, alice)
 			Expect(err).NotTo(HaveOccurred())
+
 			key[0] ^= 0xff
 
 			Expect(p.Seal(context.Background(), nil, b)).To(Succeed())
@@ -180,6 +184,7 @@ var _ = Describe("ProofOfAuthority", func() {
 		DescribeTable("rejects a bad signature encoding",
 			func(signature string) {
 				sealed()
+
 				b.Signature = signature
 				Expect(p.Verify([]*domain.Block{prev}, b)).To(MatchError(consensus.ErrInvalidSignature))
 			},
@@ -191,12 +196,14 @@ var _ = Describe("ProofOfAuthority", func() {
 
 		It("rejects a non-canonical (uppercase) signature", func() {
 			sealed()
+
 			b.Signature = strings.ToUpper(b.Signature)
 			Expect(p.Verify([]*domain.Block{prev}, b)).To(MatchError(consensus.ErrInvalidSignature))
 		})
 
 		It("rejects an uppercase validator through the hash", func() {
 			sealed()
+
 			b.Validator = strings.ToUpper(b.Validator)
 			Expect(p.Verify([]*domain.Block{prev}, b)).To(MatchError(consensus.ErrInvalidHash))
 		})

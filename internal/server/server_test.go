@@ -42,6 +42,7 @@ func (rejectingConsensus) Verify(history []*domain.Block, b *domain.Block) error
 func newWallet() *wallet.Wallet {
 	w, err := wallet.New()
 	Expect(err).NotTo(HaveOccurred())
+
 	return w
 }
 
@@ -66,15 +67,19 @@ func (b *bank) service(repo *memory.Repository, engine consensus.Consensus, opts
 	for i := range allocs {
 		allocs[i] = domain.TxOut{Amount: bankAmount, Address: b.owner.Address()}
 	}
+
 	svc, err := chain.NewService(repo, engine, append([]chain.Option{chain.WithGenesisAllocations(allocs)}, opts...)...)
 	if err != nil {
 		return nil, err
 	}
+
 	blocks, err := repo.All()
 	if err != nil {
 		return nil, err
 	}
+
 	b.txid = blocks[0].Transactions[0].CalculateHash()
+
 	return svc, nil
 }
 
@@ -87,6 +92,7 @@ func (b *bank) spend(idx uint32, to string, amount uint64) domain.Transaction {
 	}
 	tx.ID = tx.CalculateHash()
 	Expect(domain.SignInput(&tx, 0, b.owner)).To(Succeed())
+
 	return tx
 }
 
@@ -96,6 +102,7 @@ func (b *bank) tx(to string, amount uint64) domain.Transaction {
 	idx := b.next
 	b.next++
 	b.mu.Unlock()
+
 	return b.spend(idx, to, amount)
 }
 
@@ -107,6 +114,7 @@ func (b *bank) payload() string {
 func payloadOf(txs ...domain.Transaction) string {
 	b, err := json.Marshal(Message{Transactions: txs})
 	Expect(err).NotTo(HaveOccurred())
+
 	return string(b)
 }
 
@@ -117,9 +125,12 @@ type chainBody struct {
 // brokenChain fails to read blocks.
 type brokenChain struct{}
 
-func (brokenChain) Tip() (*domain.Block, error)               { return nil, errors.New("read failed") }
-func (brokenChain) BlockByHeight(int) (*domain.Block, error)  { return nil, errors.New("read failed") }
+func (brokenChain) Tip() (*domain.Block, error) { return nil, errors.New("read failed") }
+
+func (brokenChain) BlockByHeight(int) (*domain.Block, error) { return nil, errors.New("read failed") }
+
 func (brokenChain) BlockByHash(string) (*domain.Block, error) { return nil, errors.New("read failed") }
+
 func (brokenChain) BlocksRange(int, int) ([]*domain.Block, error) {
 	return nil, errors.New("read failed")
 }
@@ -128,6 +139,7 @@ func (brokenChain) Blocks() ([]*domain.Block, error) { return nil, errors.New("r
 func (brokenChain) Transaction(string) (*domain.Transaction, string, int, error) {
 	return nil, "", 0, errors.New("read failed")
 }
+
 func (brokenChain) TxProof(string) (*chain.InclusionProof, error) {
 	return nil, errors.New("read failed")
 }
@@ -135,6 +147,7 @@ func (brokenChain) Contract(string) ([]byte, map[uint64]uint64, bool) { return n
 func (brokenChain) Balance(string) (uint64, []chain.UTXO) {
 	return 0, []chain.UTXO{}
 }
+
 func (brokenChain) Mine(context.Context, []domain.Transaction) (*domain.Block, error) {
 	return nil, errors.New("unused")
 }
@@ -173,7 +186,9 @@ type recordingChain struct {
 func (r *recordingChain) Mine(ctx context.Context, txs []domain.Transaction) (*domain.Block, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
 	r.txs = append(r.txs, txs)
+
 	return &domain.Block{Index: 1, Hash: "00000000000000000000000000000000000000000000000000000000000000aa"}, nil
 }
 
@@ -192,16 +207,19 @@ var _ = Describe("Server", func() {
 		Expect(err).NotTo(HaveOccurred())
 		srv, err := NewServer(svc, cfg)
 		Expect(err).NotTo(HaveOccurred())
+
 		router = srv.Handler()
 	}
 	chainLen := func() int {
 		all, err := repo.All()
 		Expect(err).NotTo(HaveOccurred())
+
 		return len(all)
 	}
 	lastBlock := func() *domain.Block {
 		b, err := repo.Last()
 		Expect(err).NotTo(HaveOccurred())
+
 		return b
 	}
 	withGenerator := func(g chain.Generator) { build(chain.WithGenerator(g)) }
@@ -211,6 +229,7 @@ var _ = Describe("Server", func() {
 		repo = memory.New()
 		engine = pow.NewProofOfWork(1)
 		cfg = Config{}
+
 		build()
 	})
 
@@ -228,6 +247,7 @@ var _ = Describe("Server", func() {
 			Expect(rec.Body.String()).To(ContainSubstring("00000000000000000000000000000000000000000000000000000000000000aa"))
 			spy.mu.Lock()
 			defer spy.mu.Unlock()
+
 			Expect(spy.txs).To(HaveLen(1))
 			Expect(spy.txs[0]).To(HaveLen(1))
 			Expect(spy.txs[0][0].ID).To(Equal(sent.ID))
@@ -242,6 +262,7 @@ var _ = Describe("Server", func() {
 				payload := []byte(payloadOf(sent))
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
 				req.Header.Set("Content-Type", "application/json")
+
 				rec := httptest.NewRecorder()
 
 				router.ServeHTTP(rec, req)
@@ -272,7 +293,9 @@ var _ = Describe("Server", func() {
 					if err != nil {
 						return nil, err
 					}
+
 					b.PrevHash = "tampered-invalid-hash"
+
 					return b, nil
 				})
 
@@ -281,6 +304,7 @@ var _ = Describe("Server", func() {
 				payload := []byte(funds.payload())
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
 				req.Header.Set("Content-Type", "application/json")
+
 				rec := httptest.NewRecorder()
 
 				router.ServeHTTP(rec, req)
@@ -309,6 +333,7 @@ var _ = Describe("Server", func() {
 				payload := []byte(funds.payload())
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
 				req.Header.Set("Content-Type", "application/json")
+
 				rec := httptest.NewRecorder()
 
 				router.ServeHTTP(rec, req)
@@ -337,6 +362,7 @@ var _ = Describe("Server", func() {
 				payload := []byte(funds.payload())
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
 				req.Header.Set("Content-Type", "application/json")
+
 				rec := httptest.NewRecorder()
 
 				router.ServeHTTP(rec, req)
@@ -364,6 +390,7 @@ var _ = Describe("Server", func() {
 				payload := []byte(funds.payload())
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload)).WithContext(ctx)
 				req.Header.Set("Content-Type", "application/json")
+
 				rec := httptest.NewRecorder()
 
 				router.ServeHTTP(rec, req)
@@ -377,6 +404,7 @@ var _ = Describe("Server", func() {
 			It("aborts mining when timeout expires with real mining", func() {
 				cfg = Config{MiningTimeout: 15 * time.Millisecond}
 				engine = pow.NewProofOfWork(60)
+
 				build()
 
 				initialLen := chainLen()
@@ -384,6 +412,7 @@ var _ = Describe("Server", func() {
 				payload := []byte(funds.payload())
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
 				req.Header.Set("Content-Type", "application/json")
+
 				rec := httptest.NewRecorder()
 
 				router.ServeHTTP(rec, req)
@@ -399,6 +428,7 @@ var _ = Describe("Server", func() {
 
 				req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{invalid-json`))
 				req.Header.Set("Content-Type", "application/json")
+
 				rec := httptest.NewRecorder()
 
 				router.ServeHTTP(rec, req)
@@ -418,24 +448,30 @@ var _ = Describe("Server", func() {
 	})
 
 	Describe("POST / concurrency", func() {
-
 		It("serializes concurrent POSTs into a valid chain and answers 201 to all", func() {
 			const n = 12
+
 			codes := make(chan int, n)
+
 			var wg sync.WaitGroup
 			for i := 0; i < n; i++ {
 				wg.Add(1)
+
 				go func() {
 					defer GinkgoRecover()
 					defer wg.Done()
+
 					req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(funds.payload()))
 					rec := httptest.NewRecorder()
 					router.ServeHTTP(rec, req)
+
 					codes <- rec.Code
 				}()
 			}
+
 			wg.Wait()
 			close(codes)
+
 			for code := range codes {
 				Expect(code).To(Equal(http.StatusCreated))
 			}
@@ -444,12 +480,15 @@ var _ = Describe("Server", func() {
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, req)
 			Expect(rec.Code).To(Equal(http.StatusOK))
+
 			var body chainBody
 			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 			blocks := body.Blocks
 			Expect(blocks).To(HaveLen(n + 1))
+
 			for i, b := range blocks {
 				Expect(b.Index).To(Equal(i))
+
 				if i > 0 {
 					Expect(b.PrevHash).To(Equal(blocks[i-1].Hash))
 					Expect(engine.Verify(blocks[:i], b)).To(Succeed())
@@ -464,8 +503,10 @@ var _ = Describe("Server", func() {
 				delta, err := domain.BlockDelta(repo, rival, false)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(repo.Commit(rival, delta)).To(Succeed())
+
 				return chain.GenerateBlockWithContext(ctx, c, history, txs)
 			})
+
 			initialLen := chainLen()
 
 			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(funds.payload()))
@@ -474,6 +515,7 @@ var _ = Describe("Server", func() {
 
 			Expect(rec.Code).To(Equal(http.StatusConflict))
 			Expect(rec.Header().Get("Content-Type")).To(Equal("application/json"))
+
 			var resp errorResponse
 			Expect(json.Unmarshal(rec.Body.Bytes(), &resp)).To(Succeed())
 			Expect(resp.Code).To(Equal("chain_conflict"))
@@ -487,14 +529,18 @@ var _ = Describe("Server", func() {
 			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, req)
+
 			return rec
 		}
+
 		It("returns 422 block_too_large when transactions exceed the limit", func() {
 			// a signed transaction is ~450 bytes: stay under the 2x request body limit
 			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "300")
+
 			rec := post(funds.payload())
 
 			Expect(rec.Code).To(Equal(http.StatusUnprocessableEntity))
+
 			var body map[string]any
 			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 			Expect(body).To(HaveKey("error"))
@@ -510,11 +556,14 @@ var _ = Describe("Server", func() {
 				if err == nil {
 					b.Timestamp = history[len(history)-1].Timestamp.Add(-time.Second)
 				}
+
 				return b, err
 			})
+
 			rec := post(funds.payload())
 
 			Expect(rec.Code).To(Equal(http.StatusUnprocessableEntity))
+
 			var body map[string]any
 			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 			Expect(body["code"]).To(Equal("timestamp_before_parent"))
@@ -527,11 +576,14 @@ var _ = Describe("Server", func() {
 				if err == nil {
 					b.Timestamp = time.Now().Add(3 * time.Hour)
 				}
+
 				return b, err
 			})
+
 			rec := post(funds.payload())
 
 			Expect(rec.Code).To(Equal(http.StatusUnprocessableEntity))
+
 			var body map[string]any
 			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 			Expect(body["code"]).To(Equal("timestamp_too_far_in_future"))
@@ -539,9 +591,11 @@ var _ = Describe("Server", func() {
 
 		It("returns 413 request_too_large for a giant body", func() {
 			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "100")
+
 			rec := post(`{"Transactions":[{"ID":"` + strings.Repeat("a", 1000) + `"}]}`)
 
 			Expect(rec.Code).To(Equal(http.StatusRequestEntityTooLarge))
+
 			var body map[string]any
 			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 			Expect(body["code"]).To(Equal("request_too_large"))
@@ -551,6 +605,7 @@ var _ = Describe("Server", func() {
 
 		It("returns 413 request_too_large for a giant body with rate limiting enabled and unexhausted", func() {
 			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "100")
+
 			repo := memory.New()
 			engine := pow.NewProofOfWorkFromEnv()
 			svc, err := funds.service(repo, engine)
@@ -563,6 +618,7 @@ var _ = Describe("Server", func() {
 			s.Handler().ServeHTTP(rec, req)
 
 			Expect(rec.Code).To(Equal(http.StatusRequestEntityTooLarge))
+
 			var body map[string]any
 			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 			Expect(body["code"]).To(Equal("request_too_large"))
@@ -599,7 +655,9 @@ var _ = Describe("Server", func() {
 
 		It("rejects blocks with 422 when the injected consensus fails verification", func() {
 			engine = rejectingConsensus{inner: engine}
+
 			build()
+
 			initialLen := chainLen()
 
 			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(funds.payload()))
@@ -616,6 +674,7 @@ var _ = Describe("Server", func() {
 			withGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 				return nil, errors.New("boom")
 			})
+
 			initialLen := chainLen()
 
 			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(funds.payload()))
@@ -633,6 +692,7 @@ var _ = Describe("Server", func() {
 		get := func(target string) *httptest.ResponseRecorder {
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+
 			return rec
 		}
 		mineN := func(n int) {
@@ -642,23 +702,28 @@ var _ = Describe("Server", func() {
 				Expect(rec.Code).To(Equal(http.StatusCreated))
 			}
 		}
+
 		type page struct {
 			Blocks []*domain.Block `json:"blocks"`
 			From   int             `json:"from"`
 			Limit  int             `json:"limit"`
 			Next   *int            `json:"next"`
 		}
+
 		getPage := func(target string) page {
 			rec := get(target)
 			Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
 			Expect(rec.Header().Get("Content-Type")).To(Equal("application/json"))
+
 			var p page
 			Expect(json.Unmarshal(rec.Body.Bytes(), &p)).To(Succeed())
+
 			return p
 		}
 		expectError := func(rec *httptest.ResponseRecorder, status int, code string) {
 			Expect(rec.Code).To(Equal(status), rec.Body.String())
 			Expect(rec.Header().Get("Content-Type")).To(Equal("application/json"))
+
 			var resp errorResponse
 			Expect(json.Unmarshal(rec.Body.Bytes(), &resp)).To(Succeed())
 			Expect(resp.Code).To(Equal(code))
@@ -667,6 +732,7 @@ var _ = Describe("Server", func() {
 		expectLinked := func(p page) {
 			for i, b := range p.Blocks {
 				Expect(b.Index).To(Equal(p.From + i))
+
 				if i > 0 {
 					Expect(b.PrevHash).To(Equal(p.Blocks[i-1].Hash))
 				}
@@ -707,6 +773,7 @@ var _ = Describe("Server", func() {
 					rec := get(target)
 					Expect(rec.Code).To(Equal(http.StatusOK))
 					Expect(rec.Body.String()).To(ContainSubstring(`"blocks": []`))
+
 					var p page
 					Expect(json.Unmarshal(rec.Body.Bytes(), &p)).To(Succeed())
 					Expect(p.Blocks).To(BeEmpty())
@@ -725,17 +792,22 @@ var _ = Describe("Server", func() {
 
 			It("follows next from 0 and returns the whole chain once, in order", func() {
 				all, _ := repo.All()
+
 				var got []*domain.Block
+
 				target := "/blocks?limit=2"
 				for target != "" {
 					p := getPage(target)
 					got = append(got, p.Blocks...)
+
 					target = ""
 					if p.Next != nil {
 						target = fmt.Sprintf("/blocks?from=%d&limit=2", *p.Next)
 					}
 				}
+
 				Expect(got).To(HaveLen(len(all)))
+
 				for i := range all {
 					Expect(got[i].Hash).To(Equal(all[i].Hash))
 				}
@@ -758,6 +830,7 @@ var _ = Describe("Server", func() {
 			It("returns 500 when the chain cannot be read", func() {
 				srv, err := NewServer(brokenChain{}, Config{})
 				Expect(err).NotTo(HaveOccurred())
+
 				h := srv.Handler()
 				rec := httptest.NewRecorder()
 				h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/blocks", nil))
@@ -775,10 +848,12 @@ var _ = Describe("Server", func() {
 					if want.Hash != "" { // the genesis block is stored unsealed, without a hash
 						refs = append(refs, want.Hash)
 					}
+
 					for _, ref := range refs {
 						rec := get("/block/" + ref)
 						Expect(rec.Code).To(Equal(http.StatusOK))
 						Expect(rec.Header().Get("Content-Type")).To(Equal("application/json"))
+
 						wantJSON, err := json.MarshalIndent(want, "", "  ")
 						Expect(err).NotTo(HaveOccurred())
 						Expect(rec.Body.String()).To(MatchJSON(wantJSON))
@@ -818,7 +893,9 @@ var _ = Describe("Server", func() {
 			It("returns 500 when the chain cannot be read", func() {
 				srv, err := NewServer(brokenChain{}, Config{})
 				Expect(err).NotTo(HaveOccurred())
+
 				h := srv.Handler()
+
 				for _, ref := range []string{"0", strings.Repeat("a", 64)} {
 					rec := httptest.NewRecorder()
 					h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/block/"+ref, nil))
@@ -829,7 +906,9 @@ var _ = Describe("Server", func() {
 			It("returns 410 block_pruned when the block body was pruned", func() {
 				srv, err := NewServer(prunedChain{}, Config{})
 				Expect(err).NotTo(HaveOccurred())
+
 				h := srv.Handler()
+
 				for _, ref := range []string{"0", strings.Repeat("a", 64)} {
 					rec := httptest.NewRecorder()
 					h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/block/"+ref, nil))
@@ -841,6 +920,7 @@ var _ = Describe("Server", func() {
 		Describe("GET /health", func() {
 			It("reports the current tip", func() {
 				mineN(2)
+
 				rec := get("/health")
 				Expect(rec.Code).To(Equal(http.StatusOK))
 				Expect(rec.Header().Get("Content-Type")).To(Equal("application/json"))
@@ -850,6 +930,7 @@ var _ = Describe("Server", func() {
 			It("returns 503 unhealthy when the repository fails", func() {
 				srv, err := NewServer(brokenChain{}, Config{})
 				Expect(err).NotTo(HaveOccurred())
+
 				h := srv.Handler()
 				rec := httptest.NewRecorder()
 				h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
@@ -914,6 +995,7 @@ var _ = Describe("Server", func() {
 			It("returns 500 when the chain cannot be read", func() {
 				srv, err := NewServer(brokenChain{}, Config{})
 				Expect(err).NotTo(HaveOccurred())
+
 				h := srv.Handler()
 				rec := httptest.NewRecorder()
 				h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tx/"+strings.Repeat("a", 64), nil))
@@ -928,6 +1010,7 @@ var _ = Describe("Server", func() {
 				req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 				rec := httptest.NewRecorder()
 				router.ServeHTTP(rec, req)
+
 				return rec
 			}
 
@@ -968,9 +1051,11 @@ var _ = Describe("Server", func() {
 				Expect(json.Unmarshal(rec.Body.Bytes(), &resp)).To(Succeed())
 				Expect(resp.Address).To(Equal(funds.owner.Address()))
 				Expect(resp.UTXOs).To(HaveLen(bankOutputs - 1)) // 1 output was spent in mineN(1)
+
 				var sum uint64
 				for i, u := range resp.UTXOs {
 					sum += u.Amount
+
 					if i > 0 {
 						prev := resp.UTXOs[i-1]
 						if prev.TxID == u.TxID {
@@ -980,6 +1065,7 @@ var _ = Describe("Server", func() {
 						}
 					}
 				}
+
 				Expect(resp.Balance).To(Equal(sum))
 			})
 
@@ -994,6 +1080,7 @@ var _ = Describe("Server", func() {
 				// Get Alice's balance and UTXO
 				aliceBalRec := get("/balance/" + alice.Address())
 				Expect(aliceBalRec.Code).To(Equal(http.StatusOK))
+
 				var aliceBalResp struct {
 					Balance uint64       `json:"balance"`
 					UTXOs   []chain.UTXO `json:"utxos"`
@@ -1037,26 +1124,36 @@ var _ = Describe("Server", func() {
 		Describe("while Mine is stuck", func() {
 			It("answers every read in under a second", func() {
 				mineN(1)
+
 				entered := make(chan struct{})
 				release := make(chan struct{})
+
 				withGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 					close(entered)
+
 					select {
 					case <-release:
 					case <-ctx.Done():
 					}
+
 					return nil, ctx.Err()
 				})
+
 				mineN := func() {
 					defer GinkgoRecover()
+
 					router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", strings.NewReader(funds.payload())))
 				}
+
 				done := make(chan struct{})
 				go func() { defer close(done); mineN() }()
+
 				Eventually(entered).Should(BeClosed())
+
 				defer func() { close(release); <-done }()
 
 				tip := lastBlock()
+
 				targets := []string{
 					"/blocks",
 					"/block/0",
@@ -1077,41 +1174,54 @@ var _ = Describe("Server", func() {
 		Describe("with concurrent POST / and parallel reads", func() {
 			It("keeps every page linked and every block findable", func() {
 				const writers, readers, rounds = 6, 6, 40
+
 				var wg sync.WaitGroup
+
 				stop := make(chan struct{})
+
 				for w := 0; w < writers; w++ {
 					wg.Add(1)
+
 					go func() {
 						defer GinkgoRecover()
 						defer wg.Done()
+
 						rec := httptest.NewRecorder()
 						router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(funds.payload())))
 						Expect(rec.Code).To(Equal(http.StatusCreated))
 					}()
 				}
+
 				var rg sync.WaitGroup
 				for r := 0; r < readers; r++ {
 					rg.Add(1)
+
 					go func() {
 						defer GinkgoRecover()
 						defer rg.Done()
+
 						for i := 0; i < rounds; i++ {
 							select {
 							case <-stop:
 								return
 							default:
 							}
+
 							p := getPage("/blocks?from=0&limit=3")
 							Expect(len(p.Blocks)).To(BeNumerically("<=", 3))
 							expectLinked(p)
+
 							for _, b := range p.Blocks {
 								if b.Hash != "" { // genesis has no hash
 									Expect(get("/block/" + b.Hash).Code).To(Equal(http.StatusOK))
 								}
+
 								Expect(get("/block/" + strconv.Itoa(b.Index)).Code).To(Equal(http.StatusOK))
+
 								for _, t := range b.Transactions {
 									txRec := get("/tx/" + t.ID)
 									Expect(txRec.Code).To(Equal(http.StatusOK))
+
 									var resp struct {
 										Transaction domain.Transaction `json:"transaction"`
 										BlockHash   string             `json:"block_hash"`
@@ -1123,24 +1233,29 @@ var _ = Describe("Server", func() {
 									Expect(resp.Height).To(Equal(b.Index))
 								}
 							}
+
 							Expect(get("/health").Code).To(Equal(http.StatusOK))
 
 							balRec := get("/balance/" + funds.owner.Address())
 							Expect(balRec.Code).To(Equal(http.StatusOK))
+
 							var balResp struct {
 								Address string       `json:"address"`
 								Balance uint64       `json:"balance"`
 								UTXOs   []chain.UTXO `json:"utxos"`
 							}
 							Expect(json.Unmarshal(balRec.Body.Bytes(), &balResp)).To(Succeed())
+
 							var sum uint64
 							for _, u := range balResp.UTXOs {
 								sum += u.Amount
 							}
+
 							Expect(balResp.Balance).To(Equal(sum))
 						}
 					}()
 				}
+
 				wg.Wait()
 				close(stop)
 				rg.Wait()
@@ -1215,9 +1330,11 @@ var _ = Describe("Server", func() {
 			s1, err := NewServer(svc, Config{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(s1.miningTimeout).To(Equal(DefaultMiningTimeout))
+
 			s2, err := NewServer(svc, Config{MiningTimeout: -time.Second})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(s2.miningTimeout).To(Equal(DefaultMiningTimeout))
+
 			s3, err := NewServer(svc, Config{MiningTimeout: time.Second})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(s3.miningTimeout).To(Equal(time.Second))
@@ -1231,6 +1348,7 @@ var _ = Describe("Server", func() {
 			Expect(err).NotTo(HaveOccurred())
 			srvB, err := NewServer(svcB, Config{})
 			Expect(err).NotTo(HaveOccurred())
+
 			a, b := srvA.Handler(), srvB.Handler()
 
 			rec := httptest.NewRecorder()
@@ -1240,8 +1358,10 @@ var _ = Describe("Server", func() {
 			count := func(h http.Handler) int {
 				rec := httptest.NewRecorder()
 				h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
 				var body chainBody
 				Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
+
 				return len(body.Blocks)
 			}
 			Expect(count(a)).To(Equal(2))
@@ -1251,6 +1371,7 @@ var _ = Describe("Server", func() {
 		It("returns 500 on GET / when the chain cannot be read", func() {
 			srv, err := NewServer(brokenChain{}, Config{})
 			Expect(err).NotTo(HaveOccurred())
+
 			h := srv.Handler()
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
@@ -1261,7 +1382,8 @@ var _ = Describe("Server", func() {
 
 	Describe("rate limiting wiring via Server.Handler()", func() {
 		It("enforces rate limit on POST /, blocks mining when exceeded, and recovers with Config.Now", func() {
-			var currentTime = time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+			currentTime := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+
 			fakeNow := func() time.Time { return currentTime }
 
 			spy := &spyMineChain{}
@@ -1279,6 +1401,7 @@ var _ = Describe("Server", func() {
 				h.ServeHTTP(rec, req)
 				Expect(rec.Code).To(Equal(http.StatusCreated))
 			}
+
 			Expect(atomic.LoadInt64(&spy.mineCalls)).To(Equal(int64(3)))
 
 			// Request N+1 (4th) from same IP at same instant must be rate limited (429)
@@ -1289,6 +1412,7 @@ var _ = Describe("Server", func() {
 
 			Expect(rec4.Code).To(Equal(http.StatusTooManyRequests))
 			Expect(rec4.Result().Header.Get("Retry-After")).To(Equal("20")) // 60s / 3 = 20s
+
 			var errBody map[string]any
 			Expect(json.Unmarshal(rec4.Body.Bytes(), &errBody)).To(Succeed())
 			Expect(errBody["code"]).To(Equal("rate_limited"))
@@ -1313,6 +1437,7 @@ var _ = Describe("Server", func() {
 				Expect(rec.Code).To(Equal(http.StatusTooManyRequests), "%s %s", rt.method, rt.path)
 				Expect(rec.Result().Header.Get("Retry-After")).To(Equal("20"), "%s %s", rt.method, rt.path)
 			}
+
 			Expect(atomic.LoadInt64(&spy.mineCalls)).To(Equal(int64(3)))
 
 			// Advance clock by 20s (60s/N) so 1 token recovers
@@ -1334,6 +1459,7 @@ var _ = Describe("Server", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			h := srv.Handler()
+
 			for _, rt := range []struct {
 				method, path string
 				first        int
@@ -1342,6 +1468,7 @@ var _ = Describe("Server", func() {
 				{http.MethodGet, "/nao-existe", http.StatusNotFound},
 			} {
 				now = now.Add(time.Hour) // refill the single token
+
 				for i, want := range []int{rt.first, http.StatusTooManyRequests} {
 					req := httptest.NewRequest(rt.method, rt.path, nil)
 					req.RemoteAddr = "192.168.10.51:9999"
@@ -1367,6 +1494,7 @@ var _ = Describe("Server", func() {
 				h.ServeHTTP(rec, req)
 				Expect(rec.Code).To(Equal(http.StatusCreated))
 			}
+
 			Expect(atomic.LoadInt64(&spy.mineCalls)).To(Equal(int64(100)))
 		})
 	})
@@ -1375,6 +1503,7 @@ var _ = Describe("Server", func() {
 		start := func() string {
 			l, err := net.Listen("tcp", "127.0.0.1:0")
 			Expect(err).NotTo(HaveOccurred())
+
 			addr := l.Addr().String()
 			Expect(l.Close()).To(Succeed())
 
@@ -1382,19 +1511,26 @@ var _ = Describe("Server", func() {
 			Expect(err).NotTo(HaveOccurred())
 			srv, err := NewServer(svc, cfg)
 			Expect(err).NotTo(HaveOccurred())
+
 			hs := srv.HTTPServer(context.Background(), addr)
+
 			DeferCleanup(func() { _ = hs.Close() })
+
 			go func() {
 				defer GinkgoRecover()
+
 				_ = hs.ListenAndServe()
 			}()
+
 			Eventually(func() error {
 				conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
 				if err == nil {
 					_ = conn.Close() // probe connection; close error is irrelevant
 				}
+
 				return err
 			}, 5*time.Second, 20*time.Millisecond).Should(Succeed())
+
 			return addr
 		}
 
@@ -1402,6 +1538,7 @@ var _ = Describe("Server", func() {
 			svc, _ := chain.NewService(memory.New(), engine)
 			srv, err := NewServer(svc, Config{})
 			Expect(err).NotTo(HaveOccurred())
+
 			hs := srv.HTTPServer(context.Background(), ":1234")
 			Expect(hs.Addr).To(Equal(":1234"))
 			Expect(hs.Handler).NotTo(BeNil())
@@ -1416,11 +1553,14 @@ var _ = Describe("Server", func() {
 			client := &http.Client{Timeout: 5 * time.Second}
 			resp, err := client.Get("http://" + addr + "/")
 			Expect(err).NotTo(HaveOccurred())
+
 			defer func() { _ = resp.Body.Close() }() // response body of a test request; close error is irrelevant
+
 			body, err := io.ReadAll(resp.Body)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(resp.StatusCode).To(Equal(http.StatusOK))
+
 			var bc chainBody
 			Expect(json.Unmarshal(body, &bc)).To(Succeed())
 			Expect(bc.Blocks).To(HaveLen(1))
@@ -1430,7 +1570,9 @@ var _ = Describe("Server", func() {
 		// turns it into 0 (no timeout) leaves the idle connection open and lets the slow reply through.
 		It("closes idle connections and drops replies written after 10s", func() {
 			handlerDone := make(chan struct{})
+
 			var handlerStarted atomic.Bool
+
 			DeferCleanup(func() {
 				if handlerStarted.Load() {
 					<-handlerDone
@@ -1440,42 +1582,58 @@ var _ = Describe("Server", func() {
 			cfg = Config{MiningTimeout: 60 * time.Second}
 			svc, err := chain.NewService(repo, engine, chain.WithGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 				handlerStarted.Store(true)
+
 				defer close(handlerDone)
+
 				time.Sleep(11 * time.Second)
+
 				return nil, errors.New("too slow")
 			}))
 			Expect(err).NotTo(HaveOccurred())
 
 			l, err := net.Listen("tcp", "127.0.0.1:0")
 			Expect(err).NotTo(HaveOccurred())
+
 			addr := l.Addr().String()
 			Expect(l.Close()).To(Succeed())
+
 			srv, err := NewServer(svc, cfg)
 			Expect(err).NotTo(HaveOccurred())
+
 			hs := srv.HTTPServer(context.Background(), addr)
+
 			DeferCleanup(func() { _ = hs.Close() })
+
 			go func() {
 				defer GinkgoRecover()
+
 				_ = hs.ListenAndServe()
 			}()
+
 			Eventually(func() error {
 				conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
 				if err == nil {
 					_ = conn.Close() // probe connection; close error is irrelevant
 				}
+
 				return err
 			}, 5*time.Second, 20*time.Millisecond).Should(Succeed())
 
 			readErr := make(chan error, 1)
+
 			go func() {
 				defer GinkgoRecover()
+
 				conn, err := net.Dial("tcp", addr)
 				if err != nil {
 					readErr <- err
 					return
 				}
+
 				defer func() { _ = conn.Close() }() // test connection; close error is irrelevant
+
 				_ = conn.SetReadDeadline(time.Now().Add(15 * time.Second))
+
 				_, err = conn.Read(make([]byte, 1))
 				readErr <- err
 			}()
@@ -1484,6 +1642,7 @@ var _ = Describe("Server", func() {
 			_, postErr := client.Post("http://"+addr+"/", "application/json",
 				strings.NewReader(funds.payload()))
 			Expect(postErr).To(HaveOccurred())
+
 			var netErr net.Error
 			Expect(errors.As(postErr, &netErr) && netErr.Timeout()).To(BeFalse(), "reply was not dropped by WriteTimeout")
 
@@ -1502,6 +1661,7 @@ var _ = Describe("Server", func() {
 
 			Expect(rec.Code).To(Equal(http.StatusOK))
 			Expect(json.Valid(rec.Body.Bytes())).To(BeTrue())
+
 			var bc chainBody
 			Expect(json.Unmarshal(rec.Body.Bytes(), &bc)).To(Succeed())
 			Expect(bc.Blocks).To(HaveLen(1))
@@ -1522,6 +1682,7 @@ var _ = Describe("Server", func() {
 			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 
 			Expect(rec.Code).To(Equal(http.StatusOK))
+
 			var bc chainBody
 			Expect(json.Unmarshal(rec.Body.Bytes(), &bc)).To(Succeed())
 			Expect(bc.Blocks).To(HaveLen(2))
@@ -1537,11 +1698,13 @@ var _ = Describe("Server", func() {
 			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, req)
+
 			return rec
 		}
 		expectError := func(rec *httptest.ResponseRecorder, status int, code string) {
 			Expect(rec.Code).To(Equal(status))
 			Expect(rec.Header().Get("Content-Type")).To(Equal("application/json"))
+
 			var resp errorResponse
 			Expect(json.Unmarshal(rec.Body.Bytes(), &resp)).To(Succeed())
 			Expect(resp.Code).To(Equal(code))
@@ -1597,6 +1760,7 @@ var _ = Describe("Server", func() {
 
 			rec := post(payloadOf(tx))
 			Expect(rec.Code).To(Equal(http.StatusCreated))
+
 			var blk domain.Block
 			Expect(json.Unmarshal(rec.Body.Bytes(), &blk)).To(Succeed())
 			Expect(blk.Transactions[0].ID).To(Equal(blk.Transactions[0].CalculateHash()))
@@ -1612,6 +1776,7 @@ var _ = Describe("Server", func() {
 		It("returns 409 double_spend for two transactions spending the same outpoint in one request", func() {
 			to := newWallet().Address()
 			initialLen := chainLen()
+
 			expectError(post(payloadOf(funds.spend(0, to, 5), funds.spend(0, to, 6))), http.StatusConflict, "double_spend")
 			Expect(chainLen()).To(Equal(initialLen))
 		})
@@ -1619,7 +1784,9 @@ var _ = Describe("Server", func() {
 		It("returns 409 input_missing_or_spent for a resend of a mined transaction", func() {
 			body := payloadOf(funds.tx(newWallet().Address(), 1))
 			Expect(post(body).Code).To(Equal(http.StatusCreated))
+
 			initialLen := chainLen()
+
 			expectError(post(body), http.StatusConflict, "input_missing_or_spent")
 			Expect(chainLen()).To(Equal(initialLen))
 		})
@@ -1627,33 +1794,45 @@ var _ = Describe("Server", func() {
 		It("returns 409 input_missing_or_spent for another transaction spending a mined outpoint", func() {
 			to := newWallet().Address()
 			Expect(post(payloadOf(funds.spend(0, to, 1))).Code).To(Equal(http.StatusCreated))
+
 			initialLen := chainLen()
+
 			expectError(post(payloadOf(funds.spend(0, to, 2))), http.StatusConflict, "input_missing_or_spent")
 			Expect(chainLen()).To(Equal(initialLen))
 		})
 
 		It("accepts exactly one of 50 concurrent transactions spending the same outpoint", func() {
 			const n = 50
+
 			to := newWallet().Address()
+
 			bodies := make([]string, n)
 			for i := range bodies {
 				bodies[i] = payloadOf(funds.spend(0, to, uint64(1+i)))
 			}
+
 			codes := make(chan int, n)
+
 			var wg sync.WaitGroup
+
 			for i := 0; i < n; i++ {
 				body := bodies[i]
+
 				wg.Add(1)
+
 				go func() {
 					defer GinkgoRecover()
 					defer wg.Done()
+
 					codes <- post(body).Code
 				}()
 			}
+
 			wg.Wait()
 			close(codes)
 
 			created, conflict := 0, 0
+
 			for c := range codes {
 				switch c {
 				case http.StatusCreated:
@@ -1662,6 +1841,7 @@ var _ = Describe("Server", func() {
 					conflict++
 				}
 			}
+
 			Expect(created).To(Equal(1))
 			Expect(conflict).To(Equal(n - 1))
 			Expect(chainLen()).To(Equal(2))
@@ -1704,9 +1884,12 @@ var _ = Describe("Server", func() {
 			// ResponseRecorder keeps HEAD bodies; a real server drops them.
 			ts := httptest.NewServer(router)
 			defer ts.Close()
+
 			resp, err := http.Head(ts.URL + "/health")
 			Expect(err).NotTo(HaveOccurred())
+
 			defer func() { _ = resp.Body.Close() }() // response body of a test request; close error is irrelevant
+
 			body, err := io.ReadAll(resp.Body)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(resp.StatusCode).To(Equal(http.StatusOK))

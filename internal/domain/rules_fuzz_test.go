@@ -15,7 +15,9 @@ import (
 // -1000..12000, so both valid and unserializable (outside 0..9999) years occur.
 func fuzzTime(sec, nsec int64) time.Time {
 	const span = 13000 * 365 * 24 * 3600
+
 	sec = sec % span
+
 	return time.Unix(sec+2*span/13, nsec%1_000_000_000).UTC()
 }
 
@@ -41,6 +43,7 @@ func FuzzValidateBlockRules(f *testing.F) {
 		}
 
 		b.MerkleRoot = domain.MerkleRoot(b.Transactions)
+
 		corrupt := txSize%7 == 3
 		if corrupt {
 			b.MerkleRoot = strings.Repeat("0", 64)
@@ -50,6 +53,7 @@ func FuzzValidateBlockRules(f *testing.F) {
 		if maxBytes > 0 {
 			limit = int(maxBytes)
 		}
+
 		t.Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(int(maxBytes)))
 
 		err := domain.ValidateBlockRules(b, parent, now)
@@ -59,10 +63,12 @@ func FuzzValidateBlockRules(f *testing.F) {
 			if err == nil {
 				t.Fatal("unserializable block was accepted")
 			}
+
 			return
 		}
 
 		var wantCode string
+
 		switch {
 		case len(encoded) > limit:
 			wantCode = domain.CodeBlockTooLarge
@@ -78,6 +84,7 @@ func FuzzValidateBlockRules(f *testing.F) {
 			if err != nil {
 				t.Fatalf("block accepted by the oracle was rejected: %v", err)
 			}
+
 			return
 		}
 
@@ -85,6 +92,7 @@ func FuzzValidateBlockRules(f *testing.F) {
 		if !errors.As(err, &verr) {
 			t.Fatalf("want *ValidationError %q, got %v", wantCode, err)
 		}
+
 		if verr.Code != wantCode {
 			t.Fatalf("code %q, want %q", verr.Code, wantCode)
 		}

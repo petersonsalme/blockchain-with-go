@@ -37,6 +37,7 @@ var _ = Describe("GET /tx/{id}/proof", func() {
 	get := func(target string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+
 		return rec
 	}
 	mineBlock := func(n int) {
@@ -44,6 +45,7 @@ var _ = Describe("GET /tx/{id}/proof", func() {
 		for i := range txs {
 			txs[i] = funds.tx(newWallet().Address(), 42)
 		}
+
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(payloadOf(txs...))))
 		Expect(rec.Code).To(Equal(http.StatusCreated), rec.Body.String())
@@ -56,7 +58,9 @@ var _ = Describe("GET /tx/{id}/proof", func() {
 		Expect(err).NotTo(HaveOccurred())
 		srv, err := NewServer(svc, Config{})
 		Expect(err).NotTo(HaveOccurred())
+
 		router = srv.Handler()
+
 		for _, n := range []int{1, 2, 3, 5} {
 			mineBlock(n)
 		}
@@ -64,11 +68,13 @@ var _ = Describe("GET /tx/{id}/proof", func() {
 
 	It("serves a proof that verifies against the block header for every transaction of the chain", func() {
 		var chainResp chainBody
+
 		rec := get("/")
 		Expect(json.Unmarshal(rec.Body.Bytes(), &chainResp)).To(Succeed())
 		Expect(chainResp.Blocks).To(HaveLen(5))
 
 		count := 0
+
 		for _, b := range chainResp.Blocks {
 			for i := range b.Transactions {
 				tx := &b.Transactions[i]
@@ -90,10 +96,13 @@ var _ = Describe("GET /tx/{id}/proof", func() {
 					Expect(s.Side).To(Or(Equal("left"), Equal("right")))
 					steps[j] = domain.MerkleStep{Hash: s.Hash, Left: s.Side == "left"}
 				}
+
 				Expect(domain.VerifyMerkleProof(p.LeafHash, steps, p.MerkleRoot)).To(BeTrue())
+
 				count++
 			}
 		}
+
 		Expect(count).To(Equal(1 + 1 + 2 + 3 + 5))
 	})
 
@@ -101,6 +110,7 @@ var _ = Describe("GET /tx/{id}/proof", func() {
 		all, _ := repo.All()
 		rec := get("/tx/" + all[1].Transactions[0].ID + "/proof")
 		Expect(rec.Code).To(Equal(http.StatusOK))
+
 		var raw map[string]json.RawMessage
 		Expect(json.Unmarshal(rec.Body.Bytes(), &raw)).To(Succeed())
 		Expect(string(raw["proof"])).To(Equal("[]"))
@@ -110,6 +120,7 @@ var _ = Describe("GET /tx/{id}/proof", func() {
 		all, _ := repo.All()
 		for i, want := range []string{"right", "left"} {
 			rec := get("/tx/" + all[2].Transactions[i].ID + "/proof")
+
 			var p proofBody
 			Expect(json.Unmarshal(rec.Body.Bytes(), &p)).To(Succeed())
 			Expect(p.Proof).To(HaveLen(1))
@@ -122,10 +133,12 @@ var _ = Describe("GET /tx/{id}/proof", func() {
 		rec := get("/tx/" + strings.Repeat("a", 64) + "/proof")
 		Expect(rec.Code).To(Equal(http.StatusNotFound))
 		Expect(rec.Header().Get("Content-Type")).To(Equal("application/json"))
+
 		var resp errorResponse
 		Expect(json.Unmarshal(rec.Body.Bytes(), &resp)).To(Succeed())
 		Expect(resp.Code).To(Equal("tx_not_found"))
 		Expect(resp.Error).NotTo(BeEmpty())
+
 		after, _ := repo.All()
 		Expect(after).To(Equal(before))
 	})
@@ -133,6 +146,7 @@ var _ = Describe("GET /tx/{id}/proof", func() {
 	It("returns 400 invalid_tx_id for a malformed id", func() {
 		rec := get("/tx/" + strings.Repeat("A", 64) + "/proof")
 		Expect(rec.Code).To(Equal(http.StatusBadRequest))
+
 		var resp errorResponse
 		Expect(json.Unmarshal(rec.Body.Bytes(), &resp)).To(Succeed())
 		Expect(resp.Code).To(Equal("invalid_tx_id"))
@@ -141,6 +155,7 @@ var _ = Describe("GET /tx/{id}/proof", func() {
 	It("returns 500 when the chain cannot be read", func() {
 		srv, err := NewServer(brokenChain{}, Config{})
 		Expect(err).NotTo(HaveOccurred())
+
 		rec := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tx/"+strings.Repeat("a", 64)+"/proof", nil))
 		Expect(rec.Code).To(Equal(http.StatusInternalServerError))

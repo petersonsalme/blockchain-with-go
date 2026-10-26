@@ -35,6 +35,7 @@ func zeroBits(hash string) int {
 // unsets it) and restores the previous value afterwards.
 func pinDifficultyEnv(value string) {
 	previous, existed := os.LookupEnv(powpkg.DifficultyEnvVar)
+
 	DeferCleanup(func() {
 		if existed {
 			Expect(os.Setenv(powpkg.DifficultyEnvVar, previous)).To(Succeed())
@@ -60,6 +61,7 @@ func mineAsync(mine func() error) error {
 
 	var err error
 	Eventually(done, time.Second).Should(Receive(&err))
+
 	return err
 }
 
@@ -293,11 +295,14 @@ var _ = Describe("ProofOfWork", func() {
 		})
 	})
 	Describe("Verify", func() {
-		var oldBlock, newBlock *domain.Block
-		var pow *powpkg.ProofOfWork
+		var (
+			oldBlock, newBlock *domain.Block
+			pow                *powpkg.ProofOfWork
+		)
 
 		BeforeEach(func() {
 			pinDifficultyEnv("2")
+
 			pow = powpkg.NewProofOfWorkFromEnv()
 
 			oldBlock = &domain.Block{

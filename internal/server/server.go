@@ -89,22 +89,27 @@ func NewServer(svc Chain, cfg Config) (*Server, error) {
 	if svc == nil {
 		return nil, ErrNilService
 	}
+
 	timeout := cfg.MiningTimeout
 	if timeout <= 0 {
 		timeout = DefaultMiningTimeout
 	}
+
 	var limiter *rateLimiter
 	if cfg.RateLimit > 0 {
 		limiter = newRateLimiter(cfg.RateLimit, cfg.Now)
 	}
+
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
+
 	now := cfg.Now
 	if now == nil {
 		now = time.Now
 	}
+
 	return &Server{chain: svc, miningTimeout: timeout, limiter: limiter, logger: logger, now: now, metrics: newMetrics(), events: newHub(), p2p: cfg.P2P}, nil
 }
 
@@ -165,6 +170,7 @@ func (s *Server) Handler() http.Handler {
 	for _, rt := range s.routes() {
 		mux.HandleFunc(rt.pattern, rt.handler)
 	}
+
 	mux.Handle("/{$}", methodNotAllowed("GET, HEAD, POST"))
 	mux.Handle("/tx", methodNotAllowed("POST"))
 	mux.Handle("/mine", methodNotAllowed("POST"))
@@ -181,10 +187,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/p2p/hello", methodNotAllowed("POST"))
 	mux.Handle("/p2p/peers", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/legacy/bpm", methodNotAllowed("POST"))
+
 	var h http.Handler = mux
 	if s.limiter != nil {
 		h = s.limiter.middleware(h)
 	}
+
 	return logRequests(s.logger, s.metrics.middleware(h))
 }
 
@@ -214,8 +222,10 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte("HTTP 500: Internal Server Error")) // headers are sent; a failed write to the client cannot be reported
+
 		return
 	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_, _ = w.Write(response) // headers are sent; a failed write to the client cannot be reported
@@ -237,10 +247,12 @@ func queryInt(r *http.Request, name string, def int) (int, error) {
 	if !q.Has(name) {
 		return def, nil
 	}
+
 	v, err := strconv.Atoi(q.Get(name))
 	if err != nil || v < 0 {
 		return 0, fmt.Errorf("%s must be a non-negative integer", name)
 	}
+
 	return v, nil
 }
 
@@ -251,14 +263,17 @@ func (s *Server) handleGetBlocks(w http.ResponseWriter, r *http.Request) {
 		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error(), Code: invalidQueryCode})
 		return
 	}
+
 	limit, err := queryInt(r, "limit", defaultPageLimit)
 	if err == nil && limit == 0 {
 		err = errors.New("limit must be positive")
 	}
+
 	if err != nil {
 		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error(), Code: invalidQueryCode})
 		return
 	}
+
 	limit = min(limit, maxPageLimit)
 
 	// One extra block tells whether a next page exists, atomically with the page.
@@ -267,12 +282,14 @@ func (s *Server) handleGetBlocks(w http.ResponseWriter, r *http.Request) {
 		respondWithJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
 		return
 	}
+
 	resp := pageResponse{Blocks: blocks, From: from, Limit: limit}
 	if len(blocks) > limit {
 		resp.Blocks = blocks[:limit]
 		next := from + limit
 		resp.Next = &next
 	}
+
 	respondWithJSON(w, http.StatusOK, resp)
 }
 
@@ -284,6 +301,7 @@ func (s *Server) handleGetBlock(w http.ResponseWriter, r *http.Request) {
 		block *domain.Block
 		err   error
 	)
+
 	switch {
 	case isHeight(ref):
 		height, convErr := strconv.Atoi(ref)
@@ -291,6 +309,7 @@ func (s *Server) handleGetBlock(w http.ResponseWriter, r *http.Request) {
 			err = storage.ErrNotFound
 			break
 		}
+
 		block, err = s.chain.BlockByHeight(height)
 	case isHash(ref):
 		block, err = s.chain.BlockByHash(ref)
@@ -303,14 +322,17 @@ func (s *Server) handleGetBlock(w http.ResponseWriter, r *http.Request) {
 		respondWithJSON(w, http.StatusGone, errorResponse{Error: "block body was pruned; only its header is kept", Code: blockPrunedCode})
 		return
 	}
+
 	if errors.Is(err, storage.ErrNotFound) {
 		respondWithJSON(w, http.StatusNotFound, errorResponse{Error: "block not found", Code: blockNotFoundCode})
 		return
 	}
+
 	if err != nil {
 		respondWithJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
 		return
 	}
+
 	respondWithJSON(w, http.StatusOK, block)
 }
 
@@ -321,6 +343,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		respondWithJSON(w, http.StatusServiceUnavailable, errorResponse{Error: err.Error(), Code: unhealthyCode})
 		return
 	}
+
 	respondWithJSON(w, http.StatusOK, healthResponse{Status: "ok", Height: tip.Index, Tip: tip.Hash})
 }
 
@@ -328,11 +351,13 @@ func isHash(ref string) bool {
 	if len(ref) != hashLen {
 		return false
 	}
+
 	for _, c := range ref {
 		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -341,11 +366,13 @@ func isHeight(ref string) bool {
 	if ref == "" || len(ref) >= hashLen {
 		return false
 	}
+
 	for _, c := range ref {
 		if c < '0' || c > '9' {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -357,6 +384,7 @@ func (s *Server) handleGetTx(w http.ResponseWriter, r *http.Request) {
 			Error: "transaction id must be a 64-character lowercase hex string",
 			Code:  invalidTxIDCode,
 		})
+
 		return
 	}
 
@@ -366,8 +394,10 @@ func (s *Server) handleGetTx(w http.ResponseWriter, r *http.Request) {
 			Error: "transaction not found",
 			Code:  txNotFoundCode,
 		})
+
 		return
 	}
+
 	if err != nil {
 		respondWithJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
 		return
@@ -388,13 +418,16 @@ func (s *Server) handleGetContract(w http.ResponseWriter, r *http.Request) {
 			Error: "contract id must be a 64-character lowercase hex string",
 			Code:  invalidContractIDCode,
 		})
+
 		return
 	}
+
 	code, storage, ok := s.chain.Contract(id)
 	if !ok {
 		respondWithJSON(w, http.StatusNotFound, errorResponse{Error: "contract not found", Code: contractNotFoundCode})
 		return
 	}
+
 	respondWithJSON(w, http.StatusOK, newContractResponse(id, code, storage))
 }
 
@@ -406,6 +439,7 @@ func (s *Server) handleGetTxProof(w http.ResponseWriter, r *http.Request) {
 			Error: "transaction id must be a 64-character lowercase hex string",
 			Code:  invalidTxIDCode,
 		})
+
 		return
 	}
 
@@ -415,8 +449,10 @@ func (s *Server) handleGetTxProof(w http.ResponseWriter, r *http.Request) {
 			Error: "transaction not found",
 			Code:  txNotFoundCode,
 		})
+
 		return
 	}
+
 	if err != nil {
 		respondWithJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
 		return
@@ -428,8 +464,10 @@ func (s *Server) handleGetTxProof(w http.ResponseWriter, r *http.Request) {
 		if st.Left {
 			side = "left"
 		}
+
 		steps[i] = proofStep{Hash: st.Hash, Side: side}
 	}
+
 	respondWithJSON(w, http.StatusOK, proofResponse{
 		TxID:       id,
 		BlockIndex: p.BlockIndex,
@@ -449,6 +487,7 @@ func (s *Server) handleGetBalance(w http.ResponseWriter, r *http.Request) {
 			Error: err.Error(),
 			Code:  invalidAddressCode,
 		})
+
 		return
 	}
 
@@ -469,11 +508,13 @@ func (s *Server) mineAndRespond(w http.ResponseWriter, r *http.Request, mine fun
 	defer cancel()
 
 	start := s.now()
+
 	newBlock, err := mine(ctx)
 	if err != nil {
 		respondWithMineError(w, err)
 		return
 	}
+
 	s.metrics.observeMining(s.now().Sub(start))
 	s.events.publish(eventBlock, newBlock)
 
@@ -510,14 +551,17 @@ func (s *Server) handleSubmitTx(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSONBody(w, r, &req) {
 		return
 	}
+
 	tx := req.transaction()
 	if !checkTx(w, &tx) {
 		return
 	}
+
 	if err := s.chain.Submit(tx); err != nil {
 		respondWithSubmitError(w, err)
 		return
 	}
+
 	s.events.publish(eventTx, tx)
 	respondWithJSON(w, http.StatusAccepted, submitResponse{ID: tx.ID})
 }
@@ -530,9 +574,12 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, v any) bool {
 		if respondIfTooLarge(w, err) {
 			return false
 		}
+
 		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid request body"})
+
 		return false
 	}
+
 	return true
 }
 
@@ -542,11 +589,13 @@ func respondIfTooLarge(w http.ResponseWriter, err error) bool {
 	if !errors.As(err, &tooLarge) {
 		return false
 	}
+
 	respondWithJSON(w, http.StatusRequestEntityTooLarge, errorResponse{
 		Error:   "request body exceeds the maximum size",
 		Code:    requestTooLargeCode,
 		Details: map[string]any{"max": tooLarge.Limit},
 	})
+
 	return true
 }
 
@@ -555,6 +604,7 @@ func checkTx(w http.ResponseWriter, tx *domain.Transaction) bool {
 	if tx.ID == "" {
 		tx.ID = tx.CalculateHash()
 	}
+
 	if err := tx.Validate(); err != nil {
 		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: fmt.Sprintf("invalid transaction: %s", err.Error())})
 		return false
@@ -564,12 +614,14 @@ func checkTx(w http.ResponseWriter, tx *domain.Transaction) bool {
 		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "transaction timestamp is required", Code: domain.CodeMissingTimestamp})
 		return false
 	}
+
 	return true
 }
 
 // handleMine mines a block from the pool; the request body is ignored.
 func (s *Server) handleMine(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = r.Body.Close() }() // closing a server request body cannot fail usefully
+
 	s.mineAndRespond(w, r, s.chain.MinePending)
 }
 
@@ -579,6 +631,7 @@ func (s *Server) handleGetMempool(w http.ResponseWriter, r *http.Request) {
 	if txs == nil {
 		txs = []domain.Transaction{}
 	}
+
 	respondWithJSON(w, http.StatusOK, mempoolResponse{Transactions: txs})
 }
 

@@ -61,7 +61,7 @@ Everything else (HTTP handlers and DTOs, logging, docs, README, CLI, build files
 
 1. **Validation and Tests:**
    - Run tests and type checking: `go test ./...`
-   - Standard Go formatting: `gofmt -s -w .` or `goimports`
+   - Go formatting (gofumpt + goimports): `golangci-lint fmt`; auto-fix style findings (wsl, nlreturn, godot): `golangci-lint run --fix ./...`
    - Build check: `go build -o /dev/null ./cmd/bwg`
    - Run the node locally: `go run ./cmd/bwg node`
    - Regenerate the client after editing `openapi.yaml`: `go generate ./client/...` (CI fails on `git diff --exit-code client/`)

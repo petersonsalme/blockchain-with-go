@@ -20,9 +20,12 @@ var _ = Describe("Coinbase rule", func() {
 		alice = seededWallet(1).Address()
 		bob = seededWallet(100).Address()
 		gtx := newTx(0, nil, domain.TxOut{Amount: 100, Address: alice})
+
 		var err error
+
 		set, err = domain.BuildUTXOSet([]*domain.Block{blockOf(0, gtx)})
 		Expect(err).NotTo(HaveOccurred())
+
 		g0 = outpoint(gtx, 0)
 	})
 
@@ -70,6 +73,7 @@ var _ = Describe("Coinbase rule", func() {
 		huge := newTx(0, nil, domain.TxOut{Amount: math.MaxUint64, Address: alice})
 		big, err := domain.BuildUTXOSet([]*domain.Block{blockOf(0, huge)})
 		Expect(err).NotTo(HaveOccurred())
+
 		spend := newTx(5, []domain.OutPoint{outpoint(huge, 0)}, domain.TxOut{Amount: 1, Address: alice})
 		_, err = domain.BlockDelta(big, blockOf(1, coinbase(1, math.MaxUint64), spend), false)
 		Expect(err).NotTo(HaveOccurred())
@@ -88,13 +92,16 @@ var _ = Describe("Coinbase rule", func() {
 	It("keeps created minus spent within the subsidy", func() {
 		d, err := domain.BlockDelta(set, blockOf(1, coinbase(1, domain.InitialSubsidy+10), feeTx(90)), false)
 		Expect(err).NotTo(HaveOccurred())
+
 		var created, spent uint64
 		for _, o := range d.Created {
 			created += o.Amount
 		}
+
 		for _, o := range d.Spent {
 			spent += o.Amount
 		}
+
 		Expect(created - spent).To(BeNumerically("<=", domain.Subsidy(1)))
 	})
 
@@ -103,12 +110,14 @@ var _ = Describe("Coinbase rule", func() {
 		blocks := []*domain.Block{blockOf(0, gtx), blockOf(1, coinbase(1, 7), feeTx(60))}
 		built, err := domain.BuildUTXOSet(blocks)
 		Expect(err).NotTo(HaveOccurred())
+
 		inc := domain.UTXOSet{}
 		for i, b := range blocks {
 			d, err := domain.BlockDelta(inc, b, i == 0)
 			Expect(err).NotTo(HaveOccurred())
 			inc.Apply(d)
 		}
+
 		Expect(built).To(Equal(inc))
 	})
 })

@@ -48,6 +48,7 @@ func (s *indexSpy) UTXOsByAddress(addr string) ([]storage.AddressUTXO, error) {
 	if s.utxoErr != nil {
 		return nil, s.utxoErr
 	}
+
 	return s.IndexedRepository.UTXOsByAddress(addr)
 }
 
@@ -55,6 +56,7 @@ func (s *indexSpy) PrunedBelow() (int, error) {
 	if s.prunedErr != nil {
 		return 0, s.prunedErr
 	}
+
 	return s.IndexedRepository.PrunedBelow()
 }
 
@@ -62,6 +64,7 @@ func (s *indexSpy) Last() (*domain.Block, error) {
 	if n := s.lasts.Add(1); s.lastErrAfter > 0 && n >= s.lastErrAfter {
 		return nil, errors.New("last failed")
 	}
+
 	return s.IndexedRepository.Last()
 }
 
@@ -69,6 +72,7 @@ func (s *indexSpy) TxHeight(id string) (int, error) {
 	if n := s.heights.Add(1); s.heightErrAfter > 0 && n >= s.heightErrAfter {
 		return 0, errors.New("height failed")
 	}
+
 	return s.IndexedRepository.TxHeight(id)
 }
 
@@ -76,11 +80,14 @@ func (s *indexSpy) TxsByAddress(addr string) ([]string, error) {
 	if s.byTxErr != nil {
 		return nil, s.byTxErr
 	}
+
 	ids, err := s.IndexedRepository.TxsByAddress(addr)
 	s.txs.Add(1)
+
 	if s.onTxs != nil {
 		s.onTxs()
 	}
+
 	return ids, err
 }
 
@@ -88,12 +95,15 @@ func (s *indexSpy) ByHeight(h int) (*domain.Block, error) {
 	if s.byHeightErr != nil {
 		return nil, s.byHeightErr
 	}
+
 	b, err := s.IndexedRepository.ByHeight(h)
 	if err == nil && s.empty {
 		stripped := *b
 		stripped.Transactions = nil
+
 		return &stripped, nil
 	}
+
 	return b, err
 }
 
@@ -102,6 +112,7 @@ func ids(txs []domain.Transaction) []string {
 	for _, tx := range txs {
 		out = append(out, tx.ID)
 	}
+
 	return out
 }
 
@@ -112,12 +123,14 @@ var _ = Describe("Service persisted indexes", func() {
 			r, err := bolt.Open(filepath.Join(GinkgoT().TempDir(), "chain.db"))
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { _ = r.Close() })
+
 			return r
 		},
 	}
 
 	for name, open := range repos {
 		open := open
+
 		Describe(name, func() {
 			var (
 				repo      storage.IndexedRepository
@@ -141,6 +154,7 @@ var _ = Describe("Service persisted indexes", func() {
 				tx0 = f.tx()[0]
 				_, err := svc.Mine(context.Background(), []domain.Transaction{tx0})
 				Expect(err).NotTo(HaveOccurred())
+
 				shared = spend(f.owner, f.ops[1], 9)
 				onlyA = spend(f.owner, f.ops[2], 8)
 				_, err = svc.Mine(context.Background(), []domain.Transaction{shared, onlyA})
@@ -157,6 +171,7 @@ var _ = Describe("Service persisted indexes", func() {
 				cand := grow(eng, blocks[:2], []domain.Transaction{shared}, b3)
 				_, err := svc.ReplaceChain(context.Background(), cand)
 				Expect(err).NotTo(HaveOccurred())
+
 				return b3
 			}
 
@@ -164,6 +179,7 @@ var _ = Describe("Service persisted indexes", func() {
 				It("find every transaction at its height without scanning the chain", func() {
 					reorg()
 					spy.all.Store(0)
+
 					for _, b := range mustAll(repo) {
 						for _, want := range b.Transactions {
 							tx, hash, height, err := svc.Transaction(want.ID)
@@ -178,11 +194,13 @@ var _ = Describe("Service persisted indexes", func() {
 							Expect(proof.BlockHash).To(Equal(b.Hash))
 						}
 					}
+
 					Expect(spy.all.Load()).To(BeZero())
 				})
 
 				It("reports a transaction of the removed branch as not found", func() {
 					reorg()
+
 					_, _, _, err := svc.Transaction(onlyA.ID)
 					Expect(err).To(MatchError(storage.ErrNotFound))
 					_, err = svc.TxProof(onlyA.ID)
@@ -222,6 +240,7 @@ var _ = Describe("Service persisted indexes", func() {
 					Expect(domain.SignInput(&bare, 0, f.owner)).To(Succeed())
 					_, err := svc.Mine(context.Background(), []domain.Transaction{bare})
 					Expect(err).NotTo(HaveOccurred())
+
 					hash := bare.CalculateHash()
 
 					tx, _, height, err := svc.Transaction(hash)
@@ -314,6 +333,7 @@ var _ = Describe("Service persisted indexes", func() {
 						if spy.txs.Load() > 1 {
 							return
 						}
+
 						_, err := svc.Mine(context.Background(), []domain.Transaction{spend(f.owner, f.ops[next], 9)})
 						Expect(err).NotTo(HaveOccurred())
 					}
@@ -334,6 +354,7 @@ var _ = Describe("Service persisted indexes", func() {
 					spy.onTxs = func() {
 						_, err := svc.Mine(context.Background(), []domain.Transaction{spend(f.owner, f.ops[next], 9)})
 						Expect(err).NotTo(HaveOccurred())
+
 						next++
 					}
 					_, err := svc.TransactionsByAddress(f.owner.Address())
@@ -345,16 +366,22 @@ var _ = Describe("Service persisted indexes", func() {
 			Describe("Balance", func() {
 				It("reads the persisted UTXO set, before and after a reorg", func() {
 					reorg()
+
 					want := replay(mustAll(repo))
+
 					for _, addr := range []string{f.owner.Address(), recipient().Address()} {
-						var sum uint64
-						var count int
+						var (
+							sum   uint64
+							count int
+						)
+
 						for _, out := range want {
 							if out.Address == addr {
 								sum += out.Amount
 								count++
 							}
 						}
+
 						got, utxos := svc.Balance(addr)
 						Expect(got).To(Equal(sum), addr)
 						Expect(utxos).To(HaveLen(count), addr)
@@ -373,16 +400,19 @@ var _ = Describe("Service persisted indexes", func() {
 			Describe("Reindex", func() {
 				It("changes nothing after any sequence of writes", func() {
 					reorg()
+
 					_, err := svc.Mine(context.Background(), []domain.Transaction{spend(f.owner, f.ops[4], 9)})
 					Expect(err).NotTo(HaveOccurred())
 
 					before := utxoSnapshot(repo)
 					Expect(before).To(Equal(replay(mustAll(repo))))
+
 					owner, err := svc.TransactionsByAddress(f.owner.Address())
 					Expect(err).NotTo(HaveOccurred())
 
 					Expect(repo.Reindex()).To(Succeed())
 					Expect(utxoSnapshot(repo)).To(Equal(before))
+
 					again, err := svc.TransactionsByAddress(f.owner.Address())
 					Expect(err).NotTo(HaveOccurred())
 					Expect(ids(again)).To(Equal(ids(owner)))
@@ -393,6 +423,7 @@ var _ = Describe("Service persisted indexes", func() {
 					again, err := NewService(reopened, eng)
 					Expect(err).NotTo(HaveOccurred())
 					Expect(reopened.all.Load()).To(Equal(int32(1)), "only the contract replay reads the chain")
+
 					got, err := again.TransactionsByAddress(f.owner.Address())
 					Expect(err).NotTo(HaveOccurred())
 					Expect(ids(got)).To(Equal([]string{genesisTx.ID, tx0.ID, shared.ID, onlyA.ID}))

@@ -38,9 +38,11 @@ func ValidateContractOp(op *ContractOp) error {
 	if op == nil {
 		return nil
 	}
+
 	if op.GasLimit == 0 || op.GasLimit > MaxContractGas {
 		return ErrInvalidContractOp
 	}
+
 	switch op.Kind {
 	case ContractDeploy:
 		raw, ok := canonicalHex(op.Code)
@@ -54,6 +56,7 @@ func ValidateContractOp(op *ContractOp) error {
 	default:
 		return ErrInvalidContractOp
 	}
+
 	return nil
 }
 

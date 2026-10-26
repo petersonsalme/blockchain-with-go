@@ -15,19 +15,24 @@ import (
 // that spends the previous one, and the id of each transaction.
 func benchRepo(b *testing.B, n int) (*bolt.Repository, []string) {
 	b.Helper()
+
 	w, err := wallet.New()
 	if err != nil {
 		b.Fatal(err)
 	}
+
 	repo, err := bolt.Open(filepath.Join(b.TempDir(), "bench.db"))
 	if err != nil {
 		b.Fatal(err)
 	}
+
 	b.Cleanup(func() { _ = repo.Close() })
 
 	blocks := make([]*domain.Block, 0, n)
 	txids := make([]string, 0, n)
+
 	var prevTx *domain.Transaction
+
 	for i := 0; i < n; i++ {
 		tx := domain.Transaction{
 			Timestamp: time.Unix(1_700_000_000+int64(i), 0).UTC(),
@@ -36,10 +41,12 @@ func benchRepo(b *testing.B, n int) (*bolt.Repository, []string) {
 		if prevTx != nil {
 			tx.Inputs = []domain.TxIn{{PrevTxID: prevTx.CalculateHash()}}
 		}
+
 		blk := &domain.Block{Index: i, Hash: fmt.Sprintf("h%d", i), Transactions: []domain.Transaction{tx}}
 		if i > 0 {
 			blk.PrevHash = blocks[i-1].Hash
 		}
+
 		blocks = append(blocks, blk)
 		txids = append(txids, tx.CalculateHash())
 		prevTx = &tx
@@ -48,14 +55,17 @@ func benchRepo(b *testing.B, n int) (*bolt.Repository, []string) {
 	if err := repo.Append(blocks[0]); err != nil {
 		b.Fatal(err)
 	}
+
 	if n > 1 {
 		if err := repo.ReplaceFrom(1, blocks[1:]); err != nil {
 			b.Fatal(err)
 		}
 	}
+
 	if err := repo.Reindex(); err != nil {
 		b.Fatal(err)
 	}
+
 	return repo, txids
 }
 

@@ -114,13 +114,16 @@ func NewService(repo storage.IndexedRepository, c consensus.Consensus, opts ...O
 	if repo == nil {
 		return nil, ErrNilRepository
 	}
+
 	if c == nil {
 		return nil, ErrNilConsensus
 	}
+
 	s := &Service{repo: repo, consensus: c, generate: GenerateBlockWithContext, writeSem: make(chan struct{}, 1)}
 	for _, opt := range opts {
 		opt(s)
 	}
+
 	if s.pool == nil {
 		s.pool = mempool.New(mempool.DefaultMaxTxs)
 	}
@@ -129,11 +132,14 @@ func NewService(repo storage.IndexedRepository, c consensus.Consensus, opts ...O
 		if !errors.Is(err, storage.ErrEmpty) {
 			return nil, err
 		}
+
 		genesis := s.genesis()
+
 		delta, err := domain.BlockDelta(repo, genesis, true)
 		if err != nil {
 			return nil, err
 		}
+
 		if err := repo.Commit(genesis, delta); err != nil {
 			return nil, err
 		}
@@ -143,6 +149,7 @@ func NewService(repo storage.IndexedRepository, c consensus.Consensus, opts ...O
 	if err != nil {
 		return nil, err
 	}
+
 	if !current {
 		if err := repo.Reindex(); err != nil {
 			return nil, err
@@ -153,6 +160,7 @@ func NewService(repo storage.IndexedRepository, c consensus.Consensus, opts ...O
 	if err != nil {
 		return nil, err
 	}
+
 	if s.contracts, err = vm.BuildState(all); err != nil {
 		return nil, err
 	}
@@ -165,10 +173,12 @@ func NewService(repo storage.IndexedRepository, c consensus.Consensus, opts ...O
 func (s *Service) Contract(id string) (code []byte, storage map[uint64]uint64, ok bool) {
 	s.contractsMu.RLock()
 	defer s.contractsMu.RUnlock()
+
 	c, ok := s.contracts.Contract(id)
 	if !ok {
 		return nil, nil, false
 	}
+
 	return slices.Clone(c.Code), maps.Clone(c.Storage), true
 }
 
@@ -176,6 +186,7 @@ func (s *Service) Contract(id string) (code []byte, storage map[uint64]uint64, o
 func (s *Service) applyContracts(d vm.Delta) {
 	s.contractsMu.Lock()
 	defer s.contractsMu.Unlock()
+
 	s.contracts.Apply(d)
 }
 
@@ -185,19 +196,23 @@ func (s *Service) applyContracts(d vm.Delta) {
 func (s *Service) confirmedDelta(txs []domain.Transaction) (vm.Delta, error) {
 	s.contractsMu.RLock()
 	defer s.contractsMu.RUnlock()
+
 	return vm.BlockDelta(s.contracts, &domain.Block{Transactions: txs})
 }
 
 // genesis builds the first block, with an allocation transaction when configured.
 func (s *Service) genesis() *domain.Block {
 	now := time.Now()
+
 	block := &domain.Block{Timestamp: now, Transactions: []domain.Transaction{}}
 	if len(s.allocations) > 0 {
 		alloc := domain.Transaction{Outputs: s.allocations, Timestamp: now}
 		alloc.ID = alloc.CalculateHash()
 		block.Transactions = append(block.Transactions, alloc)
 	}
+
 	block.MerkleRoot = domain.MerkleRoot(block.Transactions)
+
 	return block
 }
 
@@ -206,23 +221,28 @@ func (s *Service) genesis() *domain.Block {
 // input resolves either in view or in an earlier transaction of txs.
 func verifyInputs(view domain.UTXOView, txs []domain.Transaction) error {
 	created := map[domain.OutPoint]domain.TxOut{}
+
 	for i := range txs {
 		tx := &txs[i]
 		for j, in := range tx.Inputs {
 			op := domain.OutPoint{TxID: in.PrevTxID, Index: in.OutIndex}
+
 			spent, ok := created[op]
 			if !ok {
 				spent, _ = view.Lookup(op)
 			}
+
 			if err := domain.VerifyInputSignature(tx, j, spent); err != nil {
 				return err
 			}
 		}
+
 		txid := tx.CalculateHash()
 		for j, out := range tx.Outputs {
 			created[domain.OutPoint{TxID: txid, Index: uint32(j)}] = out
 		}
 	}
+
 	return nil
 }
 
@@ -244,6 +264,7 @@ func (s *Service) BlockByHeight(h int) (*domain.Block, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return s.retained(b)
 }
 
@@ -254,6 +275,7 @@ func (s *Service) BlockByHash(hash string) (*domain.Block, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return s.retained(b)
 }
 
@@ -263,9 +285,11 @@ func (s *Service) retained(b *domain.Block) (*domain.Block, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	if b.Index < below {
 		return nil, storage.ErrPruned
 	}
+
 	return b, nil
 }
 
@@ -289,7 +313,9 @@ func (s *Service) Transaction(id string) (*domain.Transaction, string, int, erro
 	if err != nil {
 		return nil, "", 0, err
 	}
+
 	tx := b.Transactions[i]
+
 	return &tx, b.Hash, b.Index, nil
 }
 
@@ -300,15 +326,18 @@ func (s *Service) locate(id string) (*domain.Block, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
+
 	b, err := s.repo.ByHeight(h)
 	if err != nil {
 		return nil, 0, err
 	}
+
 	for i := range b.Transactions {
 		if b.Transactions[i].CalculateHash() == id {
 			return b, i, nil
 		}
 	}
+
 	return nil, 0, storage.ErrNotFound
 }
 
@@ -331,13 +360,16 @@ func (s *Service) TxProof(id string) (*InclusionProof, error) {
 	if errors.Is(err, storage.ErrNotFound) {
 		return nil, ErrTxNotFound
 	}
+
 	if err != nil {
 		return nil, err
 	}
+
 	proof, err := domain.BuildMerkleProof(b.Transactions, i)
 	if err != nil {
 		return nil, err
 	}
+
 	return &InclusionProof{
 		BlockIndex: b.Index,
 		BlockHash:  b.Hash,
@@ -353,14 +385,18 @@ func (s *Service) TxProof(id string) (*InclusionProof, error) {
 // blocks and adds those of the new ones. It never waits for Mine.
 func (s *Service) TransactionsByAddress(addr string) ([]domain.Transaction, error) {
 	var txs []domain.Transaction
+
 	err := s.consistent(func() error {
 		var err error
+
 		txs, err = s.addressTxs(addr)
+
 		return err
 	})
 	if err != nil {
 		return nil, err
 	}
+
 	return txs, nil
 }
 
@@ -370,26 +406,33 @@ func (s *Service) addressTxs(addr string) ([]domain.Transaction, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	txs := make([]domain.Transaction, 0, len(ids))
 	blocks := map[int]*domain.Block{}
+
 	for _, id := range ids {
 		h, err := s.repo.TxHeight(id)
 		if err != nil {
 			return nil, err
 		}
+
 		b, ok := blocks[h]
 		if !ok {
 			if b, err = s.repo.ByHeight(h); err != nil {
 				return nil, err
 			}
+
 			blocks[h] = b
 		}
+
 		i := slices.IndexFunc(b.Transactions, func(tx domain.Transaction) bool { return tx.CalculateHash() == id })
 		if i < 0 {
 			return nil, storage.ErrNotFound
 		}
+
 		txs = append(txs, b.Transactions[i])
 	}
+
 	return txs, nil
 }
 
@@ -410,15 +453,19 @@ func (s *Service) consistent(read func() error) error {
 		if err != nil {
 			return err
 		}
+
 		readErr := read()
+
 		after, err := s.repo.Last()
 		if err != nil {
 			return err
 		}
+
 		if before.Hash == after.Hash {
 			return readErr
 		}
 	}
+
 	return ErrTipMoving
 }
 
@@ -431,21 +478,26 @@ func (s *Service) Balance(addr string) (uint64, []UTXO) {
 		balance uint64
 		utxos   []UTXO
 	)
+
 	err := s.consistent(func() error {
 		balance, utxos = 0, make([]UTXO, 0)
+
 		owned, err := s.repo.UTXOsByAddress(addr)
 		if err != nil {
 			return err
 		}
+
 		for _, u := range owned {
 			balance += u.Amount
 			utxos = append(utxos, UTXO{TxID: u.OutPoint.TxID, Index: u.OutPoint.Index, Amount: u.Amount})
 		}
+
 		return nil
 	})
 	if err != nil {
 		return 0, make([]UTXO, 0)
 	}
+
 	return balance, utxos
 }
 
@@ -456,6 +508,7 @@ func (s *Service) lock(ctx context.Context) (func(), error) {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+
 	release := func() { <-s.writeSem }
 
 	if s.diverged {
@@ -468,6 +521,7 @@ func (s *Service) lock(ctx context.Context) (func(), error) {
 		release()
 		return nil, err
 	}
+
 	return release, nil
 }
 
@@ -505,14 +559,18 @@ func (s *Service) Submit(tx domain.Transaction) error {
 	if len(tx.Inputs) == 0 {
 		return domain.ErrMissingInputs
 	}
+
 	txs := []domain.Transaction{tx}
+
 	delta, err := domain.BlockDelta(s.repo, &domain.Block{Transactions: txs}, false)
 	if err != nil {
 		return err
 	}
+
 	if err := verifyInputs(s.repo, txs); err != nil {
 		return err
 	}
+
 	if _, err := s.confirmedDelta(txs); err != nil {
 		return err
 	}
@@ -522,9 +580,11 @@ func (s *Service) Submit(tx domain.Transaction) error {
 	for _, o := range delta.Spent {
 		in += o.Amount
 	}
+
 	for _, o := range tx.Outputs {
 		out += o.Amount
 	}
+
 	return s.pool.Add(tx, in-out)
 }
 
@@ -549,6 +609,7 @@ func (s *Service) MinePending(ctx context.Context) (*domain.Block, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return s.mineLocked(ctx, s.dropStale(txs))
 }
 
@@ -559,10 +620,12 @@ func (s *Service) MinePending(ctx context.Context) (*domain.Block, error) {
 // selection just made. It falls on every pass, so the loop ends.
 func (s *Service) fit() ([]domain.Transaction, error) {
 	limit := domain.MaxBlockBytes()
+
 	empty, err := s.sealedSize([]domain.Transaction{})
 	if err != nil {
 		return nil, err
 	}
+
 	room := limit - empty
 	budget := room
 	// With a coinbase in the block every pool transaction costs a separator.
@@ -570,8 +633,10 @@ func (s *Service) fit() ([]domain.Transaction, error) {
 	if s.minerAddr != "" {
 		firstFree = 0
 	}
+
 	for {
 		txs := s.pool.Select(budget)
+
 		size, err := s.sealedSize(txs)
 		if err != nil {
 			return nil, err
@@ -580,6 +645,7 @@ func (s *Service) fit() ([]domain.Transaction, error) {
 		if size <= limit || len(txs) == 0 {
 			return txs, nil
 		}
+
 		budget = room - (len(txs) - firstFree)
 	}
 }
@@ -591,25 +657,34 @@ func (s *Service) fit() ([]domain.Transaction, error) {
 // order, each over the writes of the kept ones before it.
 func (s *Service) dropStale(txs []domain.Transaction) []domain.Transaction {
 	valid := make([]domain.Transaction, 0, len(txs))
-	var contractTxs []domain.Transaction
-	var stale []string
+
+	var (
+		contractTxs []domain.Transaction
+		stale       []string
+	)
+
 	for i := range txs {
 		one := txs[i : i+1]
 		if _, err := domain.BlockDelta(s.repo, &domain.Block{Transactions: one}, false); err != nil || verifyInputs(s.repo, one) != nil {
 			stale = append(stale, txs[i].ID)
 			continue
 		}
+
 		if txs[i].Contract != nil {
 			withThis := append(slices.Clone(contractTxs), txs[i])
 			if _, err := s.confirmedDelta(withThis); err != nil {
 				stale = append(stale, txs[i].ID)
 				continue
 			}
+
 			contractTxs = withThis
 		}
+
 		valid = append(valid, txs[i])
 	}
+
 	s.pool.Remove(stale...)
+
 	return valid
 }
 
@@ -627,6 +702,7 @@ func (s *Service) sealedSize(txs []domain.Transaction) (int, error) {
 		}
 		txs = append([]domain.Transaction{coinbase}, txs...)
 	}
+
 	b := domain.Block{
 		Index:        math.MaxInt,
 		Timestamp:    time.Date(2000, 1, 1, 0, 0, 0, 123456789, time.FixedZone("", 3600)),
@@ -639,6 +715,7 @@ func (s *Service) sealedSize(txs []domain.Transaction) (int, error) {
 		Validator:    hash,
 		Signature:    strings.Repeat("0", 128),
 	}
+
 	return b.Size()
 }
 
@@ -650,7 +727,9 @@ func (s *Service) writeFailed(err error) error {
 	if errors.Is(err, storage.ErrConflict) {
 		return err
 	}
+
 	s.diverged = true
+
 	return fmt.Errorf("%w: %w", ErrStateDiverged, err)
 }
 
@@ -660,24 +739,29 @@ func (s *Service) mineLocked(ctx context.Context, txs []domain.Transaction) (*do
 	if err != nil {
 		return nil, err
 	}
+
 	if len(history) == 0 {
 		return nil, storage.ErrEmpty
 	}
+
 	prev := history[len(history)-1]
 
 	delta, err := domain.BlockDelta(s.repo, &domain.Block{Index: prev.Index + 1, Transactions: txs}, false)
 	if err != nil {
 		return nil, err
 	}
+
 	if s.minerAddr != "" {
 		txs, delta, err = s.withCoinbase(prev.Index+1, txs, delta)
 		if err != nil {
 			return nil, err
 		}
 	}
+
 	if err := verifyInputs(s.repo, txs); err != nil {
 		return nil, err
 	}
+
 	contractDelta, err := s.confirmedDelta(txs)
 	if err != nil {
 		return nil, err
@@ -701,9 +785,11 @@ func (s *Service) mineLocked(ctx context.Context, txs []domain.Transaction) (*do
 	if err := s.repo.Commit(block, delta); err != nil {
 		return nil, s.writeFailed(err)
 	}
+
 	s.applyContracts(contractDelta)
 
 	s.pool.Prune(block, s.repo)
+
 	return block, nil
 }
 
@@ -717,16 +803,20 @@ func (s *Service) withCoinbase(height int, txs []domain.Transaction, delta domai
 	for _, o := range delta.Spent {
 		reward += o.Amount
 	}
+
 	for _, o := range delta.Created {
 		reward -= o.Amount
 	}
+
 	if reward == 0 {
 		return txs, delta, nil
 	}
+
 	cb := domain.Transaction{Outputs: []domain.TxOut{{Amount: reward, Address: s.minerAddr}}, Timestamp: time.Now()}
 	cb.ID = cb.CalculateHash()
 	txs = append([]domain.Transaction{cb}, txs...)
 	full, err := domain.BlockDelta(s.repo, &domain.Block{Index: height, Transactions: txs}, false)
+
 	return txs, full, err
 }
 
@@ -753,9 +843,11 @@ func (s *Service) ReplaceChain(ctx context.Context, candidate []*domain.Block) (
 	if err != nil {
 		return nil, err
 	}
+
 	if len(local) == 0 {
 		return nil, storage.ErrEmpty
 	}
+
 	fork, err := forkPoint(local, candidate)
 	if err != nil {
 		return nil, err
@@ -781,31 +873,41 @@ func (s *Service) ReplaceChain(ctx context.Context, candidate []*domain.Block) (
 	// The shared prefix is the local one, whatever else the candidate carries there.
 	history := make([]*domain.Block, fork, len(candidate))
 	copy(history, local[:fork])
+
 	now := time.Now()
+
 	var deltas []domain.UTXODelta
+
 	for _, b := range candidate[fork:] {
 		if b == nil {
 			return nil, ErrInvalidBlock
 		}
+
 		if err := s.consensus.Verify(history, b); err != nil {
 			return nil, err
 		}
+
 		if err := domain.ValidateBlockRules(b, history[len(history)-1], now); err != nil {
 			return nil, err
 		}
+
 		delta, err := domain.BlockDelta(forkState, b, false)
 		if err != nil {
 			return nil, err
 		}
+
 		if err := verifyInputs(forkState, b.Transactions); err != nil {
 			return nil, err
 		}
+
 		contractDelta, err := vm.BlockDelta(forkContracts, b)
 		if err != nil {
 			return nil, err
 		}
+
 		forkState.Apply(delta)
 		forkContracts.Apply(contractDelta)
+
 		deltas = append(deltas, delta)
 		history = append(history, b)
 	}
@@ -818,11 +920,13 @@ func (s *Service) ReplaceChain(ctx context.Context, candidate []*domain.Block) (
 	if err := s.repo.Reorg(fork, connected, deltas); err != nil {
 		return nil, s.writeFailed(err)
 	}
+
 	s.contractsMu.Lock()
 	s.contracts = forkContracts
 	s.contractsMu.Unlock()
 
 	disconnected := slices.Clone(local[fork:])
+
 	return &Reorg{
 		ForkHeight:   fork,
 		Disconnected: disconnected,
@@ -838,15 +942,18 @@ func forkPoint(local, candidate []*domain.Block) (int, error) {
 	if len(candidate) == 0 || candidate[0] == nil {
 		return 0, ErrInvalidBlock
 	}
+
 	genesis := candidate[0]
 	// The genesis is never sealed, so its Hash may be empty: compare what it commits to.
 	if genesis.Hash != local[0].Hash || genesis.CalculateHash() != local[0].CalculateHash() {
 		return 0, ErrGenesisMismatch
 	}
+
 	fork := 1
 	for fork < len(local) && fork < len(candidate) && candidate[fork] != nil && candidate[fork].Hash == local[fork].Hash {
 		fork++
 	}
+
 	return fork, nil
 }
 
@@ -854,12 +961,15 @@ func forkPoint(local, candidate []*domain.Block) (int, error) {
 // connected block holds. Transactions are matched by hash, not by their ID field.
 func orphaned(disconnected, connected []*domain.Block) []domain.Transaction {
 	kept := map[string]bool{}
+
 	for _, b := range connected {
 		for i := range b.Transactions {
 			kept[b.Transactions[i].CalculateHash()] = true
 		}
 	}
+
 	var out []domain.Transaction
+
 	for _, b := range disconnected {
 		for i := range b.Transactions {
 			if !kept[b.Transactions[i].CalculateHash()] {
@@ -867,5 +977,6 @@ func orphaned(disconnected, connected []*domain.Block) []domain.Transaction {
 			}
 		}
 	}
+
 	return out
 }

@@ -45,6 +45,7 @@ func OpenPruned(path string, p storage.Pruning) (*Repository, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
+
 	db, err := bbolt.Open(path, 0o600, &bbolt.Options{Timeout: time.Second})
 	if err != nil {
 		return nil, err
@@ -58,14 +59,17 @@ func OpenPruned(path string, p storage.Pruning) (*Repository, error) {
 				return err
 			}
 		}
+
 		if legacy {
 			if err := tx.Bucket(metaBucket).Delete(indexedTipKey); err != nil {
 				return err
 			}
 		}
+
 		if p.KeepBlocks == 0 && metaInt(tx, prunedBelowKey) > 0 {
 			return storage.ErrInvalidPruning
 		}
+
 		return nil
 	})
 	if err != nil {
@@ -84,23 +88,29 @@ func (r *Repository) Close() error {
 // Last returns the most recently appended block, or storage.ErrEmpty.
 func (r *Repository) Last() (*domain.Block, error) {
 	var block *domain.Block
+
 	err := r.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(blocksBucket)
 		c := b.Cursor()
+
 		k, v := c.Last()
 		if k == nil {
 			return storage.ErrEmpty
 		}
+
 		var decoded domain.Block
 		if err := json.Unmarshal(v, &decoded); err != nil {
 			return err
 		}
+
 		block = &decoded
+
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+
 	return block, nil
 }
 
@@ -114,6 +124,7 @@ func (r *Repository) Append(b *domain.Block) error {
 		if err := checkTip(tx.Bucket(blocksBucket), b); err != nil {
 			return err
 		}
+
 		return putBlock(tx, b)
 	})
 }
@@ -124,13 +135,16 @@ func checkTip(bBucket *bbolt.Bucket, b *domain.Block) error {
 	if k == nil {
 		return nil
 	}
+
 	var last domain.Block
 	if err := json.Unmarshal(v, &last); err != nil {
 		return err
 	}
+
 	if b.Index != last.Index+1 || b.PrevHash != last.Hash {
 		return storage.ErrConflict
 	}
+
 	return nil
 }
 
@@ -140,34 +154,42 @@ func putBlock(tx *bbolt.Tx, b *domain.Block) error {
 	if err != nil {
 		return err
 	}
+
 	key := heightKey(b.Index)
 	if err := tx.Bucket(blocksBucket).Put(key, data); err != nil {
 		return err
 	}
+
 	if len(b.Hash) > 0 {
 		return tx.Bucket(hashesBucket).Put([]byte(b.Hash), key)
 	}
+
 	return nil
 }
 
 // All returns a snapshot of all blocks in index order, oldest first.
 func (r *Repository) All() ([]*domain.Block, error) {
 	var blocks []*domain.Block
+
 	err := r.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(blocksBucket)
 		blocks = make([]*domain.Block, 0, b.Stats().KeyN)
+
 		return b.ForEach(func(k, v []byte) error {
 			var decoded domain.Block
 			if err := json.Unmarshal(v, &decoded); err != nil {
 				return err
 			}
+
 			blocks = append(blocks, &decoded)
+
 			return nil
 		})
 	})
 	if err != nil {
 		return nil, err
 	}
+
 	return blocks, nil
 }
 
@@ -178,24 +200,30 @@ func (r *Repository) ByHeight(h int) (*domain.Block, error) {
 	}
 
 	var block *domain.Block
+
 	err := r.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(blocksBucket)
 		key := make([]byte, 8)
 		binary.BigEndian.PutUint64(key, uint64(h))
+
 		v := b.Get(key)
 		if v == nil {
 			return storage.ErrNotFound
 		}
+
 		var decoded domain.Block
 		if err := json.Unmarshal(v, &decoded); err != nil {
 			return err
 		}
+
 		block = &decoded
+
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+
 	return block, nil
 }
 
@@ -206,14 +234,17 @@ func (r *Repository) ByHash(hash string) (*domain.Block, error) {
 	}
 
 	var block *domain.Block
+
 	err := r.db.View(func(tx *bbolt.Tx) error {
 		hBucket := tx.Bucket(hashesBucket)
+
 		key := hBucket.Get([]byte(hash))
 		if key == nil {
 			return storage.ErrNotFound
 		}
 
 		bBucket := tx.Bucket(blocksBucket)
+
 		v := bBucket.Get(key)
 		if v == nil {
 			return storage.ErrNotFound
@@ -223,12 +254,15 @@ func (r *Repository) ByHash(hash string) (*domain.Block, error) {
 		if err := json.Unmarshal(v, &decoded); err != nil {
 			return err
 		}
+
 		block = &decoded
+
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+
 	return block, nil
 }
 
@@ -239,6 +273,7 @@ func (r *Repository) Range(from, limit int) ([]*domain.Block, error) {
 	}
 
 	var blocks []*domain.Block
+
 	err := r.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(blocksBucket)
 		c := b.Cursor()
@@ -258,13 +293,16 @@ func (r *Repository) Range(from, limit int) ([]*domain.Block, error) {
 			if err := json.Unmarshal(v, &decoded); err != nil {
 				return err
 			}
+
 			blocks = append(blocks, &decoded)
 		}
+
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+
 	return blocks, nil
 }
 
@@ -276,6 +314,7 @@ func (r *Repository) ReplaceFrom(height int, blocks []*domain.Block) error {
 			return ErrNilBlock
 		}
 	}
+
 	if height < 1 || len(blocks) == 0 {
 		return storage.ErrConflict
 	}
@@ -287,27 +326,32 @@ func (r *Repository) ReplaceFrom(height int, blocks []*domain.Block) error {
 		if err := checkSplice(bBucket, height, blocks); err != nil {
 			return err
 		}
+
 		if height < metaInt(tx, prunedBelowKey) {
 			return storage.ErrReorgTooDeep
 		}
+
 		if err := dropSnapshotFrom(tx, height); err != nil {
 			return err
 		}
 
 		// Collect first: bbolt cursors must not see deletes made while iterating.
 		var stale [][]byte
+
 		c := bBucket.Cursor()
 		for k, v := c.Seek(heightKey(height)); k != nil; k, v = c.Next() {
 			var removed domain.Block
 			if err := json.Unmarshal(v, &removed); err != nil {
 				return err
 			}
+
 			stale = append(stale, append([]byte(nil), k...))
 			// Deleting a hash that was never indexed (an empty one) is a no-op.
 			if err := hBucket.Delete([]byte(removed.Hash)); err != nil {
 				return err
 			}
 		}
+
 		for _, key := range stale {
 			if err := bBucket.Delete(key); err != nil {
 				return err
@@ -335,18 +379,22 @@ func checkSplice(bBucket *bbolt.Bucket, height int, blocks []*domain.Block) erro
 	if err := json.Unmarshal(bBucket.Get(heightKey(height-1)), &prev); err != nil {
 		return err
 	}
+
 	prevHash := prev.Hash
 	for i, b := range blocks {
 		if b.Index != height+i || b.PrevHash != prevHash {
 			return storage.ErrConflict
 		}
+
 		prevHash = b.Hash
 	}
+
 	return nil
 }
 
 func heightKey(h int) []byte {
 	key := make([]byte, 8)
 	binary.BigEndian.PutUint64(key, uint64(h))
+
 	return key
 }

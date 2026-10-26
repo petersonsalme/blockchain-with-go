@@ -19,6 +19,7 @@ func New() (*Wallet, error) {
 	if _, err := rand.Read(seed); err != nil {
 		return nil, fmt.Errorf("wallet: generating seed: %w", err)
 	}
+
 	return FromSeed(seed)
 }
 
@@ -27,6 +28,7 @@ func FromSeed(seed []byte) (*Wallet, error) {
 	if len(seed) != ed25519.SeedSize {
 		return nil, fmt.Errorf("wallet: seed must be %d bytes, got %d", ed25519.SeedSize, len(seed))
 	}
+
 	return &Wallet{priv: ed25519.NewKeyFromSeed(seed)}, nil
 }
 
@@ -51,5 +53,6 @@ func Verify(pub ed25519.PublicKey, msg, sig []byte) bool {
 	if len(pub) != ed25519.PublicKeySize {
 		return false
 	}
+
 	return ed25519.Verify(pub, msg, sig)
 }

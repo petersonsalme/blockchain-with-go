@@ -36,6 +36,7 @@ func FuzzBlockJSONRoundTrip(f *testing.F) {
 		if err := json.Unmarshal(encoded, &decoded); err != nil {
 			t.Fatalf("encoded block does not decode: %v", err)
 		}
+
 		if decoded.CalculateHash() != hash {
 			t.Fatalf("round trip changed the hash: %s != %s", decoded.CalculateHash(), hash)
 		}
@@ -44,6 +45,7 @@ func FuzzBlockJSONRoundTrip(f *testing.F) {
 		if err != nil {
 			t.Fatalf("decoded block does not encode: %v", err)
 		}
+
 		if string(reencoded) != string(encoded) {
 			t.Fatalf("encoding is not idempotent:\n%s\n%s", encoded, reencoded)
 		}

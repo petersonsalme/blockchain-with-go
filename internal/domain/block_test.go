@@ -71,6 +71,7 @@ var _ = Describe("Block", func() {
 			legacy := func(b *domain.Block) string {
 				record := fmt.Sprintf("%d%s%s%s%d%d", b.Index, b.Timestamp.UTC().String(), b.MerkleRoot, b.PrevHash, b.Nonce, b.Difficulty)
 				sum := sha256.Sum256([]byte(record))
+
 				return hex.EncodeToString(sum[:])
 			}
 

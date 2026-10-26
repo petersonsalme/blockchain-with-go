@@ -43,6 +43,7 @@ func New(maxTxs int) *Pool {
 	if maxTxs <= 0 {
 		maxTxs = DefaultMaxTxs
 	}
+
 	return &Pool{
 		maxTxs: maxTxs,
 		byID:   make(map[string]struct{}),
@@ -62,6 +63,7 @@ func Size(tx domain.Transaction) int {
 func rank(a, b entry) int {
 	ahi, alo := bits.Mul64(a.fee, uint64(b.size))
 	bhi, blo := bits.Mul64(b.fee, uint64(a.size))
+
 	return cmp.Or(cmp.Compare(bhi, ahi), cmp.Compare(blo, alo), cmp.Compare(a.tx.ID, b.tx.ID))
 }
 
@@ -76,23 +78,29 @@ func (p *Pool) Add(tx domain.Transaction, fee uint64) error {
 	if _, ok := p.byID[tx.ID]; ok {
 		return ErrDuplicate
 	}
+
 	for _, in := range tx.Inputs {
 		if _, ok := p.spent[domain.OutPoint{TxID: in.PrevTxID, Index: in.OutIndex}]; ok {
 			return ErrConflict
 		}
 	}
+
 	i, _ := slices.BinarySearchFunc(p.ordered, e, rank)
 	if len(p.ordered) >= p.maxTxs {
 		if i == len(p.ordered) { // ranks after the last one
 			return ErrFull
 		}
+
 		p.removeAt(len(p.ordered) - 1)
 	}
+
 	p.ordered = slices.Insert(p.ordered, i, e)
+
 	p.byID[tx.ID] = struct{}{}
 	for _, in := range tx.Inputs {
 		p.spent[domain.OutPoint{TxID: in.PrevTxID, Index: in.OutIndex}] = tx.ID
 	}
+
 	return nil
 }
 
@@ -103,13 +111,16 @@ func (p *Pool) Select(budget int) []domain.Transaction {
 	defer p.mu.Unlock()
 
 	var out []domain.Transaction
+
 	for _, e := range p.ordered {
 		if e.size > budget {
 			continue
 		}
+
 		budget -= e.size
 		out = append(out, e.tx)
 	}
+
 	return out
 }
 
@@ -122,6 +133,7 @@ func (p *Pool) Remove(ids ...string) {
 	for _, id := range ids {
 		drop[id] = struct{}{}
 	}
+
 	p.removeWhere(func(e entry) bool {
 		_, ok := drop[e.tx.ID]
 		return ok
@@ -138,15 +150,18 @@ func (p *Pool) Prune(b *domain.Block, view domain.UTXOView) {
 	for _, tx := range b.Transactions {
 		mined[tx.ID] = struct{}{}
 	}
+
 	p.removeWhere(func(e entry) bool {
 		if _, ok := mined[e.tx.ID]; ok {
 			return true
 		}
+
 		for _, in := range e.tx.Inputs {
 			if _, ok := view.Lookup(domain.OutPoint{TxID: in.PrevTxID, Index: in.OutIndex}); !ok {
 				return true
 			}
 		}
+
 		return false
 	})
 }
@@ -155,6 +170,7 @@ func (p *Pool) Prune(b *domain.Block, view domain.UTXOView) {
 func (p *Pool) Len() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
 	return len(p.ordered)
 }
 
@@ -166,8 +182,10 @@ func (p *Pool) removeWhere(drop func(entry) bool) {
 			p.forget(e)
 			continue
 		}
+
 		kept = append(kept, e)
 	}
+
 	clear(p.ordered[len(kept):])
 	p.ordered = kept
 }
@@ -179,6 +197,7 @@ func (p *Pool) removeAt(i int) {
 
 func (p *Pool) forget(e entry) {
 	delete(p.byID, e.tx.ID)
+
 	for _, in := range e.tx.Inputs {
 		delete(p.spent, domain.OutPoint{TxID: in.PrevTxID, Index: in.OutIndex})
 	}

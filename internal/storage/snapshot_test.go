@@ -21,6 +21,7 @@ func TestSnapshotHashVector(t *testing.T) {
 	if got := storage.SnapshotHash(blockHash, set); got != want {
 		t.Fatalf("SnapshotHash = %s, want %s", got, want)
 	}
+
 	const empty = "a0fab1377f49a759b57f63318262ebe89fabfc990e8e93ceac2984561482b9d4"
 	if got := storage.SnapshotHash(blockHash, nil); got != empty {
 		t.Fatalf("SnapshotHash(empty) = %s, want %s", got, empty)
@@ -30,6 +31,7 @@ func TestSnapshotHashVector(t *testing.T) {
 func TestSnapshotHashDependsOnEveryField(t *testing.T) {
 	op := domain.OutPoint{TxID: "t", Index: 1}
 	base := storage.SnapshotHash("h", domain.UTXOSet{op: {Amount: 1, Address: "a"}})
+
 	variants := map[string]string{
 		"block hash": storage.SnapshotHash("g", domain.UTXOSet{op: {Amount: 1, Address: "a"}}),
 		"index":      storage.SnapshotHash("h", domain.UTXOSet{{TxID: "t", Index: 2}: {Amount: 1, Address: "a"}}),

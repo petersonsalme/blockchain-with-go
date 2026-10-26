@@ -122,6 +122,7 @@ const mempoolFullCode = "mempool_full"
 // rejections answer 409; any other error maps as in respondWithMineError.
 func respondWithSubmitError(w http.ResponseWriter, err error) {
 	var code string
+
 	switch {
 	case errors.Is(err, mempool.ErrDuplicate):
 		code = duplicateTxCode
@@ -133,5 +134,6 @@ func respondWithSubmitError(w http.ResponseWriter, err error) {
 		respondWithMineError(w, err)
 		return
 	}
+
 	respondWithJSON(w, http.StatusConflict, errorResponse{Error: err.Error(), Code: code})
 }

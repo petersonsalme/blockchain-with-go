@@ -24,6 +24,7 @@ func leadingZeroBits(t *testing.T, hash string) int {
 	}
 
 	zeros := 0
+
 	for _, octet := range raw {
 		if octet != 0 {
 			return zeros + bits.LeadingZeros8(octet)
@@ -42,6 +43,7 @@ func parallelBlock() *domain.Block {
 		PrevHash:  "prev",
 	}
 	b.Hash = "unchanged"
+
 	return b
 }
 
@@ -204,6 +206,7 @@ func TestWorkersFromEnv(t *testing.T) {
 	}
 
 	t.Setenv(powpkg.WorkersEnvVar, "3")
+
 	if got := powpkg.NewFromEnv().Workers; got != 3 {
 		t.Fatalf("NewFromEnv().Workers = %d, want 3", got)
 	}

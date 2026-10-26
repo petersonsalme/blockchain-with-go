@@ -45,6 +45,7 @@ func (s *countingConsensus) Seal(ctx context.Context, history []*domain.Block, b
 func (s *countingConsensus) Verify(history []*domain.Block, b *domain.Block) error {
 	s.verifies.Add(1)
 	s.verified.Store(b)
+
 	return s.inner.Verify(history, b)
 }
 
@@ -70,6 +71,7 @@ func (f *failingRepo) ByHeight(h int) (*domain.Block, error) {
 	if f.readErr != nil {
 		return nil, f.readErr
 	}
+
 	return f.IndexedRepository.ByHeight(h)
 }
 
@@ -77,6 +79,7 @@ func (f *failingRepo) ByHash(hash string) (*domain.Block, error) {
 	if f.readErr != nil {
 		return nil, f.readErr
 	}
+
 	return f.IndexedRepository.ByHash(hash)
 }
 
@@ -84,30 +87,37 @@ func (f *failingRepo) Range(from, limit int) ([]*domain.Block, error) {
 	if f.readErr != nil {
 		return nil, f.readErr
 	}
+
 	return f.IndexedRepository.Range(from, limit)
 }
 
 func (f *failingRepo) IndexCurrent() (bool, error) {
 	f.currents.Add(1)
+
 	if f.indexErr != nil {
 		return false, f.indexErr
 	}
+
 	return f.IndexedRepository.IndexCurrent()
 }
 
 func (f *failingRepo) Reindex() error {
 	f.reindexes.Add(1)
+
 	if f.reindexErr != nil {
 		return f.reindexErr
 	}
+
 	return f.IndexedRepository.Reindex()
 }
 
 func (f *failingRepo) All() ([]*domain.Block, error) {
 	f.all.Add(1)
+
 	if f.allErr != nil {
 		return nil, f.allErr
 	}
+
 	return f.IndexedRepository.All()
 }
 
@@ -115,6 +125,7 @@ func (f *failingRepo) Commit(b *domain.Block, d domain.UTXODelta) error {
 	if f.commitErr != nil {
 		return f.commitErr
 	}
+
 	return f.IndexedRepository.Commit(b, d)
 }
 
@@ -122,6 +133,7 @@ func (f *failingRepo) TxHeight(txid string) (int, error) {
 	if f.txErr != nil {
 		return 0, f.txErr
 	}
+
 	return f.IndexedRepository.TxHeight(txid)
 }
 
@@ -129,6 +141,7 @@ func (f *failingRepo) TxsByAddress(addr string) ([]string, error) {
 	if f.txErr != nil {
 		return nil, f.txErr
 	}
+
 	return f.IndexedRepository.TxsByAddress(addr)
 }
 
@@ -136,6 +149,7 @@ func (f *failingRepo) Last() (*domain.Block, error) {
 	if f.lastErr != nil {
 		return nil, f.lastErr
 	}
+
 	return f.IndexedRepository.Last()
 }
 
@@ -229,6 +243,7 @@ var _ = Describe("Service", func() {
 
 		It("fails when the reindex fails", func() {
 			boom := errors.New("boom")
+
 			Expect(repo.Append(&domain.Block{Index: 0})).To(Succeed())
 			_, err := NewService(&failingRepo{IndexedRepository: repo, reindexErr: boom}, eng)
 			Expect(err).To(MatchError(boom))
@@ -278,6 +293,7 @@ var _ = Describe("Service", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(byHash).To(BeIdenticalTo(b))
 			}
+
 			page, err := svc.BlocksRange(1, 5)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(page).To(Equal(all[1:]))
@@ -295,6 +311,7 @@ var _ = Describe("Service", func() {
 			failing := &failingRepo{IndexedRepository: repo}
 			bad, err := NewService(failing, eng)
 			Expect(err).NotTo(HaveOccurred())
+
 			failing.readErr, failing.lastErr = boom, boom
 			_, err = bad.BlockByHeight(0)
 			Expect(err).To(MatchError(boom))
@@ -333,6 +350,7 @@ var _ = Describe("Service", func() {
 			failing := &failingRepo{IndexedRepository: repo}
 			bad, err := NewService(failing, eng)
 			Expect(err).NotTo(HaveOccurred())
+
 			failing.txErr = boom
 			_, _, _, err = bad.Transaction("any")
 			Expect(err).To(MatchError(boom))
@@ -344,6 +362,7 @@ var _ = Describe("Service", func() {
 			balance, utxos := svc.Balance(ownerAddr)
 			Expect(balance).To(Equal(uint64(110))) // 12 * 10 - 10 spent
 			Expect(utxos).To(HaveLen(11))
+
 			for i := 1; i < len(utxos); i++ {
 				prev, curr := utxos[i-1], utxos[i]
 				if prev.TxID == curr.TxID {
@@ -383,6 +402,7 @@ var _ = Describe("Service", func() {
 			rBalFinal, rUTXOsFinal := svc.Balance(recipAddr)
 			Expect(rBalFinal).To(Equal(uint64(3 + 4 + 9)))
 			Expect(rUTXOsFinal).To(HaveLen(3))
+
 			for i := 1; i < len(rUTXOsFinal); i++ {
 				prev, curr := rUTXOsFinal[i-1], rUTXOsFinal[i]
 				if prev.TxID == curr.TxID {
@@ -440,6 +460,7 @@ var _ = Describe("Service", func() {
 			}))
 			_, err := svc.Mine(context.Background(), f.tx())
 			Expect(err).To(MatchError(ErrInvalidBlock))
+
 			all, _ := repo.All()
 			Expect(all).To(HaveLen(1))
 		})
@@ -448,20 +469,25 @@ var _ = Describe("Service", func() {
 			svc, f := funded(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 				b, err := GenerateBlockWithContext(ctx, c, history, txs)
 				b.Timestamp = history[len(history)-1].Timestamp.Add(-time.Second)
+
 				return b, err
 			}))
 			_, err := svc.Mine(context.Background(), f.tx())
+
 			var ve *domain.ValidationError
 			Expect(errors.As(err, &ve)).To(BeTrue())
 			Expect(ve.Code).To(Equal("timestamp_before_parent"))
+
 			all, _ := repo.All()
 			Expect(all).To(HaveLen(1))
 		})
 
 		It("propagates a ValidationError from the size pre-check", func() {
 			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "100")
+
 			svc, f := funded(repo, eng)
 			_, err := svc.Mine(context.Background(), f.tx())
+
 			var ve *domain.ValidationError
 			Expect(errors.As(err, &ve)).To(BeTrue())
 			Expect(ve.Code).To(Equal("block_too_large"))
@@ -474,6 +500,7 @@ var _ = Describe("Service", func() {
 				}))
 				_, err := svc.Mine(context.Background(), f.tx())
 				Expect(errors.Is(err, e)).To(BeTrue())
+
 				all, _ := repo.All()
 				Expect(all).To(HaveLen(1))
 			},
@@ -494,10 +521,12 @@ var _ = Describe("Service", func() {
 		DescribeTable("releases the write lock when Mine fails",
 			func(failFirst func(context.Context, consensus.Consensus, []*domain.Block, []domain.Transaction) (*domain.Block, error), recoverPanic bool) {
 				var calls atomic.Int32
+
 				svc, f := funded(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 					if calls.Add(1) == 1 {
 						return failFirst(ctx, c, history, txs)
 					}
+
 					return GenerateBlockWithContext(ctx, c, history, txs)
 				}))
 
@@ -505,13 +534,16 @@ var _ = Describe("Service", func() {
 					if recoverPanic {
 						defer func() { Expect(recover()).NotTo(BeNil()) }()
 					}
+
 					_, err := svc.Mine(context.Background(), f.tx())
+
 					Expect(recoverPanic).To(BeFalse())
 					Expect(err).To(HaveOccurred())
 				}()
 
 				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 				defer cancel()
+
 				blk, err := svc.Mine(ctx, f.tx())
 				Expect(err).NotTo(HaveOccurred())
 				Expect(blk.Index).To(Equal(1))
@@ -529,6 +561,7 @@ var _ = Describe("Service", func() {
 
 		It("returns the context error without generating or appending when ctx is already done and the lock is free", func() {
 			var called atomic.Bool
+
 			svc, f := funded(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 				called.Store(true)
 				return GenerateBlockWithContext(ctx, c, history, txs)
@@ -539,6 +572,7 @@ var _ = Describe("Service", func() {
 			Expect(blk).To(BeNil())
 			Expect(errors.Is(err, context.Canceled)).To(BeTrue())
 			Expect(called.Load()).To(BeFalse())
+
 			all, _ := repo.All()
 			Expect(all).To(HaveLen(1))
 		})
@@ -560,6 +594,7 @@ var _ = Describe("Service", func() {
 
 			ab, _ := a.Blocks()
 			bb, _ := b.Blocks()
+
 			Expect(ab).To(HaveLen(2))
 			Expect(bb).To(HaveLen(1))
 		})
@@ -567,9 +602,11 @@ var _ = Describe("Service", func() {
 		It("lets exactly one of two services mining on the same tip append, the other gets ErrConflict", func() {
 			var read sync.WaitGroup
 			read.Add(2)
+
 			barrier := func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 				read.Done()
 				read.Wait()
+
 				return GenerateBlockWithContext(ctx, c, history, txs)
 			}
 			a, f := funded(repo, eng, WithGenerator(barrier))
@@ -580,23 +617,30 @@ var _ = Describe("Service", func() {
 
 			errs := make(chan error, 2)
 			txs := [][]domain.Transaction{f.tx(), f.tx()}
+
 			for i, svc := range []*Service{a, b} {
 				i, svc := i, svc
+
 				go func() {
 					defer GinkgoRecover()
+
 					_, err := svc.Mine(context.Background(), txs[i])
 					errs <- err
 				}()
 			}
+
 			results := []error{<-errs, <-errs}
 
 			failed := 0
+
 			for _, e := range results {
 				if e != nil {
 					failed++
+
 					Expect(errors.Is(e, storage.ErrConflict)).To(BeTrue())
 				}
 			}
+
 			Expect(failed).To(Equal(1))
 
 			all, _ := repo.All()
@@ -606,22 +650,30 @@ var _ = Describe("Service", func() {
 
 		It("serializes concurrent Mine calls into a valid chain", func() {
 			svc, f := funded(repo, eng)
+
 			const n = 10
+
 			var wg sync.WaitGroup
+
 			for i := 0; i < n; i++ {
 				txs := f.tx()
+
 				wg.Add(1)
+
 				go func() {
 					defer GinkgoRecover()
 					defer wg.Done()
+
 					_, err := svc.Mine(context.Background(), txs)
 					Expect(err).NotTo(HaveOccurred())
 				}()
 			}
+
 			wg.Wait()
 
 			all, _ := repo.All()
 			Expect(all).To(HaveLen(n + 1))
+
 			for i := 1; i < len(all); i++ {
 				Expect(all[i].Index).To(Equal(i))
 				Expect(eng.Verify(all[:i], all[i])).To(Succeed())
@@ -642,19 +694,25 @@ var _ = Describe("Service", func() {
 				entered = make(chan struct{})
 				release = make(chan struct{})
 				holderCh = make(chan error, 1)
+
 				calls.Store(0)
+
 				svc, f = funded(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 					if calls.Add(1) == 1 {
 						close(entered)
 						<-release
 					}
+
 					return GenerateBlockWithContext(ctx, c, history, txs)
 				}))
+
 				go func() {
 					defer GinkgoRecover()
+
 					_, err := svc.Mine(context.Background(), f.tx())
 					holderCh <- err
 				}()
+
 				Eventually(entered).Should(BeClosed())
 			})
 
@@ -664,6 +722,7 @@ var _ = Describe("Service", func() {
 				default:
 					close(release)
 				}
+
 				Eventually(holderCh).Should(Receive())
 			})
 
@@ -682,23 +741,31 @@ var _ = Describe("Service", func() {
 
 			It("does not block Blocks", func() {
 				done := make(chan []*domain.Block, 1)
+
 				go func() {
 					defer GinkgoRecover()
+
 					bs, err := svc.Blocks()
 					Expect(err).NotTo(HaveOccurred())
+
 					done <- bs
 				}()
+
 				Eventually(done, time.Second).Should(Receive(HaveLen(1)))
 			})
 
 			It("does not block Transaction or Balance", func() {
 				done := make(chan struct{}, 1)
+
 				go func() {
 					defer GinkgoRecover()
+
 					_, _, _, _ = svc.Transaction("any")
 					_, _ = svc.Balance("any")
+
 					close(done)
 				}()
+
 				Eventually(done, time.Second).Should(BeClosed())
 			})
 		})

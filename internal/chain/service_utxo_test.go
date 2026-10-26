@@ -38,6 +38,7 @@ var _ = Describe("Service UTXO rules", func() {
 		be := be
 		Describe(be.name, func() {
 			BeforeEach(func() { newRepo = be.open })
+
 			var (
 				repo  storage.IndexedRepository
 				eng   *pow.ProofOfWork
@@ -52,14 +53,18 @@ var _ = Describe("Service UTXO rules", func() {
 			chainLen := func() int {
 				all, err := repo.All()
 				Expect(err).NotTo(HaveOccurred())
+
 				return len(all)
 			}
 			// expectUntouched runs fn and asserts that the chain and the UTXO set did not change.
 			expectUntouched := func(fn func()) {
 				before, err := repo.All()
 				Expect(err).NotTo(HaveOccurred())
+
 				snapshot := utxoSnapshot(repo)
+
 				fn()
+
 				after, err := repo.All()
 				Expect(err).NotTo(HaveOccurred())
 				Expect(after).To(Equal(before))
@@ -71,6 +76,7 @@ var _ = Describe("Service UTXO rules", func() {
 
 			BeforeEach(func() {
 				var err error
+
 				repo = newRepo()
 				eng = pow.NewProofOfWork(1)
 				svc, f = funded(repo, eng)
@@ -90,6 +96,7 @@ var _ = Describe("Service UTXO rules", func() {
 					Expect(alloc.Outputs).To(HaveLen(fundedOutputs))
 					Expect(alloc.Timestamp).To(Equal(genesis.Timestamp))
 					Expect(alloc.ID).To(Equal(alloc.CalculateHash()))
+
 					for i, op := range f.ops {
 						Expect(op).To(Equal(domain.OutPoint{TxID: alloc.CalculateHash(), Index: uint32(i)}))
 						got, found := repo.Lookup(op)
@@ -102,6 +109,7 @@ var _ = Describe("Service UTXO rules", func() {
 					emptyRepo := newRepo()
 					_, err := NewService(emptyRepo, eng)
 					Expect(err).NotTo(HaveOccurred())
+
 					all, _ := emptyRepo.All()
 					Expect(all[0].Transactions).To(BeEmpty())
 					Expect(utxoSnapshot(emptyRepo)).To(BeEmpty())
@@ -111,6 +119,7 @@ var _ = Describe("Service UTXO rules", func() {
 					emptyRepo := newRepo()
 					_, err := NewService(emptyRepo, eng, WithGenesisAllocations([]domain.TxOut{}))
 					Expect(err).NotTo(HaveOccurred())
+
 					all, _ := emptyRepo.All()
 					Expect(all[0].Transactions).To(BeEmpty())
 				})
@@ -119,6 +128,7 @@ var _ = Describe("Service UTXO rules", func() {
 					again, err := NewService(repo, eng, WithGenesisAllocations([]domain.TxOut{{Amount: 99, Address: other.Address()}}))
 					Expect(err).NotTo(HaveOccurred())
 					Expect(chainLen()).To(Equal(1))
+
 					blocks, _ := again.Blocks()
 					Expect(blocks[0].Transactions[0].Outputs).To(HaveLen(fundedOutputs))
 				})
@@ -128,6 +138,7 @@ var _ = Describe("Service UTXO rules", func() {
 						bad := newRepo()
 						_, err := NewService(bad, eng, WithGenesisAllocations(allocs))
 						Expect(err).To(MatchError(domain.ErrInvalidOutput))
+
 						_, lastErr := bad.Last()
 						Expect(lastErr).To(MatchError(storage.ErrEmpty))
 					},
@@ -221,18 +232,22 @@ var _ = Describe("Service UTXO rules", func() {
 						if err != nil {
 							return nil, err
 						}
+
 						b.MerkleRoot = wrong
 						b.Hash = b.CalculateHash()
+
 						return b, nil
 					}))
 					Expect(err).NotTo(HaveOccurred())
 
 					before, err := repo.All()
 					Expect(err).NotTo(HaveOccurred())
+
 					snapshot := utxoSnapshot(repo)
 
 					blk, err := bad.Mine(context.Background(), f.tx())
 					Expect(blk).To(BeNil())
+
 					var ve *domain.ValidationError
 					Expect(errors.As(err, &ve)).To(BeTrue())
 					Expect(ve.Code).To(Equal(domain.CodeMerkleRootMismatch))
@@ -273,6 +288,7 @@ var _ = Describe("Service UTXO rules", func() {
 				It("rejects a chained spend signed by the wrong key", func() {
 					first := f.tx()[0]
 					second := spend(other, domain.OutPoint{TxID: first.CalculateHash()}, 5)
+
 					expectUntouched(func() {
 						_, err := mine(first, second)
 						Expect(err).To(MatchError(domain.ErrInputOwnerMismatch))
@@ -282,6 +298,7 @@ var _ = Describe("Service UTXO rules", func() {
 				It("rejects two transactions spending the same outpoint in one request", func() {
 					a := spend(f.owner, f.ops[0], 9)
 					b := spend(f.owner, f.ops[0], 8)
+
 					expectUntouched(func() {
 						_, err := mine(a, b)
 						Expect(err).To(MatchError(domain.ErrDoubleSpend))
@@ -310,6 +327,7 @@ var _ = Describe("Service UTXO rules", func() {
 				It("reports a missing input before checking its signature", func() {
 					tx := spend(other, domain.OutPoint{TxID: "unknown"}, 1)
 					tx.Inputs[0].Signature = ""
+
 					expectUntouched(func() {
 						_, err := mine(tx)
 						Expect(err).To(MatchError(domain.ErrInputMissingOrSpent))
@@ -319,6 +337,7 @@ var _ = Describe("Service UTXO rules", func() {
 				DescribeTable("rejects an invalid transaction without changing the chain or the set",
 					func(build func(f *funding, other *wallet.Wallet) domain.Transaction, want error) {
 						tx := build(f, other)
+
 						expectUntouched(func() {
 							_, err := mine(tx)
 							Expect(err).To(MatchError(want))
@@ -339,27 +358,32 @@ var _ = Describe("Service UTXO rules", func() {
 					Entry("no inputs", func(f *funding, _ *wallet.Wallet) domain.Transaction {
 						tx := spend(f.owner, f.ops[0], 1)
 						tx.Inputs = nil
+
 						return tx
 					}, domain.ErrMissingInputs),
 					Entry("unsigned", func(f *funding, _ *wallet.Wallet) domain.Transaction {
 						tx := spend(f.owner, f.ops[0], 1)
 						tx.Inputs[0].Signature = ""
+
 						return tx
 					}, domain.ErrMissingSignature),
 					Entry("bad signature", func(f *funding, _ *wallet.Wallet) domain.Transaction {
 						tx := spend(f.owner, f.ops[0], 1)
 						tx.Outputs[0].Amount = 2
+
 						return tx
 					}, domain.ErrInvalidSignature),
 					Entry("bad public key", func(f *funding, _ *wallet.Wallet) domain.Transaction {
 						tx := spend(f.owner, f.ops[0], 1)
 						tx.Inputs[0].PublicKey = "abcd"
+
 						return tx
 					}, domain.ErrInvalidPublicKey),
 					Entry("signature on the second input missing", func(f *funding, _ *wallet.Wallet) domain.Transaction {
 						tx := spend(f.owner, f.ops[0], 1)
 						tx.Inputs = append(tx.Inputs, domain.TxIn{PrevTxID: f.ops[1].TxID, OutIndex: f.ops[1].Index})
 						Expect(domain.SignInput(&tx, 0, f.owner)).To(Succeed())
+
 						return tx
 					}, domain.ErrMissingSignature),
 				)
@@ -385,6 +409,7 @@ var _ = Describe("Service UTXO rules", func() {
 
 					_, err := rej.Mine(context.Background(), rf.tx())
 					Expect(err).To(MatchError(ErrInvalidBlock))
+
 					all, _ := rejRepo.All()
 					Expect(all).To(HaveLen(1))
 					Expect(utxoSnapshot(rejRepo)).To(Equal(before))
@@ -408,7 +433,9 @@ var _ = Describe("Service UTXO rules", func() {
 					boom := errors.New("boom")
 					memRepo := newRepo()
 					failing := &failingWrites{IndexedRepository: memRepo}
+
 					var genCalls atomic.Int32
+
 					s, ff := funded(failing, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, history []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 						genCalls.Add(1)
 						return GenerateBlockWithContext(ctx, c, history, txs)
@@ -423,6 +450,7 @@ var _ = Describe("Service UTXO rules", func() {
 					all, err := memRepo.All()
 					Expect(err).NotTo(HaveOccurred())
 					Expect(all).To(HaveLen(1))
+
 					callsBefore := genCalls.Load()
 
 					// Every subsequent Mine returns ErrStateDiverged without calling Generator or Append
@@ -445,22 +473,29 @@ var _ = Describe("Service UTXO rules", func() {
 						_, err := mine(f.tx()[0])
 						Expect(err).NotTo(HaveOccurred())
 					}
+
 					expectRebuildMatches()
 				})
 
 				It("lets exactly one of 50 concurrent requests spend the same outpoint", func() {
 					const n = 50
-					var wg sync.WaitGroup
-					var ok, spent atomic.Int32
+
+					var (
+						wg        sync.WaitGroup
+						ok, spent atomic.Int32
+					)
+
 					for i := 0; i < n; i++ {
 						tx := spend(f.owner, f.ops[0], uint64(1+i%9))
 						tx.Timestamp = tx.Timestamp.Add(time.Duration(i) * time.Nanosecond)
 						tx.ID = tx.CalculateHash()
 						Expect(domain.SignInput(&tx, 0, f.owner)).To(Succeed())
 						wg.Add(1)
+
 						go func() {
 							defer GinkgoRecover()
 							defer wg.Done()
+
 							_, err := mine(tx)
 							switch {
 							case err == nil:
@@ -472,6 +507,7 @@ var _ = Describe("Service UTXO rules", func() {
 							}
 						}()
 					}
+
 					wg.Wait()
 
 					Expect(ok.Load()).To(Equal(int32(1)))

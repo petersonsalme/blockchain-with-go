@@ -23,6 +23,7 @@ func ParseRateLimit(raw string) int {
 	if err != nil || v < 1 {
 		return 0
 	}
+
 	return v
 }
 
@@ -43,6 +44,7 @@ func newRateLimiter(rateLimit int, now func() time.Time) *rateLimiter {
 	if now == nil {
 		now = time.Now
 	}
+
 	return &rateLimiter{
 		rateLimit: rateLimit,
 		now:       now,
@@ -69,6 +71,7 @@ func (l *rateLimiter) allow(remoteAddr string) (bool, int) {
 				delete(l.buckets, k)
 			}
 		}
+
 		l.lastSweep = now
 	}
 
@@ -78,6 +81,7 @@ func (l *rateLimiter) allow(remoteAddr string) (bool, int) {
 			tokens:    maxTokens - 1.0,
 			lastCheck: now,
 		}
+
 		return true, 0
 	}
 
@@ -90,10 +94,12 @@ func (l *rateLimiter) allow(remoteAddr string) (bool, int) {
 	if b.tokens < 1.0 {
 		missing := 1.0 - b.tokens
 		retryAfter := int(math.Ceil(missing / refillRate))
+
 		return false, retryAfter
 	}
 
 	b.tokens -= 1.0
+
 	return true, 0
 }
 
@@ -104,6 +110,7 @@ func (l *rateLimiter) middleware(next http.Handler) http.Handler {
 			respondRateLimited(w, retryAfter)
 			return
 		}
+
 		next.ServeHTTP(w, r)
 	})
 }

@@ -35,6 +35,7 @@ func merkleLeaf(tx *Transaction) [sha256.Size]byte {
 			data = append(data, s...)
 		}
 	}
+
 	return sha256.Sum256(data)
 }
 
@@ -42,6 +43,7 @@ func merkleNode(left, right [sha256.Size]byte) [sha256.Size]byte {
 	data := []byte{merkleNodePrefix}
 	data = append(data, left[:]...)
 	data = append(data, right[:]...)
+
 	return sha256.Sum256(data)
 }
 
@@ -58,9 +60,11 @@ func merkleParents(level [][sha256.Size]byte) [][sha256.Size]byte {
 	for i := 0; i+1 < len(level); i += 2 {
 		next = append(next, merkleNode(level[i], level[i+1]))
 	}
+
 	if len(level)%2 == 1 {
 		next = append(next, level[len(level)-1])
 	}
+
 	return next
 }
 
@@ -69,6 +73,7 @@ func merkleLevels(level [][sha256.Size]byte) [][][sha256.Size]byte {
 	if len(level) == 1 {
 		return [][][sha256.Size]byte{level}
 	}
+
 	return append([][][sha256.Size]byte{level}, merkleLevels(merkleParents(level))...)
 }
 
@@ -77,6 +82,7 @@ func merkleLeaves(txs []Transaction) [][sha256.Size]byte {
 	for i := range txs {
 		leaves[i] = merkleLeaf(&txs[i])
 	}
+
 	return leaves
 }
 
@@ -88,7 +94,9 @@ func MerkleRoot(txs []Transaction) string {
 		empty := sha256.Sum256(nil)
 		return hex.EncodeToString(empty[:])
 	}
+
 	levels := merkleLevels(merkleLeaves(txs))
+
 	return hex.EncodeToString(levels[len(levels)-1][0][:])
 }
 
@@ -97,7 +105,9 @@ func BuildMerkleProof(txs []Transaction, index int) (MerkleProof, error) {
 	if index < 0 || index >= len(txs) {
 		return MerkleProof{}, ErrMerkleIndex
 	}
+
 	var steps []MerkleStep
+
 	for _, level := range merkleLevels(merkleLeaves(txs)) {
 		if sibling := index ^ 1; sibling < len(level) {
 			steps = append(steps, MerkleStep{
@@ -105,18 +115,23 @@ func BuildMerkleProof(txs []Transaction, index int) (MerkleProof, error) {
 				Left: index%2 == 1,
 			})
 		}
+
 		index /= 2
 	}
+
 	return MerkleProof{Steps: steps}, nil
 }
 
 func decodeMerkleHash(s string) ([sha256.Size]byte, bool) {
 	var out [sha256.Size]byte
+
 	raw, err := hex.DecodeString(s)
 	if err != nil || len(raw) != sha256.Size {
 		return out, false
 	}
+
 	copy(out[:], raw)
+
 	return out, true
 }
 
@@ -126,20 +141,24 @@ func VerifyMerkleProof(leafHash string, steps []MerkleStep, root string) bool {
 	if !ok {
 		return false
 	}
+
 	want, ok := decodeMerkleHash(root)
 	if !ok {
 		return false
 	}
+
 	for _, s := range steps {
 		sibling, ok := decodeMerkleHash(s.Hash)
 		if !ok {
 			return false
 		}
+
 		if s.Left {
 			cur = merkleNode(sibling, cur)
 		} else {
 			cur = merkleNode(cur, sibling)
 		}
 	}
+
 	return cur == want
 }

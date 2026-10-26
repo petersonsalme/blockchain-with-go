@@ -18,6 +18,7 @@ var seq uint32
 
 func contractTx(op *domain.ContractOp) domain.Transaction {
 	seq++
+
 	return domain.Transaction{
 		Inputs:    []domain.TxIn{{PrevTxID: "aa", OutIndex: seq}},
 		Outputs:   []domain.TxOut{{Amount: 1, Address: "bob"}},
@@ -38,19 +39,23 @@ func blockOf(txs ...domain.Transaction) *domain.Block { return &domain.Block{Tra
 
 func cloneState(s vm.State) vm.State {
 	out := vm.State{}
+
 	for id, c := range s {
 		st := map[uint64]uint64{}
 		for k, v := range c.Storage {
 			st[k] = v
 		}
+
 		out[id] = vm.Contract{Code: append([]byte(nil), c.Code...), Storage: st}
 	}
+
 	return out
 }
 
 func counterOf(s vm.State, id string) uint64 {
 	c, ok := s.Contract(id)
 	Expect(ok).To(BeTrue())
+
 	return c.Storage[0]
 }
 
@@ -78,6 +83,7 @@ var _ = Describe("contract state", func() {
 			tx.ID = "stale"
 			delta, err := vm.BlockDelta(vm.State{}, blockOf(tx))
 			Expect(err).NotTo(HaveOccurred())
+
 			var s vm.State
 			s.Apply(delta)
 			_, ok := s.Contract(tx.CalculateHash())
@@ -129,6 +135,7 @@ var _ = Describe("contract state", func() {
 			id := dep.CalculateHash()
 			s, err := vm.BuildState([]*domain.Block{blockOf(dep, callTx(id, 100, 42, 7))})
 			Expect(err).NotTo(HaveOccurred())
+
 			c, _ := s.Contract(id)
 			Expect(c.Storage).To(Equal(map[uint64]uint64{7: 42}))
 
@@ -171,6 +178,7 @@ var _ = Describe("contract state", func() {
 				dep := deployTx(vm.CounterCode)
 				s, err := vm.BuildState([]*domain.Block{blockOf(dep)})
 				Expect(err).NotTo(HaveOccurred())
+
 				return s, blockOf(dep)
 			}, vm.ErrContractExists),
 			Entry("deploy of the same transaction twice in a block", func() (vm.State, *domain.Block) {
@@ -189,6 +197,7 @@ var _ = Describe("contract state", func() {
 				id := dep.CalculateHash()
 				s, err := vm.BuildState([]*domain.Block{blockOf(dep)})
 				Expect(err).NotTo(HaveOccurred())
+
 				return s, blockOf(callTx(id, 29), callTx(id, 28))
 			}, vm.ErrOutOfGas),
 		)
@@ -198,6 +207,7 @@ var _ = Describe("contract state", func() {
 		It("is empty for no blocks", func() {
 			s, err := vm.BuildState(nil)
 			Expect(err).NotTo(HaveOccurred())
+
 			_, ok := s.Contract("x")
 			Expect(ok).To(BeFalse())
 		})

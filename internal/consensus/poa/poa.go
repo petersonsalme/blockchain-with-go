@@ -34,6 +34,7 @@ func New(validators []ed25519.PublicKey, signer *wallet.Wallet) (*ProofOfAuthori
 		if len(v) != ed25519.PublicKeySize {
 			return nil, errors.New("poa: validator key has invalid size")
 		}
+
 		set[i] = append(ed25519.PublicKey(nil), v...)
 	}
 
@@ -55,6 +56,7 @@ func (p *ProofOfAuthority) isValidator(key ed25519.PublicKey) bool {
 			return true
 		}
 	}
+
 	return false
 }
 

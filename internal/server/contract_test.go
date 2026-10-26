@@ -42,12 +42,14 @@ func loadSpec(path string) (*openapi3.T, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return doc, doc.Validate(context.Background())
 }
 
 // specPairs lists every declared (operation, status) pair as "METHOD /path STATUS".
 func specPairs(doc *openapi3.T) []string {
 	var pairs []string
+
 	for path, item := range doc.Paths.Map() {
 		for method, op := range item.Operations() {
 			for status := range op.Responses.Map() {
@@ -55,7 +57,9 @@ func specPairs(doc *openapi3.T) []string {
 			}
 		}
 	}
+
 	sort.Strings(pairs)
+
 	return pairs
 }
 
@@ -92,11 +96,13 @@ func contractCases() []contractCase {
 		Expect(err).NotTo(HaveOccurred())
 		srv, err := NewServer(svc, cfg)
 		Expect(err).NotTo(HaveOccurred())
+
 		return srv.Handler(), funds
 	}
 	broken := func() http.Handler {
 		srv, err := NewServer(brokenChain{}, Config{})
 		Expect(err).NotTo(HaveOccurred())
+
 		return srv.Handler()
 	}
 	plain := func(target string) func() (http.Handler, string, string) {
@@ -112,6 +118,7 @@ func contractCases() []contractCase {
 		return func() (http.Handler, string, string) {
 			srv, err := NewServer(prunedChain{}, Config{})
 			Expect(err).NotTo(HaveOccurred())
+
 			return srv.Handler(), target, ""
 		}
 	}
@@ -119,6 +126,7 @@ func contractCases() []contractCase {
 		return func() (http.Handler, string, string) {
 			now := time.Unix(fixedNow, 0)
 			h, _ := real(Config{RateLimit: 1, Now: func() time.Time { return now }})
+
 			return h, target, ""
 		}
 	}
@@ -127,6 +135,7 @@ func contractCases() []contractCase {
 			h, funds := real(Config{}, chain.WithGenerator(func(context.Context, consensus.Consensus, []*domain.Block, []domain.Transaction) (*domain.Block, error) {
 				return nil, err
 			}))
+
 			return h, "/", funds.payload()
 		}
 	}
@@ -135,6 +144,7 @@ func contractCases() []contractCase {
 			h, _ := real(Config{}, chain.WithGenerator(func(context.Context, consensus.Consensus, []*domain.Block, []domain.Transaction) (*domain.Block, error) {
 				return block, err
 			}))
+
 			return h, "/mine", ""
 		}
 	}
@@ -177,6 +187,7 @@ func contractCases() []contractCase {
 		{method: "POST", route: "/", status: 429, serve: func() (http.Handler, string, string) {
 			now := time.Unix(fixedNow, 0)
 			h, funds := real(Config{RateLimit: 1, Now: func() time.Time { return now }})
+
 			return h, "/", funds.payload()
 		}, warmup: 1},
 		{method: "POST", route: "/", status: 500, serve: generator(errors.New("boom"))},
@@ -222,6 +233,7 @@ func contractCases() []contractCase {
 		{method: "GET", route: "/contracts/{id}", status: 200, serve: func() (http.Handler, string, string) {
 			h, funds := real(Config{})
 			id := deployCounter(h, funds)
+
 			return h, "/contracts/" + id, ""
 		}},
 		{method: "GET", route: "/contracts/{id}", status: 400, serve: plain("/contracts/xyz")},
@@ -264,6 +276,7 @@ func contractCases() []contractCase {
 		{method: "POST", route: "/tx", status: 429, serve: func() (http.Handler, string, string) {
 			now := time.Unix(fixedNow, 0)
 			h, funds := real(Config{RateLimit: 1, Now: func() time.Time { return now }})
+
 			return h, "/tx", txBody(funds.tx(newWallet().Address(), 42))
 		}, warmup: 1},
 		{method: "POST", route: "/tx", status: 500, serve: func() (http.Handler, string, string) {
@@ -301,6 +314,7 @@ func contractCases() []contractCase {
 				peers: []p2p.PeerInfo{{NodeID: idB, Addr: "http://10.0.0.2:8080", Height: 7, TipHash: zeroHash, Inbound: true, LastSeen: time.Unix(fixedNow, 0)}},
 				addrs: []string{"http://10.0.0.2:8080"},
 			}})()
+
 			return h, "/p2p/peers", ""
 		}},
 		{method: "GET", route: "/p2p/peers", status: 404, serve: func() (http.Handler, string, string) {
@@ -312,6 +326,7 @@ func contractCases() []contractCase {
 			return h, "/p2p/peers", ""
 		}, warmup: 1},
 	}
+
 	return cases
 }
 
@@ -323,6 +338,7 @@ var _ = Describe("OpenAPI contract", func() {
 
 	BeforeEach(func() {
 		var err error
+
 		doc, err = loadSpec(specPath)
 		Expect(err).NotTo(HaveOccurred())
 		router, err = legacy.NewRouter(doc)
@@ -350,16 +366,20 @@ var _ = Describe("OpenAPI contract", func() {
 		It("declares exactly the routes registered in Server.Handler()", func() {
 			srv, err := NewServer(brokenChain{}, Config{})
 			Expect(err).NotTo(HaveOccurred())
+
 			var routes []string
 			for _, rt := range srv.routes() {
 				routes = append(routes, strings.Replace(rt.pattern, "{$}", "", 1))
 			}
+
 			var declared []string
+
 			for path, item := range doc.Paths.Map() {
 				for method := range item.Operations() {
 					declared = append(declared, method+" "+path)
 				}
 			}
+
 			Expect(declared).To(ConsistOf(routes))
 		})
 
@@ -374,6 +394,7 @@ var _ = Describe("OpenAPI contract", func() {
 			for _, c := range contractCases() {
 				have = append(have, c.pair())
 			}
+
 			Expect(have).To(ConsistOf(specPairs(doc)))
 		})
 	})
@@ -388,13 +409,17 @@ var _ = Describe("OpenAPI contract", func() {
 					if c.cancelAfter > 0 {
 						ctx, cancel := context.WithTimeout(req.Context(), c.cancelAfter)
 						DeferCleanup(cancel)
+
 						req = req.WithContext(ctx)
 					}
+
 					if body != "" {
 						req.Header.Set("Content-Type", "application/json")
 					}
+
 					return req
 				}
+
 				for range c.warmup { // warmups only spend rate-limit tokens: a cancelled context keeps a stream from holding them open
 					ctx, cancel := context.WithCancel(context.Background())
 					cancel()
@@ -421,15 +446,19 @@ var _ = Describe("OpenAPI contract", func() {
 
 				result := rec.Result()
 				defer func() { _ = result.Body.Close() }()
+
 				respBody, err := io.ReadAll(result.Body)
 				Expect(err).NotTo(HaveOccurred())
+
 				wantType := "application/json"
 				if c.route == "/metrics" && c.status == 200 {
 					wantType = metricsContentType
 				}
+
 				if c.route == "/events" && c.status == 200 {
 					wantType = "text/event-stream"
 				}
+
 				Expect(result.Header.Get("Content-Type")).To(Equal(wantType))
 				Expect(openapi3filter.ValidateResponse(context.Background(), &openapi3filter.ResponseValidationInput{
 					RequestValidationInput: input,
@@ -454,7 +483,9 @@ var _ = Describe("OpenAPI contract", func() {
 		connect := func(h http.Handler) {
 			srv = httptest.NewServer(h)
 			DeferCleanup(srv.Close)
+
 			var err error
+
 			api, err = client.NewClientWithResponses(srv.URL)
 			Expect(err).NotTo(HaveOccurred())
 		}
@@ -487,6 +518,7 @@ var _ = Describe("OpenAPI contract", func() {
 			bad, err := NewServer(brokenChain{}, Config{})
 			Expect(err).NotTo(HaveOccurred())
 			connect(bad.Handler())
+
 			resp, err := api.GetHealthWithResponse(ctx)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(resp.JSON503).NotTo(BeNil())
@@ -598,10 +630,12 @@ func toClientTx(tx domain.Transaction) client.Transaction {
 	for i, in := range tx.Inputs {
 		ins[i] = client.TxIn{PrevTxID: in.PrevTxID, OutIndex: in.OutIndex, PublicKey: in.PublicKey, Signature: in.Signature}
 	}
+
 	outs := make([]client.TxOut, len(tx.Outputs))
 	for i, out := range tx.Outputs {
 		outs[i] = client.TxOut{Amount: out.Amount, Address: out.Address}
 	}
+
 	return client.Transaction{ID: &tx.ID, Inputs: &ins, Outputs: outs, Timestamp: tx.Timestamp}
 }
 
@@ -617,6 +651,7 @@ func toContractClientTx(tx domain.Transaction) client.Transaction {
 	if c := tx.Contract; c != nil {
 		req.Contract = &client.ContractOp{Kind: client.ContractOpKind(c.Kind), Code: &c.Code, Target: &c.Target, Args: &c.Args, GasLimit: c.GasLimit}
 	}
+
 	return req
 }
 
@@ -627,10 +662,12 @@ func deployCounter(h http.Handler, funds *bank) string {
 	Expect(domain.SignInput(&tx, 0, funds.owner)).To(Succeed())
 	body, err := json.Marshal(toContractClientTx(tx))
 	Expect(err).NotTo(HaveOccurred())
+
 	for _, step := range []struct{ path, body string }{{"/tx", string(body)}, {"/mine", ""}} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, step.path, strings.NewReader(step.body)))
 		Expect(rec.Code).To(BeNumerically("<", 300), rec.Body.String())
 	}
+
 	return tx.ID
 }

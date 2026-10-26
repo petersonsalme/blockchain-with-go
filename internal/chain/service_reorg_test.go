@@ -56,6 +56,7 @@ var engineCases = []engineCase{
 			Expect(err).NotTo(HaveOccurred())
 			c, err := poa.New([]ed25519.PublicKey{w.PublicKey()}, w)
 			Expect(err).NotTo(HaveOccurred())
+
 			return c
 		},
 		breakSeal:       func(b *domain.Block) { b.Signature = strings.Repeat("0", 128) },
@@ -72,6 +73,7 @@ type fixedDifficulty struct{ d int }
 func (f fixedDifficulty) Seal(_ context.Context, _ []*domain.Block, b *domain.Block) error {
 	b.Difficulty = f.d
 	b.Hash = b.CalculateHash()
+
 	return nil
 }
 
@@ -85,6 +87,7 @@ func (f fixedDifficulty) Verify(history []*domain.Block, b *domain.Block) error 
 	case b.CalculateHash() != b.Hash:
 		return consensus.ErrInvalidHash
 	}
+
 	return nil
 }
 
@@ -113,6 +116,7 @@ func newForkFixture(ec engineCase, opts ...Option) *forkFixture {
 
 	_, err := fx.svc.Mine(context.Background(), fx.f.tx())
 	Expect(err).NotTo(HaveOccurred())
+
 	fx.base, _ = fx.repo.All()
 
 	ops := fx.f.ops
@@ -120,6 +124,7 @@ func newForkFixture(ec engineCase, opts ...Option) *forkFixture {
 	fx.onlyA = spend(fx.f.owner, ops[2], 8)
 	_, err = fx.svc.Mine(context.Background(), []domain.Transaction{fx.shared, fx.onlyA})
 	Expect(err).NotTo(HaveOccurred())
+
 	fx.local, _ = fx.repo.All()
 
 	fx.b3 = []domain.Transaction{
@@ -127,6 +132,7 @@ func newForkFixture(ec engineCase, opts ...Option) *forkFixture {
 		spend(fx.f.owner, ops[3], 7),
 	}
 	fx.candidate = grow(fx.eng, fx.base, []domain.Transaction{fx.shared}, fx.b3)
+
 	return fx
 }
 
@@ -134,6 +140,7 @@ func newForkFixture(ec engineCase, opts ...Option) *forkFixture {
 func replay(chain []*domain.Block) domain.UTXOSet {
 	set, err := domain.BuildUTXOSet(chain)
 	Expect(err).NotTo(HaveOccurred())
+
 	return set
 }
 
@@ -142,6 +149,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 		be := be
 		Describe(be.name, func() {
 			BeforeEach(func() { newRepo = be.open })
+
 			for _, ec := range engineCases {
 				ec := ec
 				Describe(ec.name, func() {
@@ -152,7 +160,9 @@ var _ = Describe("Service.ReplaceChain", func() {
 					untouched := func(run func() error) {
 						beforeBlocks, _ := fx.svc.Blocks()
 						beforeUTXO := utxoSnapshot(fx.repo)
+
 						Expect(run()).NotTo(Succeed())
+
 						afterBlocks, _ := fx.svc.Blocks()
 						Expect(hashes(afterBlocks)).To(Equal(hashes(beforeBlocks)))
 						Expect(utxoSnapshot(fx.repo)).To(Equal(beforeUTXO))
@@ -175,13 +185,16 @@ var _ = Describe("Service.ReplaceChain", func() {
 
 							want := replay(blocks)
 							Expect(utxoSnapshot(fx.repo)).To(Equal(want))
+
 							for _, addr := range []string{fx.f.owner.Address(), recipient().Address()} {
 								var sum uint64
+
 								for _, out := range want {
 									if out.Address == addr {
 										sum += out.Amount
 									}
 								}
+
 								got, _ := fx.svc.Balance(addr)
 								Expect(got).To(Equal(sum), addr)
 							}
@@ -197,12 +210,14 @@ var _ = Describe("Service.ReplaceChain", func() {
 							// A bounded turn turns a lost release into a failure instead of a hang.
 							ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 							defer cancel()
+
 							b, err := fx.svc.Mine(ctx, []domain.Transaction{spend(fx.f.owner, fx.f.ops[4], 9)})
 							Expect(err).NotTo(HaveOccurred())
 
 							tip := fx.candidate[len(fx.candidate)-1]
 							Expect(b.PrevHash).To(Equal(tip.Hash))
 							Expect(b.Index).To(Equal(tip.Index + 1))
+
 							blocks, _ := fx.svc.Blocks()
 							Expect(utxoSnapshot(fx.repo)).To(Equal(replay(blocks)))
 						})
@@ -222,6 +237,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 							Expect(err).NotTo(HaveOccurred())
 							_, err = fx.svc.Mine(context.Background(), a4)
 							Expect(err).NotTo(HaveOccurred())
+
 							heavier := grow(fx.eng, fx.base,
 								[]domain.Transaction{spend(fx.f.owner, fx.f.ops[7], 9)},
 								[]domain.Transaction{spend(fx.f.owner, fx.f.ops[8], 9)},
@@ -243,6 +259,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 							Expect(reorg.ForkHeight).To(Equal(len(fx.local)))
 							Expect(reorg.Disconnected).To(BeEmpty())
 							Expect(reorg.Orphaned).To(BeEmpty())
+
 							blocks, _ := fx.svc.Blocks()
 							Expect(hashes(blocks)).To(Equal(hashes(longer)))
 							Expect(utxoSnapshot(fx.repo)).To(Equal(replay(blocks)))
@@ -260,6 +277,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 
 							_, err := fx.svc.ReplaceChain(context.Background(), forged)
 							Expect(err).NotTo(HaveOccurred())
+
 							blocks, _ := fx.svc.Blocks()
 							Expect(blocks[1].Transactions).To(Equal(fx.base[1].Transactions))
 							Expect(blocks[1].Timestamp).To(Equal(fx.base[1].Timestamp))
@@ -269,18 +287,22 @@ var _ = Describe("Service.ReplaceChain", func() {
 					Describe("a candidate without more work", func() {
 						It("rejects an equal-work branch (first seen wins)", func() {
 							equal := grow(fx.eng, fx.base, []domain.Transaction{fx.shared, fx.onlyA})
+
 							untouched(func() error {
 								_, err := fx.svc.ReplaceChain(context.Background(), equal)
 								Expect(err).To(MatchError(ErrInsufficientWork))
+
 								return err
 							})
 						})
 
 						It("rejects a lighter branch", func() {
 							lighter := fx.base
+
 							untouched(func() error {
 								_, err := fx.svc.ReplaceChain(context.Background(), lighter)
 								Expect(err).To(MatchError(ErrInsufficientWork))
+
 								return err
 							})
 						})
@@ -289,6 +311,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 							untouched(func() error {
 								_, err := fx.svc.ReplaceChain(context.Background(), fx.local)
 								Expect(err).To(MatchError(ErrInsufficientWork))
+
 								return err
 							})
 						})
@@ -300,6 +323,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 						onTop := func(history []*domain.Block, txs []domain.Transaction) *domain.Block {
 							b, err := GenerateBlockWithContext(context.Background(), fx.eng, history, txs)
 							Expect(err).NotTo(HaveOccurred())
+
 							return b
 						}
 						// last is B2 followed by one more block, built by mutate.
@@ -322,6 +346,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 						stranger := func() *wallet.Wallet {
 							w, err := wallet.New()
 							Expect(err).NotTo(HaveOccurred())
+
 							return w
 						}
 
@@ -330,6 +355,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 							build func() []*domain.Block
 							check func(error)
 						}
+
 						rows := func() []row {
 							return []row{
 								{"nil block", func() []*domain.Block {
@@ -339,6 +365,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 								{"nil genesis", func() []*domain.Block {
 									c := cloneBlocks(fx.candidate)
 									c[0] = nil
+
 									return c
 								}, is(ErrInvalidBlock)},
 								{"different genesis", func() []*domain.Block {
@@ -350,12 +377,14 @@ var _ = Describe("Service.ReplaceChain", func() {
 									g := *c[0]
 									g.Nonce++
 									c[0] = &g
+
 									return c
 								}, is(ErrGenesisMismatch)},
 								{"tampered hash", func() []*domain.Block {
 									return last(func(h []*domain.Block) *domain.Block {
 										b := onTop(h, good())
 										b.Hash = strings.Repeat("0", 64)
+
 										return b
 									})
 								}, is(consensus.ErrInvalidHash)},
@@ -363,6 +392,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 									return last(func(h []*domain.Block) *domain.Block {
 										b := onTop(h, good())
 										ec.breakSeal(b)
+
 										return b
 									})
 								}, is(ec.sealErr)},
@@ -370,6 +400,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 									return last(func(h []*domain.Block) *domain.Block {
 										b := onTop(h, good())
 										ec.wrongDifficulty(b)
+
 										return b
 									})
 								}, is(ec.difficultyErr)},
@@ -378,6 +409,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 										b := onTop(h, good())
 										b.MerkleRoot = strings.Repeat("1", 64)
 										Expect(fx.eng.Seal(context.Background(), h, b)).To(Succeed())
+
 										return b
 									})
 								}, mismatch(string(domain.CodeMerkleRootMismatch))},
@@ -390,6 +422,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 									return last(func(h []*domain.Block) *domain.Block {
 										tx := domain.Transaction{Outputs: []domain.TxOut{{Amount: domain.InitialSubsidy + 1, Address: fx.f.owner.Address()}}, Timestamp: time.Now()}
 										tx.ID = tx.CalculateHash()
+
 										return onTop(h, []domain.Transaction{tx})
 									})
 								}, is(domain.ErrCoinbaseTooLarge)},
@@ -397,6 +430,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 									return last(func(h []*domain.Block) *domain.Block {
 										tx := good()[0]
 										tx.Inputs[0].Signature = hex.EncodeToString(make([]byte, 64))
+
 										return onTop(h, []domain.Transaction{tx})
 									})
 								}, is(domain.ErrInvalidSignature)},
@@ -418,6 +452,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 								{"invalid first block of the tail, valid after it", func() []*domain.Block {
 									bad := onTop(fx.base, []domain.Transaction{spend(fx.f.owner, fx.f.ops[3], 7), spend(fx.f.owner, fx.f.ops[3], 6)})
 									h := append(append([]*domain.Block{}, fx.base...), bad)
+
 									return append(h, onTop(h, nil))
 								}, is(domain.ErrDoubleSpend)},
 								{"block older than its parent", func() []*domain.Block {
@@ -425,6 +460,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 										b := onTop(h, good())
 										b.Timestamp = h[len(h)-1].Timestamp.Add(-time.Hour)
 										Expect(fx.eng.Seal(context.Background(), h, b)).To(Succeed())
+
 										return b
 									})
 								}, mismatch(string(domain.CodeTimestampBeforeParent))},
@@ -448,6 +484,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 									reorg, err := fx.svc.ReplaceChain(context.Background(), r.build())
 									Expect(reorg).To(BeNil())
 									r.check(err)
+
 									return err
 								})
 							})
@@ -462,6 +499,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 							svc, f := funded(repo, eng)
 							_, err := svc.Mine(context.Background(), f.tx())
 							Expect(err).NotTo(HaveOccurred())
+
 							local, _ := repo.All()
 							cand := grow(eng, local[:1], f.tx(), f.tx(), f.tx())
 							repo.reorgErr = storage.ErrConflict
@@ -472,6 +510,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 							Expect(err).To(MatchError(storage.ErrConflict))
 							Expect(errors.Is(err, ErrStateDiverged)).To(BeFalse())
 							Expect(utxoSnapshot(mem)).To(Equal(before))
+
 							after, _ := repo.All()
 							Expect(hashes(after)).To(Equal(hashes(local)))
 
@@ -488,6 +527,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 							svc, f := funded(failing, eng)
 							_, err := svc.Mine(context.Background(), f.tx())
 							Expect(err).NotTo(HaveOccurred())
+
 							local, _ := repo.All()
 							cand := grow(eng, local[:1], f.tx(), f.tx())
 							failing.reorgErr = boom
@@ -511,10 +551,12 @@ var _ = Describe("Service.ReplaceChain", func() {
 							failing.commitErr = errors.New("boom")
 							_, err := svc.Mine(context.Background(), f.tx())
 							Expect(err).To(MatchError(ErrStateDiverged))
+
 							before, _ := repo.All()
 
 							_, err = svc.ReplaceChain(context.Background(), nil)
 							Expect(err).To(MatchError(ErrStateDiverged))
+
 							after, _ := repo.All()
 							Expect(hashes(after)).To(Equal(hashes(before)))
 						})
@@ -535,26 +577,33 @@ var _ = Describe("Service.ReplaceChain", func() {
 						It("returns the context error to a ReplaceChain queued behind Mine, changing nothing", func() {
 							eng := ec.new()
 							entered, release := make(chan struct{}), make(chan struct{})
+
 							var calls atomic.Int32
+
 							repo := newRepo()
 							svc, f := funded(repo, eng, WithGenerator(func(ctx context.Context, c consensus.Consensus, h []*domain.Block, txs []domain.Transaction) (*domain.Block, error) {
 								if calls.Add(1) == 1 {
 									close(entered)
 									<-release
 								}
+
 								return GenerateBlockWithContext(ctx, c, h, txs)
 							}))
 							cand := grow(eng, mustAll(repo), f.tx(), f.tx())
 							done := make(chan error, 1)
+
 							go func() {
 								defer GinkgoRecover()
+
 								_, err := svc.Mine(context.Background(), f.tx())
 								done <- err
 							}()
+
 							Eventually(entered).Should(BeClosed())
 
 							ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 							defer cancel()
+
 							reorg, err := svc.ReplaceChain(ctx, cand)
 							Expect(reorg).To(BeNil())
 							Expect(errors.Is(err, context.DeadlineExceeded)).To(BeTrue())
@@ -570,6 +619,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 							untouched(func() error {
 								_, err := fx.svc.ReplaceChain(ctx, fx.candidate)
 								Expect(errors.Is(err, context.Canceled)).To(BeTrue())
+
 								return err
 							})
 						})
@@ -582,10 +632,12 @@ var _ = Describe("Service.ReplaceChain", func() {
 					repo := newRepo()
 					svc, err := NewService(repo, fixedDifficulty{d})
 					Expect(err).NotTo(HaveOccurred())
+
 					for i := 0; i < n; i++ {
 						_, err := svc.Mine(context.Background(), []domain.Transaction{})
 						Expect(err).NotTo(HaveOccurred())
 					}
+
 					return svc, repo
 				}
 
@@ -628,37 +680,48 @@ var _ = Describe("Service.ReplaceChain", func() {
 						for j := 0; j <= i+1; j++ {
 							txss = append(txss, []domain.Transaction{spend(f.owner, f.ops[j], uint64(9-j%3))})
 						}
+
 						candidates[i] = grow(eng, base, txss...)
 					}
 
 					// A bounded turn turns a lost release into a failure instead of a hang.
 					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 					defer cancel()
+
 					var wg sync.WaitGroup
+
 					for _, cand := range candidates {
 						cand := cand
+
 						wg.Add(1)
+
 						go func() {
 							defer GinkgoRecover()
 							defer wg.Done()
+
 							_, err := svc.ReplaceChain(ctx, cand)
 							if err != nil {
 								Expect(errors.Is(err, ErrInsufficientWork) || errors.Is(err, domain.ErrInputMissingOrSpent) || errors.Is(err, storage.ErrReorgTooDeep)).To(BeTrue(), "%v", err)
 							}
 						}()
 					}
+
 					for k := 0; k < 4; k++ {
 						k := k
+
 						wg.Add(1)
+
 						go func() {
 							defer GinkgoRecover()
 							defer wg.Done()
+
 							_, err := svc.Mine(ctx, []domain.Transaction{spend(f.owner, f.ops[6+k], 9)})
 							if err != nil {
 								Expect(errors.Is(err, domain.ErrInputMissingOrSpent)).To(BeTrue(), "%v", err)
 							}
 						}()
 					}
+
 					wg.Wait()
 
 					blocks := mustAll(repo)
@@ -667,6 +730,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 						Expect(blocks[i].PrevHash).To(Equal(blocks[i-1].Hash))
 						Expect(eng.Verify(blocks[:i], blocks[i])).To(Succeed())
 					}
+
 					Expect(utxoSnapshot(repo)).To(Equal(replayRepo(repo)))
 				})
 			})
@@ -677,6 +741,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 func mustAll(repo storage.IndexedRepository) []*domain.Block {
 	blocks, err := repo.All()
 	Expect(err).NotTo(HaveOccurred())
+
 	return blocks
 }
 

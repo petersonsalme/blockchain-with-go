@@ -46,21 +46,25 @@ func serve(n *Node, hellos *atomic.Int64) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /p2p/hello", func(w http.ResponseWriter, r *http.Request) {
 		hellos.Add(1)
+
 		var remote Hello
 		if err := json.NewDecoder(r.Body).Decode(&remote); err != nil {
 			http.Error(w, "bad", http.StatusBadRequest)
 			return
 		}
+
 		local, err := n.Accept(remote)
 		if err != nil {
 			http.Error(w, err.Error(), helloStatus(err))
 			return
 		}
+
 		_ = json.NewEncoder(w).Encode(local)
 	})
 	mux.HandleFunc("GET /p2p/peers", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"peers": []any{}, "addrs": n.Addrs()})
 	})
+
 	return mux
 }
 
@@ -73,16 +77,22 @@ type testNode struct {
 
 func newTestNode(t *testing.T, c ChainView, id string, l Limits, opts ...Option) *testNode {
 	t.Helper()
+
 	tn := &testNode{book: NewBook(l, nil), hellos: &atomic.Int64{}}
+
 	var handler http.Handler
+
 	tn.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { handler.ServeHTTP(w, r) }))
 	t.Cleanup(tn.srv.Close)
+
 	n, err := NewNode(c, tn.book, id, tn.srv.URL, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	tn.Node = n
 	handler = serve(n, tn.hellos)
+
 	return tn
 }
 
@@ -92,6 +102,7 @@ func peerByID(peers []PeerInfo, id string) (PeerInfo, bool) {
 			return p, true
 		}
 	}
+
 	return PeerInfo{}, false
 }
 
@@ -106,6 +117,7 @@ func TestRoundConnectsToSeed(t *testing.T) {
 	if !ok || pa.Inbound || pa.Height != 1 || pa.Addr != a.srv.URL {
 		t.Fatalf("B peers = %+v", b.Peers())
 	}
+
 	pb, ok := peerByID(a.Peers(), idB)
 	if !ok || !pb.Inbound || pb.Height != 0 {
 		t.Fatalf("A peers = %+v", a.Peers())
@@ -115,13 +127,16 @@ func TestRoundConnectsToSeed(t *testing.T) {
 // stubPeer answers /p2p/hello with the given status and body and /p2p/peers with addrs.
 func stubPeer(t *testing.T, status int, helloBody any, addrs []string) *httptest.Server {
 	t.Helper()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /p2p/hello", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(status)
+
 		if s, ok := helloBody.(string); ok {
 			_, _ = w.Write([]byte(s))
 			return
 		}
+
 		_ = json.NewEncoder(w).Encode(helloBody)
 	})
 	mux.HandleFunc("GET /p2p/peers", func(w http.ResponseWriter, _ *http.Request) {
@@ -129,6 +144,7 @@ func stubPeer(t *testing.T, status int, helloBody any, addrs []string) *httptest
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
+
 	return srv
 }
 
@@ -143,6 +159,7 @@ func TestRoundRefusesIncompatiblePeer(t *testing.T) {
 	if len(b.Peers()) != 0 || len(a.Peers()) != 0 {
 		t.Fatalf("peers: B=%+v A=%+v", b.Peers(), a.Peers())
 	}
+
 	if a.hellos.Load() != 2 {
 		t.Fatalf("hellos to A = %d, want one per round", a.hellos.Load())
 	}
@@ -152,6 +169,7 @@ func TestRoundRunsCheckOnTheResponse(t *testing.T) {
 	good := func() Hello {
 		return Hello{Version: 1, NodeID: idA, GenesisHash: gen, Height: 5, TipHash: tip, ListenAddr: "http://x:1"}
 	}
+
 	cases := []struct {
 		name   string
 		status int
@@ -174,6 +192,7 @@ func TestRoundRunsCheckOnTheResponse(t *testing.T) {
 			b := newTestNode(t, chain1(), idB, Limits{})
 			b.book.AddAddrs(stub.URL)
 			b.Round(context.Background())
+
 			if got := len(b.Peers()); got != tc.peers {
 				t.Fatalf("peers = %+v, want %d", b.Peers(), tc.peers)
 			}
@@ -185,14 +204,17 @@ func TestRoundExchangesAddresses(t *testing.T) {
 	a := newTestNode(t, chain2(), idA, Limits{})
 	b := newTestNode(t, chain2(), idB, Limits{})
 	c := newTestNode(t, chain1(), idC, Limits{})
+
 	b.book.AddAddrs(a.srv.URL)
 	b.Round(context.Background())
 	c.book.AddAddrs(b.srv.URL)
 
 	c.Round(context.Background())
+
 	if !containsStr(c.Addrs(), a.srv.URL) {
 		t.Fatalf("C addrs after 1 round = %v", c.Addrs())
 	}
+
 	c.Round(context.Background())
 
 	for _, id := range []string{idA, idB} {
@@ -200,6 +222,7 @@ func TestRoundExchangesAddresses(t *testing.T) {
 			t.Fatalf("C not connected out to %s: %+v", id, c.Peers())
 		}
 	}
+
 	if containsStr(c.Addrs(), c.srv.URL) {
 		t.Fatalf("C learned its own address: %v", c.Addrs())
 	}
@@ -211,6 +234,7 @@ func containsStr(list []string, s string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -219,6 +243,7 @@ func TestRoundDisconnectsUnresponsiveOutboundPeer(t *testing.T) {
 	b := newTestNode(t, chain1(), idB, Limits{})
 	b.book.AddAddrs(a.srv.URL)
 	b.Round(context.Background())
+
 	if len(b.Peers()) != 1 {
 		t.Fatalf("not connected: %+v", b.Peers())
 	}
@@ -229,6 +254,7 @@ func TestRoundDisconnectsUnresponsiveOutboundPeer(t *testing.T) {
 	if len(b.Peers()) != 0 {
 		t.Fatalf("peers = %+v, want none", b.Peers())
 	}
+
 	if !containsStr(b.Addrs(), a.srv.URL) {
 		t.Fatal("address of the dead peer was forgotten")
 	}
@@ -237,6 +263,7 @@ func TestRoundDisconnectsUnresponsiveOutboundPeer(t *testing.T) {
 func TestRoundDisconnectsPeerThatBecameIncompatible(t *testing.T) {
 	var version atomic.Int64
 	version.Store(1)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /p2p/hello", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(Hello{Version: int(version.Load()), NodeID: idA, GenesisHash: gen, Height: 1, TipHash: tip})
@@ -247,12 +274,14 @@ func TestRoundDisconnectsPeerThatBecameIncompatible(t *testing.T) {
 	b := newTestNode(t, chain1(), idB, Limits{})
 	b.book.AddAddrs(srv.URL)
 	b.Round(context.Background())
+
 	if len(b.Peers()) != 1 {
 		t.Fatalf("not connected: %+v", b.Peers())
 	}
 
 	version.Store(2)
 	b.Round(context.Background())
+
 	if len(b.Peers()) != 0 {
 		t.Fatalf("peers = %+v, want none", b.Peers())
 	}
@@ -261,6 +290,7 @@ func TestRoundDisconnectsPeerThatBecameIncompatible(t *testing.T) {
 func TestRoundReplacesPeerThatRestartedWithNewNodeID(t *testing.T) {
 	var id atomic.Value
 	id.Store(idA)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /p2p/hello", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(Hello{Version: 1, NodeID: id.Load().(string), GenesisHash: gen, Height: 1, TipHash: tip})
@@ -284,7 +314,9 @@ func TestRoundReplacesPeerThatRestartedWithNewNodeID(t *testing.T) {
 func TestRoundRespectsMaxOutbound(t *testing.T) {
 	b := newTestNode(t, chain1(), idB, Limits{MaxOutbound: 2})
 	ids := []string{idA, idC, idD}
+
 	var nodes []*testNode
+
 	for _, id := range ids {
 		n := newTestNode(t, chain2(), id, Limits{})
 		nodes = append(nodes, n)
@@ -295,11 +327,13 @@ func TestRoundRespectsMaxOutbound(t *testing.T) {
 	b.Round(context.Background())
 
 	out := 0
+
 	for _, p := range b.Peers() {
 		if !p.Inbound {
 			out++
 		}
 	}
+
 	if out != 2 {
 		t.Fatalf("outbound = %d, want 2: %+v", out, b.Peers())
 	}
@@ -310,6 +344,7 @@ func TestRoundRespectsMaxOutbound(t *testing.T) {
 			last = n
 		}
 	}
+
 	if last.hellos.Load() != 0 {
 		t.Fatalf("hellos to the third candidate = %d", last.hellos.Load())
 	}
@@ -382,17 +417,20 @@ type syncBuf struct {
 func (s *syncBuf) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	return s.b.Write(p)
 }
 
 func (s *syncBuf) String() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	return s.b.String()
 }
 
 func TestRoundLogsNetworkFailures(t *testing.T) {
 	var buf syncBuf
+
 	b := newTestNode(t, chain1(), idB, Limits{}, WithLogger(slog.New(slog.NewTextHandler(&buf, nil))))
 	dead := httptest.NewServer(http.NotFoundHandler())
 	dead.Close()
@@ -407,7 +445,9 @@ func TestRoundLogsNetworkFailures(t *testing.T) {
 
 func TestRoundWithBrokenLocalChainDoesNothing(t *testing.T) {
 	a := newTestNode(t, chain2(), idA, Limits{})
+
 	var buf syncBuf
+
 	b := newTestNode(t, fakeChain{err: errors.New("boom")}, idB, Limits{}, WithLogger(slog.New(slog.NewTextHandler(&buf, nil))))
 	b.book.AddAddrs(a.srv.URL)
 
@@ -423,23 +463,29 @@ func TestRoundExpiresPeersNotSeenForThreeIntervals(t *testing.T) {
 	clock := func() time.Time { return now }
 	interval := 10 * time.Second
 	book := NewBook(Limits{}, clock)
+
 	n, err := NewNode(chain2(), book, idA, "", WithInterval(interval))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	n.now = clock
 	if _, err := n.Accept(hello(idB)); err != nil {
 		t.Fatal(err)
 	}
 
 	now = now.Add(3 * interval)
+
 	n.Round(context.Background())
+
 	if len(n.Peers()) != 1 {
 		t.Fatalf("peer expired after exactly 3 intervals: %+v", n.Peers())
 	}
 
 	now = now.Add(time.Nanosecond)
+
 	n.Round(context.Background())
+
 	if len(n.Peers()) != 0 {
 		t.Fatalf("peer still listed: %+v", n.Peers())
 	}
@@ -465,6 +511,7 @@ func TestRoundWithoutAddrFileCreatesNothing(t *testing.T) {
 	b := newTestNode(t, chain1(), idB, Limits{})
 	b.book.AddAddrs("http://z:9")
 	b.Round(context.Background())
+
 	entries, _ := os.ReadDir(dir)
 	if len(entries) != 0 {
 		t.Fatalf("files created: %v", entries)
@@ -473,9 +520,11 @@ func TestRoundWithoutAddrFileCreatesNothing(t *testing.T) {
 
 func TestRoundLogsSaveFailure(t *testing.T) {
 	var buf syncBuf
+
 	path := filepath.Join(t.TempDir(), "missing", "peers.json")
 	b := newTestNode(t, chain1(), idB, Limits{}, WithAddrFile(path), WithLogger(slog.New(slog.NewTextHandler(&buf, nil))))
 	b.Round(context.Background())
+
 	if !strings.Contains(buf.String(), "peers.json") {
 		t.Fatalf("log = %q", buf.String())
 	}
@@ -498,9 +547,12 @@ func TestRoundStopsOnCancelledContext(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
+
 	go func() { b.Round(ctx); close(done) }()
+
 	time.Sleep(50 * time.Millisecond)
 	cancel()
+
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
@@ -512,6 +564,7 @@ func TestRoundSkipsDialingOnceContextIsDone(t *testing.T) {
 	a := newTestNode(t, chain2(), idA, Limits{})
 	b := newTestNode(t, chain1(), idB, Limits{})
 	b.book.AddAddrs(a.srv.URL)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -527,14 +580,18 @@ func TestOptionsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if n.interval != 30*time.Second || n.client == nil || n.client.Timeout != 5*time.Second || n.log == nil {
 		t.Fatalf("defaults: %v %+v", n.interval, n.client)
 	}
+
 	n, _ = NewNode(chain1(), NewBook(Limits{}, nil), idA, "", WithInterval(-1))
 	if n.interval != 30*time.Second {
 		t.Fatalf("interval = %v", n.interval)
 	}
+
 	c := &http.Client{Timeout: time.Second}
+
 	n, _ = NewNode(chain1(), NewBook(Limits{}, nil), idA, "", WithInterval(time.Minute), WithClient(c))
 	if n.interval != time.Minute || n.client != c {
 		t.Fatal("options not applied")
@@ -543,8 +600,10 @@ func TestOptionsDefaults(t *testing.T) {
 
 func TestDefaultClientDoesNotFollowRedirects(t *testing.T) {
 	var hit atomic.Int64
+
 	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hit.Add(1) }))
 	t.Cleanup(target.Close)
+
 	redir := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
 	}))
@@ -561,6 +620,7 @@ func TestDefaultClientDoesNotFollowRedirects(t *testing.T) {
 
 func TestRunRoundsUntilCancelled(t *testing.T) {
 	defer goleak.VerifyNone(t)
+
 	client := &http.Client{Timeout: time.Second, Transport: &http.Transport{DisableKeepAlives: true}}
 	a := newTestNode(t, chain2(), idA, Limits{})
 	b := newTestNode(t, chain1(), idB, Limits{}, WithInterval(10*time.Millisecond), WithClient(client))
@@ -568,21 +628,26 @@ func TestRunRoundsUntilCancelled(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
+
 	go func() { b.Run(ctx); close(done) }()
 
 	deadline := time.Now().Add(3 * time.Second)
 	for a.hellos.Load() < 3 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
+
 	if a.hellos.Load() < 3 {
 		t.Fatalf("hellos = %d, want a first round and later ticks", a.hellos.Load())
 	}
+
 	cancel()
+
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not return")
 	}
+
 	a.srv.Close()
 	b.srv.Close()
 }
@@ -591,15 +656,20 @@ func TestRunStartsWithAnImmediateRound(t *testing.T) {
 	a := newTestNode(t, chain2(), idA, Limits{})
 	b := newTestNode(t, chain1(), idB, Limits{}, WithInterval(time.Hour))
 	b.book.AddAddrs(a.srv.URL)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
+
 	go func() { b.Run(ctx); close(done) }()
+
 	deadline := time.Now().Add(3 * time.Second)
 	for a.hellos.Load() < 1 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
+
 	cancel()
 	<-done
+
 	if a.hellos.Load() != 1 {
 		t.Fatalf("hellos = %d, want 1", a.hellos.Load())
 	}
@@ -608,8 +678,10 @@ func TestRunStartsWithAnImmediateRound(t *testing.T) {
 func TestRoundSendsJSONHelloAndAcceptsResponseAtTheSizeLimit(t *testing.T) {
 	var contentType atomic.Value
 	contentType.Store("")
+
 	var getType atomic.Value
 	getType.Store("unset")
+
 	padded := func(size int) string {
 		base := `{"addrs":["http://z:9"]}`
 		return base + strings.Repeat(" ", size-len(base))
@@ -626,10 +698,12 @@ func TestRoundSendsJSONHelloAndAcceptsResponseAtTheSizeLimit(t *testing.T) {
 			mux := http.NewServeMux()
 			mux.HandleFunc("POST /p2p/hello", func(w http.ResponseWriter, r *http.Request) {
 				contentType.Store(r.Header.Get("Content-Type"))
+
 				_ = json.NewEncoder(w).Encode(Hello{Version: 1, NodeID: idA, GenesisHash: gen, Height: 1, TipHash: tip})
 			})
 			mux.HandleFunc("GET /p2p/peers", func(w http.ResponseWriter, r *http.Request) {
 				getType.Store(r.Header.Get("Content-Type"))
+
 				_, _ = w.Write([]byte(padded(tc.size)))
 			})
 			srv := httptest.NewServer(mux)
@@ -644,6 +718,7 @@ func TestRoundSendsJSONHelloAndAcceptsResponseAtTheSizeLimit(t *testing.T) {
 			}
 		})
 	}
+
 	if contentType.Load() != "application/json" || getType.Load() != "" {
 		t.Fatalf("content types: hello %q, peers %q", contentType.Load(), getType.Load())
 	}
@@ -651,11 +726,13 @@ func TestRoundSendsJSONHelloAndAcceptsResponseAtTheSizeLimit(t *testing.T) {
 
 func TestRoundRenewalOfAHealthyPeerLogsNothing(t *testing.T) {
 	var buf syncBuf
+
 	a := newTestNode(t, chain2(), idA, Limits{})
 	b := newTestNode(t, chain1(), idB, Limits{}, WithLogger(slog.New(slog.NewTextHandler(&buf, nil))))
 	b.book.AddAddrs(a.srv.URL)
 	b.Round(context.Background())
 	b.Round(context.Background())
+
 	if len(b.Peers()) != 1 || buf.String() != "" {
 		t.Fatalf("peers = %+v log = %q", b.Peers(), buf.String())
 	}
@@ -663,17 +740,21 @@ func TestRoundRenewalOfAHealthyPeerLogsNothing(t *testing.T) {
 
 func TestHelloAnnouncesAnUnsealedGenesisByItsCommittedHash(t *testing.T) {
 	g := &domain.Block{Index: 0}
+
 	n, err := NewNode(fakeChain{blocks: []*domain.Block{g}}, NewBook(Limits{}, nil), idA, "")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	h, err := n.Hello()
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if h.GenesisHash != g.CalculateHash() || h.TipHash != g.CalculateHash() || !isHex(h.GenesisHash, 64) {
 		t.Fatalf("hello = %+v", h)
 	}
+
 	if err := Check(h, Hello{Version: 1, NodeID: idB, GenesisHash: h.GenesisHash, TipHash: h.TipHash}); err != nil {
 		t.Fatal(err)
 	}

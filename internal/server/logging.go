@@ -21,6 +21,7 @@ func (r *statusRecorder) WriteHeader(code int) {
 		r.status = code
 		r.wroteHeader = true
 	}
+
 	r.ResponseWriter.WriteHeader(code)
 }
 
@@ -37,6 +38,7 @@ func routeOf(r *http.Request) string {
 	if r.Pattern == "" {
 		return unmatchedRoute
 	}
+
 	return r.Pattern
 }
 

@@ -35,15 +35,19 @@ func NewBook(l Limits, now func() time.Time) *Book {
 	if l.MaxInbound <= 0 {
 		l.MaxInbound = 16
 	}
+
 	if l.MaxOutbound <= 0 {
 		l.MaxOutbound = 8
 	}
+
 	if l.MaxAddrs <= 0 {
 		l.MaxAddrs = 1000
 	}
+
 	if now == nil {
 		now = time.Now
 	}
+
 	return &Book{limits: l, now: now, addrs: map[string]struct{}{}, peers: map[string]*PeerInfo{}}
 }
 
@@ -52,12 +56,15 @@ func NewBook(l Limits, now func() time.Time) *Book {
 func (b *Book) AddAddrs(addrs ...string) int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
 	n := 0
+
 	for _, a := range addrs {
 		if b.addLocked(a) {
 			n++
 		}
 	}
+
 	return n
 }
 
@@ -66,10 +73,13 @@ func (b *Book) addLocked(raw string) bool {
 	if err != nil {
 		return false
 	}
+
 	if _, ok := b.addrs[a]; ok || len(b.addrs) >= b.limits.MaxAddrs {
 		return false
 	}
+
 	b.addrs[a] = struct{}{}
+
 	return true
 }
 
@@ -77,6 +87,7 @@ func (b *Book) addLocked(raw string) bool {
 func (b *Book) Addrs() []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
 	return b.sortedAddrs(func(string) bool { return true })
 }
 
@@ -84,21 +95,26 @@ func (b *Book) Addrs() []string {
 func (b *Book) Candidates() []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
 	used := map[string]bool{}
 	for _, p := range b.peers {
 		used[p.Addr] = true
 	}
+
 	return b.sortedAddrs(func(a string) bool { return !used[a] })
 }
 
 func (b *Book) sortedAddrs(keep func(string) bool) []string {
 	out := []string{}
+
 	for a := range b.addrs {
 		if keep(a) {
 			out = append(out, a)
 		}
 	}
+
 	sort.Strings(out)
+
 	return out
 }
 
@@ -107,35 +123,44 @@ func (b *Book) sortedAddrs(keep func(string) bool) []string {
 // refused with ErrPeerLimit. A refusal leaves the book unchanged.
 func (b *Book) Connect(h Hello, inbound bool) error {
 	addr := ""
+
 	if h.ListenAddr != "" {
 		a, err := NormalizeAddr(h.ListenAddr)
 		if err != nil {
 			return err
 		}
+
 		addr = a
 	}
+
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
 	if p, ok := b.peers[h.NodeID]; ok {
 		p.Height, p.TipHash, p.LastSeen = h.Height, h.TipHash, b.now()
 		return nil
 	}
+
 	count, limit := 0, b.limits.MaxOutbound
 	if inbound {
 		limit = b.limits.MaxInbound
 	}
+
 	for _, p := range b.peers {
 		if p.Inbound == inbound {
 			count++
 		}
 	}
+
 	if count >= limit {
 		return ErrPeerLimit
 	}
+
 	b.peers[h.NodeID] = &PeerInfo{NodeID: h.NodeID, Addr: addr, Height: h.Height, TipHash: h.TipHash, Inbound: inbound, LastSeen: b.now()}
 	if addr != "" {
 		b.addLocked(addr)
 	}
+
 	return nil
 }
 
@@ -143,6 +168,7 @@ func (b *Book) Connect(h Hello, inbound bool) error {
 func (b *Book) Disconnect(nodeID string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
 	delete(b.peers, nodeID)
 }
 
@@ -150,11 +176,14 @@ func (b *Book) Disconnect(nodeID string) {
 func (b *Book) Peers() []PeerInfo {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
 	out := make([]PeerInfo, 0, len(b.peers))
 	for _, p := range b.peers {
 		out = append(out, *p)
 	}
+
 	slices.SortFunc(out, func(a, b PeerInfo) int { return strings.Compare(a.NodeID, b.NodeID) })
+
 	return out
 }
 
@@ -163,13 +192,17 @@ func (b *Book) Peers() []PeerInfo {
 func (b *Book) Expire(before time.Time) int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
 	n := 0
+
 	for id, p := range b.peers {
 		if p.LastSeen.Before(before) {
 			delete(b.peers, id)
+
 			n++
 		}
 	}
+
 	return n
 }
 
