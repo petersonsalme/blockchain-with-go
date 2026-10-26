@@ -294,6 +294,29 @@ The node writes one structured JSON log line (`log/slog`) to stderr for every HT
 
 On `SIGINT`/`SIGTERM` the node cancels the context of every request: a block being mined answers `408` with `{"error":"mining cancelled"}` and no block is appended. The other in-flight requests are drained for up to 10 seconds before the server closes. A fatal error is logged at `ERROR` level and the process exits with code 1.
 
+### Docker
+
+The `Dockerfile` builds a static `bwg` in a Go stage and runs `bwg node` on `gcr.io/distroless/static-debian12:nonroot` (user `65532`, no shell). The image listens on `8080` and is configured only through environment variables: it ships an empty `/app/.env`, so `docker run -e` is the only source of settings and every variable keeps the meaning described in [Configuration & Environment Variables](#configuration--environment-variables).
+
+```shell
+$ docker build -t bwg .
+$ docker run --rm -p 8080:8080 bwg                                   # in-memory chain
+$ docker run --rm -p 8080:8080 -e DATA_DIR=/data -v bwg-data:/data bwg   # bbolt in a named volume
+$ curl -s localhost:8080/health
+{"status":"ok","height":0,"tip":"..."}
+```
+
+Pass any other variable with `-e` (for example `-e CONSENSUS=poa -e POA_VALIDATORS=...`). Other subcommands run with the same image: `docker run --rm -e DATA_DIR=/data -v bwg-data:/data bwg node --reindex`. `scripts/docker-smoke.sh` builds the image and checks the non-root user and `GET /health` in both modes; CI runs it in the `docker` job.
+
+### Releases
+
+Pushing a tag `v*` (for example `git tag v0.1.0 && git push origin v0.1.0`) runs `.github/workflows/release.yml`, which uses [goreleaser](https://goreleaser.com) (`.goreleaser.yaml`) to build static `bwg` binaries for linux, darwin and windows on amd64 and arm64 and publish them, with `checksums.txt`, as a GitHub release. To try it locally without publishing:
+
+```shell
+$ go run github.com/goreleaser/goreleaser/v2@v2.19.0 check
+$ go run github.com/goreleaser/goreleaser/v2@v2.19.0 release --snapshot --clean   # binaries in dist/
+```
+
 ### Fuzzing
 
 Native Go fuzz targets (`testing.F`) check that `POST /` decoding, block JSON/hash and the block rules never panic and keep their properties. Seeds live in `testdata/fuzz/<FuzzName>/` of each package and run with a plain `go test ./...`. To fuzz for 60 seconds each:

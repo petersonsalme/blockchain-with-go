@@ -62,3 +62,24 @@ jobs:
 
     - name: govulncheck
       run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Build image and check GET /health
+      run: scripts/docker-smoke.sh
+
+  release-check:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: goreleaser check
+      run: go run github.com/goreleaser/goreleaser/v2@v2.19.0 check
