@@ -132,6 +132,7 @@ func TestPostHelloErrorMapping(t *testing.T) {
 		{"version", p2p.ErrIncompatibleVersion, http.StatusConflict, "incompatible_version"},
 		{"genesis", p2p.ErrGenesisMismatch, http.StatusConflict, "genesis_mismatch"},
 		{"self", p2p.ErrSelf, http.StatusConflict, "self_connection"},
+		{"banned", p2p.ErrBanned, http.StatusForbidden, "peer_banned"},
 		{"limit", p2p.ErrPeerLimit, http.StatusServiceUnavailable, "peer_limit"},
 		{"wrapped", errors.Join(errors.New("ctx"), p2p.ErrSelf), http.StatusConflict, "self_connection"},
 		{"other", errors.New("boom"), http.StatusInternalServerError, ""},

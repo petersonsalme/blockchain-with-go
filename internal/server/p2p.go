@@ -21,6 +21,7 @@ func helloRefusals() []errorRule {
 		{p2p.ErrIncompatibleVersion, http.StatusConflict, "incompatible_version"},
 		{p2p.ErrGenesisMismatch, http.StatusConflict, "genesis_mismatch"},
 		{p2p.ErrSelf, http.StatusConflict, "self_connection"},
+		{p2p.ErrBanned, http.StatusForbidden, "peer_banned"},
 		{p2p.ErrPeerLimit, http.StatusServiceUnavailable, "peer_limit"},
 	}
 }
