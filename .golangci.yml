@@ -48,6 +48,7 @@ linters:
     - exptostd
     - bodyclose
     - noctx
+    - contextcheck
   settings:
     nlreturn:
       # Same threshold as wsl_v5's branch-max-lines: a return in a block of up to 2 lines needs no blank line.
@@ -84,6 +85,9 @@ linters:
         - name: redefines-builtin-id
   exclusions:
     rules:
+      # The root command builds its own context for graceful shutdown (see node.go), so callers cannot pass one.
+      - path: cmd/bwg/(main|wallet_test)\.go
+        linters: [contextcheck]
       # Keys with surrounding spaces are deliberate trimming cases.
       - path: cmd/bwg/p2p_test.go
         linters: [gocritic]

@@ -411,7 +411,7 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	shutdownCtx, cancel := shutdownContext()
 	defer cancel()
 
-	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+	if err := httpSrv.Shutdown(shutdownCtx); err != nil { //nolint:contextcheck // ctx is already cancelled here; graceful shutdown needs a fresh deadline
 		return err
 	}
 

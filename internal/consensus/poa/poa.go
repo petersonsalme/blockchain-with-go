@@ -62,7 +62,7 @@ func (p *ProofOfAuthority) isValidator(key ed25519.PublicKey) bool {
 
 // Seal fills the consensus fields of b: it names the signer as validator,
 // computes the hash and signs it.
-func (p *ProofOfAuthority) Seal(ctx context.Context, _ []*domain.Block, b *domain.Block) error {
+func (p *ProofOfAuthority) Seal(ctx context.Context, _ []*domain.Block, b *domain.Block) error { //nolint:contextcheck // Seal accepts a nil context from callers that have none
 	if ctx == nil {
 		ctx = context.Background()
 	}

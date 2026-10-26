@@ -230,7 +230,7 @@ func (p *ProofOfWork) Verify(history []*domain.Block, b *domain.Block) error {
 // MineWithContext searches for a nonce whose hash satisfies the given difficulty
 // and stores the resulting nonce, difficulty and hash on the block. It checks
 // ctx.Err() in the nonce loop and aborts with the context error if canceled or timed out.
-func MineWithContext(ctx context.Context, b *domain.Block, difficulty int) error {
+func MineWithContext(ctx context.Context, b *domain.Block, difficulty int) error { //nolint:contextcheck // a nil context from callers that have none means no cancellation
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -258,7 +258,7 @@ func MineWithContext(ctx context.Context, b *domain.Block, difficulty int) error
 // MineParallel returns only after all of them stopped. Any valid nonce is
 // accepted, so the one found may differ between runs when workers > 1. On
 // success it stores nonce, difficulty and hash on b; on error b is unchanged.
-func MineParallel(ctx context.Context, b *domain.Block, difficulty, workers int) error {
+func MineParallel(ctx context.Context, b *domain.Block, difficulty, workers int) error { //nolint:contextcheck // a nil context from callers that have none means no cancellation
 	if ctx == nil {
 		ctx = context.Background()
 	}

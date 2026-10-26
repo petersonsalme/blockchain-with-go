@@ -266,7 +266,7 @@ func (w *spyWriter) snapshot() (deadlines []time.Time, flushes int, body string)
 // serveEvents runs handleEvents on w in the background and returns a channel closed when it returns.
 func serveEvents(srv *Server, w http.ResponseWriter, ctx context.Context) <-chan struct{} {
 	done := make(chan struct{})
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/events", nil).WithContext(ctx)
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/events", nil)
 
 	go func() { defer close(done); srv.handleEvents(w, req) }()
 
