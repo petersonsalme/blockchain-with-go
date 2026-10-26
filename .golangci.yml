@@ -25,6 +25,7 @@ linters:
     - sloglint
     - nestif
     - rowserrcheck
+    - sqlclosecheck
   settings:
     nlreturn:
       # Same threshold as wsl_v5's branch-max-lines: a return in a block of up to 2 lines needs no blank line.
