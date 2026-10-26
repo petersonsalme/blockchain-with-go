@@ -68,6 +68,7 @@ linters:
     - gocyclo
     - maintidx
     - containedctx
+    - tagliatelle
   settings:
     nlreturn:
       # Same threshold as wsl_v5's branch-max-lines: a return in a block of up to 2 lines needs no blank line.
@@ -76,6 +77,11 @@ linters:
       enable:
         - leading-whitespace
         - trailing-whitespace
+    tagliatelle:
+      case:
+        rules:
+          # The HTTP contract (openapi.yaml) and the peer protocol use snake_case.
+          json: snake
     revive:
       rules:
         - name: blank-imports
@@ -96,6 +102,14 @@ linters:
         - name: redefines-builtin-id
   exclusions:
     rules:
+      # Transaction is hashed and persisted with its Go field names; renaming "Contract" would change the schema.
+      - path: internal/domain/transaction\.go
+        linters: [tagliatelle]
+        text: "'Contract'"
+      # The snapshot file format (ENG-168) already ships with a camelCase blockHash key.
+      - path: internal/storage/snapshotfile(_test)?\.go
+        linters: [tagliatelle]
+        text: "blockHash"
       # G101: the matches are the names of environment variables, not credentials.
       - path: cmd/bwg/node\.go
         linters: [gosec]
