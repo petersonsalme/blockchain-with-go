@@ -61,6 +61,7 @@ linters:
     - inamedparam
     - errname
     - dupword
+    - godoclint
   settings:
     nlreturn:
       # Same threshold as wsl_v5's branch-max-lines: a return in a block of up to 2 lines needs no blank line.
@@ -97,6 +98,9 @@ linters:
         - name: redefines-builtin-id
   exclusions:
     rules:
+      # client.gen.go carries its own package comment and is not edited by hand.
+      - path: client/
+        linters: [godoclint]
       # The root command builds its own context for graceful shutdown (see node.go), so callers cannot pass one.
       - path: cmd/bwg/(main|wallet_test)\.go
         linters: [contextcheck]
