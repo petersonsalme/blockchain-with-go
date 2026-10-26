@@ -40,7 +40,7 @@ func grow(base []*domain.Block, validator string, diffs ...int) []*domain.Block 
 		prev := out[len(out)-1]
 		out = append(out, sealed(&domain.Block{
 			Index: prev.Index + 1, Timestamp: syncT0.Add(time.Duration(prev.Index+1) * time.Second),
-			MerkleRoot: domain.MerkleRoot(nil), PrevHash: prev.Hash, Difficulty: d, Validator: validator,
+			MerkleRoot: domain.MerkleRoot(nil), PrevHash: blockHash(prev), Difficulty: d, Validator: validator,
 		}))
 	}
 
@@ -138,7 +138,7 @@ func (l *syncLedger) AcceptBlock(_ context.Context, b *domain.Block) error {
 		}
 	}
 
-	if b.PrevHash != l.blocks[len(l.blocks)-1].Hash {
+	if b.PrevHash != blockHash(l.blocks[len(l.blocks)-1]) {
 		return ErrNotOnTip
 	}
 
@@ -590,7 +590,7 @@ func headerLies(canonical []*domain.Block) map[string]pageMutation {
 		"header with a wrong hash": func(route string, from, _ int, page []*domain.Block) []*domain.Block {
 			if route == "headers" && from == 1 {
 				page = orig(page)
-				page[3].Hash = strings.Repeat("0", 64)
+				page[len(page)-1].Hash = strings.Repeat("0", 64)
 			}
 
 			return page
@@ -1227,5 +1227,18 @@ func TestSyncRequestFailuresDisconnectWithoutBan(t *testing.T) {
 		if len(peer.requests()) >= failAt && hasPeer(n, idA) {
 			t.Fatalf("request %d failed but the peer is still connected", failAt)
 		}
+	}
+}
+
+func TestSyncAcceptsAnUnsealedGenesisAndTheHighestDifficulty(t *testing.T) {
+	genesis := &domain.Block{Timestamp: syncT0, MerkleRoot: domain.MerkleRoot(nil)} // never sealed: Hash is empty
+	canonical := grow([]*domain.Block{genesis}, "A", 1, maxDifficulty, 1)
+	l := newSyncLedger(canonical[:1])
+	peer := newSyncPeer(t, canonical)
+	n := newSyncNode(t, l)
+	n.connectTo(t, idA, peer)
+
+	if !n.Sync(context.Background()) || l.height() != 3 || n.book.Banned(idA, peer.srv.URL) {
+		t.Fatalf("height %d", l.height())
 	}
 }
