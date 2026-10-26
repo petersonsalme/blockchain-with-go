@@ -23,6 +23,7 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus"
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus/pow"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
+	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/memory"
 	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
 )
@@ -137,6 +138,12 @@ func (brokenChain) Balance(string) (uint64, []chain.UTXO) {
 func (brokenChain) Mine(context.Context, []domain.Transaction) (*domain.Block, error) {
 	return nil, errors.New("unused")
 }
+
+// prunedChain answers every block lookup as pruned (ADR-0014).
+type prunedChain struct{ brokenChain }
+
+func (prunedChain) BlockByHeight(int) (*domain.Block, error)  { return nil, storage.ErrPruned }
+func (prunedChain) BlockByHash(string) (*domain.Block, error) { return nil, storage.ErrPruned }
 
 // spyMineChain counts Mine calls and returns a valid mock block.
 type spyMineChain struct {
@@ -816,6 +823,17 @@ var _ = Describe("Server", func() {
 					rec := httptest.NewRecorder()
 					h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/block/"+ref, nil))
 					Expect(rec.Code).To(Equal(http.StatusInternalServerError))
+				}
+			})
+
+			It("returns 410 block_pruned when the block body was pruned", func() {
+				srv, err := NewServer(prunedChain{}, Config{})
+				Expect(err).NotTo(HaveOccurred())
+				h := srv.Handler()
+				for _, ref := range []string{"0", strings.Repeat("a", 64)} {
+					rec := httptest.NewRecorder()
+					h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/block/"+ref, nil))
+					expectError(rec, http.StatusGone, "block_pruned")
 				}
 			})
 		})

@@ -299,6 +299,10 @@ func (s *Server) handleGetBlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if errors.Is(err, storage.ErrPruned) {
+		respondWithJSON(w, http.StatusGone, errorResponse{Error: "block body was pruned; only its header is kept", Code: blockPrunedCode})
+		return
+	}
 	if errors.Is(err, storage.ErrNotFound) {
 		respondWithJSON(w, http.StatusNotFound, errorResponse{Error: "block not found", Code: blockNotFoundCode})
 		return
