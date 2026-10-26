@@ -31,6 +31,8 @@ blockchain-with-go/
 │   └── vm/            # Contract VM: pure stack-machine interpreter with gas (ADR-0014); depends only on domain
 ├── pkg/
 │   └── wallet/        # Ed25519 keys, addressing and keystore
+├── Dockerfile         # Multi-stage image: static bwg on distroless nonroot, runs `bwg node` on 8080
+├── .goreleaser.yaml   # Release build of bwg (linux/darwin/windows × amd64/arm64); run on `v*` tags by release.yml
 ├── openapi.yaml       # HTTP API contract (OpenAPI 3.0.3); internal/server/contract_test.go checks the server against it
 ├── go.mod             # Go module and dependencies
 └── README.md          # Project documentation and run instructions
@@ -64,6 +66,8 @@ Everything else (HTTP handlers and DTOs, logging, docs, README, CLI, build files
    - Go formatting (gofumpt + goimports): `golangci-lint fmt`; auto-fix style findings (wsl, nlreturn, godot): `golangci-lint run --fix ./...`
    - Build check: `go build -o /dev/null ./cmd/bwg`
    - Run the node locally: `go run ./cmd/bwg node`
+   - Docker smoke (build, non-root user, `GET /health` in memory and with `DATA_DIR=/data`): `scripts/docker-smoke.sh`
+   - Release config check and local snapshot build: `go run github.com/goreleaser/goreleaser/v2@v2.19.0 check` and `go run github.com/goreleaser/goreleaser/v2@v2.19.0 release --snapshot --clean` (output in `dist/`, ignored)
    - Regenerate the client after editing `openapi.yaml`: `go generate ./client/...` (CI fails on `git diff --exit-code client/`)
    - CI quality gates (`.github/workflows/go-ci.yml`), local equivalents:
      - Tests with race detector and coverage profile: `go test -race -covermode=atomic -coverprofile=coverage.out ./...`
