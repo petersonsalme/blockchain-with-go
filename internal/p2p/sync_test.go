@@ -69,6 +69,7 @@ type syncLedger struct {
 	acceptErr  func(*domain.Block) error
 	replaceErr func([]*domain.Block) error
 
+	rangeReqs            []string // "from/limit" of every BlocksRange call
 	tipCalls, rangeCalls int
 	failTip, failRange   int  // the call to fail, counting from 1; 0 never fails
 	emptyRange           bool // the failing BlocksRange answers an empty page instead of an error
@@ -102,6 +103,8 @@ func (l *syncLedger) BlocksRange(from, limit int) ([]*domain.Block, error) {
 	defer l.mu.Unlock()
 
 	l.rangeCalls++
+
+	l.rangeReqs = append(l.rangeReqs, fmt.Sprintf("%d/%d", from, limit))
 	if l.rangeCalls == l.failRange {
 		if l.emptyRange {
 			return nil, nil
@@ -513,6 +516,11 @@ func TestSyncFindsAForkBelowTheWindow(t *testing.T) {
 	}
 
 	reqs := peer.requests()
+
+	if !slices.Contains(l.rangeReqs, "51/1000") || !slices.Contains(l.rangeReqs, "1051/50") {
+		t.Fatalf("local ranges = %v", l.rangeReqs)
+	}
+
 	if reqs[0] != "headers?from=101&limit=1000" || reqs[1] != "headers?from=0&limit=101" {
 		t.Fatalf("window requests = %v", reqs[:2])
 	}

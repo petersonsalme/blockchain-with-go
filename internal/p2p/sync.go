@@ -18,7 +18,7 @@ const (
 	// DefaultBanDuration is how long a misbehaving peer stays banned when WithBanDuration gives none.
 	DefaultBanDuration = time.Hour
 	// SyncAttemptTimeout bounds one sync attempt against one peer.
-	SyncAttemptTimeout = 2 * time.Minute
+	SyncAttemptTimeout = time.Duration(120e9) // 2 minutes
 	// HeaderBatch is the most headers asked for in one request.
 	HeaderBatch = 1000
 	// BodyBatch is the most block bodies asked for in one request.
@@ -125,19 +125,32 @@ func (n *Node) syncAttempt(ctx context.Context, p PeerInfo) bool {
 // settle applies the outcome of an attempt: misbehaviour (and any error the
 // ledger gives for the peer's blocks) bans, a failed request disconnects, the rest is no one's fault.
 func (n *Node) settle(ctx context.Context, p PeerInfo, err error) {
-	switch {
-	case err == nil:
-	case errors.Is(err, errMisbehaved):
+	if err == nil {
+		return
+	}
+
+	if errors.Is(err, errMisbehaved) {
 		n.ban(p, err)
-	case ctx.Err() != nil:
-	case errors.Is(err, errRequest):
+		return
+	}
+
+	if ctx.Err() != nil {
+		return
+	}
+
+	if errors.Is(err, errRequest) {
 		n.log.Warn("p2p: sync request failed", "addr", p.Addr, "error", err)
 		n.book.Disconnect(p.NodeID)
-	case errors.Is(err, ErrInsufficientWork), errors.Is(err, ErrNotOnTip), errors.Is(err, ErrLocalFailure), errors.Is(err, ErrPeerPruned):
-		n.log.Info("p2p: sync stopped", "addr", p.Addr, "reason", err)
-	default:
-		n.ban(p, err)
+
+		return
 	}
+
+	if errors.Is(err, ErrInsufficientWork) || errors.Is(err, ErrNotOnTip) || errors.Is(err, ErrLocalFailure) || errors.Is(err, ErrPeerPruned) {
+		n.log.Info("p2p: sync stopped", "addr", p.Addr, "reason", err)
+		return
+	}
+
+	n.ban(p, err)
 }
 
 func (n *Node) ban(p PeerInfo, reason error) {
@@ -191,7 +204,7 @@ func (n *Node) localRange(from, count int) ([]*domain.Block, error) {
 		}
 
 		if len(page) == 0 {
-			return nil, fmt.Errorf("%w: no block at height %d", ErrLocalFailure, from+len(out))
+			return nil, fmt.Errorf("%w: short range from height %d", ErrLocalFailure, from)
 		}
 
 		out = append(out, page...)
@@ -372,21 +385,36 @@ func (n *Node) fetchHeaders(ctx context.Context, addr string, from, limit int, p
 	}
 
 	for i, h := range headers {
-		switch {
-		case h == nil || h.Index != from+i:
-			return nil, misbehaved("header out of order at position %d from height %d", i, from)
-		case h.Index > 0 && h.Hash != h.CalculateHash():
-			return nil, misbehaved("header %d has a wrong hash", h.Index)
-		case h.Difficulty < 0 || h.Difficulty > maxDifficulty:
-			return nil, misbehaved("header %d has difficulty %d", h.Index, h.Difficulty)
-		case prev != nil && h.PrevHash != blockHash(prev):
-			return nil, misbehaved("header %d does not link to its parent", h.Index)
+		err = checkHeader(h, i, from, prev)
+		if err != nil {
+			return nil, err
 		}
 
 		prev = h
 	}
 
 	return headers, nil
+}
+
+// checkHeader checks the i-th header of a page asked from height from: height, hash, difficulty and link to prev (when known).
+func checkHeader(h *domain.Block, i, from int, prev *domain.Block) error {
+	if h == nil || h.Index != from+i {
+		return misbehaved("header out of order at position %d from height %d", i, from)
+	}
+
+	if h.Index > 0 && h.Hash != h.CalculateHash() {
+		return misbehaved("header %d has a wrong hash", h.Index)
+	}
+
+	if h.Difficulty < 0 || h.Difficulty > maxDifficulty {
+		return misbehaved("header %d has difficulty %d", h.Index, h.Difficulty)
+	}
+
+	if prev != nil && h.PrevHash != blockHash(prev) {
+		return misbehaved("header %d does not link to its parent", h.Index)
+	}
+
+	return nil
 }
 
 // fetchBodies returns the blocks for headers, checked against them.
