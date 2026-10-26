@@ -1887,6 +1887,8 @@ type GetBlockResponse struct {
 	JSON400 *BadRequest
 	// JSON404 the response for an HTTP 404 `application/json` response
 	JSON404 *NotFound
+	// JSON410 the response for an HTTP 410 `application/json` response
+	JSON410 *ErrorResponse
 	// JSON429 the response for an HTTP 429 `application/json` response
 	JSON429 *RateLimited
 	// JSON500 the response for an HTTP 500 `application/json` response
@@ -1908,6 +1910,11 @@ func (r GetBlockResponse) GetJSON400() *BadRequest {
 // GetJSON404 returns the response for an HTTP 404 `application/json` response
 func (r GetBlockResponse) GetJSON404() *NotFound {
 	return r.JSON404
+}
+
+// GetJSON410 returns the response for an HTTP 410 `application/json` response
+func (r GetBlockResponse) GetJSON410() *ErrorResponse {
+	return r.JSON410
 }
 
 // GetJSON429 returns the response for an HTTP 429 `application/json` response
@@ -3384,6 +3391,13 @@ func ParseGetBlockResponse(rsp *http.Response) (*GetBlockResponse, error) {
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 410:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON410 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
 		var dest RateLimited

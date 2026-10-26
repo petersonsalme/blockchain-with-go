@@ -137,6 +137,7 @@ Design decisions live in [`docs/adr/`](docs/adr/0009-merkle-tree.md):
 | [0009](docs/adr/0009-merkle-tree.md) | Transaction Merkle tree in the block header (RFC 6962 odd-node rule) |
 | [0010](docs/adr/0010-prometheus-metrics.md) | Prometheus metrics written by hand, no client library |
 | [0012](docs/adr/0012-difficulty-bits.md) | Proof-of-work difficulty counts leading zero bits; defaults realigned with `MINING_TIMEOUT` |
+| [0014](docs/adr/0014-snapshots-and-pruning.md) | UTXO snapshots every N blocks, pruning of old bodies to headers, and boot from a snapshot file |
 | [0015](docs/adr/0015-coinbase-and-halving.md) | Coinbase reward capped at `Subsidy(height) + fees`, with halving every 210,000 blocks |
 | [0016](docs/adr/0016-bwg-cli-composition-root.md) | One `bwg` binary is the composition root; `bwg node` replaces `cmd/node` |
 | [0017](docs/adr/0017-hd-wallet-slip10.md) | HD wallet: BIP-39 mnemonics with SLIP-0010 ed25519 derivation (hardened only) |
@@ -160,6 +161,8 @@ The application can be configured via environment variables (e.g., in a `.env` f
 | `GENESIS_ALLOCATIONS` | Genesis outputs as `address:amount[,address:amount...]`. Each address must be a valid wallet address and each amount an integer from 1 to 2^64−1; an invalid item stops the node at startup. Whitespace around each item and around `:` is ignored. Only used when the chain is empty (the genesis is created); ignored otherwise | empty (genesis without transactions) |
 | `MINER_ADDRESS` | Wallet address that receives the coinbase (`Subsidy(height) + fees`) of every block this node mines. Blank or only spaces adds no coinbase; an invalid address stops the node at startup, naming the variable | empty (no coinbase) |
 | `DATA_DIR` | Directory for persistent disk storage (stores `chain.db` and the known peer addresses in `peers.json`; a corrupt `peers.json` stops the node). When empty, the in-memory repository is used | empty (in-memory storage) |
+| `SNAPSHOT_INTERVAL` | Blocks between stored UTXO snapshots (non-negative integer; `0` disables them). With `PRUNE_KEEP_BLOCKS=K`, the snapshot of height `t − K` is stored when block `t` is committed. An invalid value stops the node at startup | `1000` |
+| `PRUNE_KEEP_BLOCKS` | `0` keeps every block body (full node). A value `>= 100` keeps the bodies of at least that many recent blocks and prunes older ones down to their headers; requires `SNAPSHOT_INTERVAL > 0`. Values from 1 to 99, or invalid ones, stop the node at startup. Pruning cannot be undone: a pruned `chain.db` refuses to open with `0` | `0` |
 | `SEED_PEERS` | Peers to dial at start: base URLs `http(s)://host:port`, comma-separated (spaces ignored). An invalid item stops the node, naming it | empty |
 | `P2P_LISTEN_ADDR` | Base URL other nodes use to reach this one, sent in every hello and advertised to peers. Empty means the node dials out but accepts no inbound peers; an invalid value stops the node | empty |
 | `MAX_INBOUND_PEERS` | Maximum inbound peers (positive integer; invalid values use the default) | `16` |
@@ -247,6 +250,23 @@ reindexed: tip height 42
 ```
 
 `--reindex` opens `$DATA_DIR/chain.db`, drops and rebuilds the indexes from the blocks in one transaction, prints the tip height (`reindexed: empty chain` when there are no blocks) and exits with code 0 without opening an HTTP port. Running it twice leaves the file in the same state as running it once. It exits with a non-zero code and an error on stderr when `DATA_DIR` is empty (the in-memory repository has nothing to rebuild), when `DATA_DIR` does not exist, or when another process holds `chain.db` (the lock wait is 1 second). `DATA_DIR` is also read from `.env` when present.
+
+### Snapshots and pruning
+
+Every `SNAPSHOT_INTERVAL` blocks the node stores a snapshot of the UTXO set together with a SHA-256 hash over the block hash and the sorted unspent outputs ([ADR-0014](docs/adr/0014-snapshots-and-pruning.md)). With `PRUNE_KEEP_BLOCKS` above `0`, block bodies below the snapshot are replaced by their headers (the hash and Merkle root stay verifiable), so `chain.db` holds the headers, the UTXO set and only the recent bodies. A pruned node follows reorgs only down to the pruned height. `GET /block/{ref}` for a pruned block returns `410` `block_pruned`, `GET /` and `GET /blocks` list pruned blocks with `"Transactions": []`, and a transaction of a pruned block returns `404` `tx_not_found`.
+
+A full node can export its stored snapshot, and a new node can start from it instead of replaying the whole chain:
+
+```sh
+$ DATA_DIR=./full go run ./cmd/bwg node --snapshot-export snapshot.json
+snapshot: height 990 hash 3f5c...
+$ DATA_DIR=./fresh PRUNE_KEEP_BLOCKS=100 go run ./cmd/bwg node --snapshot-import snapshot.json --snapshot-hash 3f5c...
+restored: height 990
+```
+
+`--snapshot-import` needs an empty `DATA_DIR`. It checks the file's hash against `--snapshot-hash` and every header against the consensus (`CONSENSUS` and its settings must match the exporting node), then writes the headers and the UTXO set; blocks after the snapshot height arrive like any other blocks. Neither flag opens an HTTP port; both exit with a non-zero code and an error on stderr when a check fails, leaving `chain.db` empty on import.
+
+**Trust model:** blocks do not commit to the UTXO set, so no consensus rule can prove a snapshot is honest. The hash only proves the file is the one a full node reported. Take `--snapshot-hash` from a full node you trust (its `--snapshot-export` output), never from the same place as the file. This is the same model as Bitcoin Core's `assumeutxo`.
 
 ### CLI (bwg)
 
@@ -379,7 +399,7 @@ Paginated read of the chain. Query: `from` (default `0`) and `limit` (default `2
 
 ### GET /block/{ref}
 
-`ref` is a block hash (64 lowercase hex characters) or a height (decimal digits, fewer than 64). Returns `200` with the block in the same JSON format as `POST /`. Any other form returns `400` `invalid_block_ref`; a block outside the chain returns `404` `block_not_found`. The genesis block carries no hash, so look it up by height (`/block/0`).
+`ref` is a block hash (64 lowercase hex characters) or a height (decimal digits, fewer than 64). Returns `200` with the block in the same JSON format as `POST /`. Any other form returns `400` `invalid_block_ref`; a block outside the chain returns `404` `block_not_found`. The genesis block carries no hash, so look it up by height (`/block/0`). On a pruned node, a block below the pruned height returns `410` `block_pruned` (see [Snapshots and pruning](#snapshots-and-pruning)).
 
 ### GET /tx/{id}
 

@@ -136,6 +136,12 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
+        "410":
+          description: The block body was pruned; only its header is kept (`block_pruned`, ADR-0014).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
         "500":

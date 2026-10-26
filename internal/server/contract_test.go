@@ -108,6 +108,13 @@ func contractCases() []contractCase {
 	brokenAt := func(target string) func() (http.Handler, string, string) {
 		return func() (http.Handler, string, string) { return broken(), target, "" }
 	}
+	prunedAt := func(target string) func() (http.Handler, string, string) {
+		return func() (http.Handler, string, string) {
+			srv, err := NewServer(prunedChain{}, Config{})
+			Expect(err).NotTo(HaveOccurred())
+			return srv.Handler(), target, ""
+		}
+	}
 	limited := func(target string) func() (http.Handler, string, string) {
 		return func() (http.Handler, string, string) {
 			now := time.Unix(fixedNow, 0)
@@ -183,6 +190,7 @@ func contractCases() []contractCase {
 		{method: "GET", route: "/block/{ref}", status: 200, serve: plain("/block/0")},
 		{method: "GET", route: "/block/{ref}", status: 400, specInvalid: true, serve: plain("/block/not-a-ref")},
 		{method: "GET", route: "/block/{ref}", status: 404, serve: plain("/block/999")},
+		{method: "GET", route: "/block/{ref}", status: 410, serve: prunedAt("/block/0")},
 		{method: "GET", route: "/block/{ref}", status: 429, serve: limited("/block/0"), warmup: 1},
 		{method: "GET", route: "/block/{ref}", status: 500, serve: brokenAt("/block/0")},
 
