@@ -134,14 +134,6 @@ func (p *ProofOfWork) WithWorkers(n int) *ProofOfWork {
 	return p
 }
 
-func (p *ProofOfWork) workers() int {
-	if p.Workers < 1 {
-		return runtime.NumCPU()
-	}
-
-	return p.Workers
-}
-
 // WithRetarget enables retargeting every interval blocks towards target per
 // block, and returns p. An interval of 0 disables it.
 func (p *ProofOfWork) WithRetarget(interval int, target time.Duration) *ProofOfWork {
@@ -225,6 +217,14 @@ func (p *ProofOfWork) Verify(history []*domain.Block, b *domain.Block) error {
 	}
 
 	return nil
+}
+
+func (p *ProofOfWork) workers() int {
+	if p.Workers < 1 {
+		return runtime.NumCPU()
+	}
+
+	return p.Workers
 }
 
 // MineWithContext searches for a nonce whose hash satisfies the given difficulty

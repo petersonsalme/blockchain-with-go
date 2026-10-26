@@ -68,21 +68,6 @@ func (b *Book) AddAddrs(addrs ...string) int {
 	return n
 }
 
-func (b *Book) addLocked(raw string) bool {
-	a, err := NormalizeAddr(raw)
-	if err != nil {
-		return false
-	}
-
-	if _, ok := b.addrs[a]; ok || len(b.addrs) >= b.limits.MaxAddrs {
-		return false
-	}
-
-	b.addrs[a] = struct{}{}
-
-	return true
-}
-
 // Addrs returns the known addresses, sorted.
 func (b *Book) Addrs() []string {
 	b.mu.Lock()
@@ -102,20 +87,6 @@ func (b *Book) Candidates() []string {
 	}
 
 	return b.sortedAddrs(func(a string) bool { return !used[a] })
-}
-
-func (b *Book) sortedAddrs(keep func(string) bool) []string {
-	out := []string{}
-
-	for a := range b.addrs {
-		if keep(a) {
-			out = append(out, a)
-		}
-	}
-
-	sort.Strings(out)
-
-	return out
 }
 
 // Connect registers the sender of h as a peer. A NodeID that is already
@@ -208,3 +179,32 @@ func (b *Book) Expire(before time.Time) int {
 
 // MaxOutbound returns the effective limit of outbound peers.
 func (b *Book) MaxOutbound() int { return b.limits.MaxOutbound }
+
+func (b *Book) addLocked(raw string) bool {
+	a, err := NormalizeAddr(raw)
+	if err != nil {
+		return false
+	}
+
+	if _, ok := b.addrs[a]; ok || len(b.addrs) >= b.limits.MaxAddrs {
+		return false
+	}
+
+	b.addrs[a] = struct{}{}
+
+	return true
+}
+
+func (b *Book) sortedAddrs(keep func(string) bool) []string {
+	out := []string{}
+
+	for a := range b.addrs {
+		if keep(a) {
+			out = append(out, a)
+		}
+	}
+
+	sort.Strings(out)
+
+	return out
+}

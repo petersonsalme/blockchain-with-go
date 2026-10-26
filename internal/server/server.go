@@ -138,29 +138,6 @@ type route struct {
 	handler http.HandlerFunc
 }
 
-// routes lists the method patterns of Handler; contract_test.go checks them against openapi.yaml.
-func (s *Server) routes() []route {
-	return []route{
-		{"GET /{$}", s.handleGetBlockchain},
-		{"POST /{$}", s.handleWriteBlock},
-		{"POST /tx", s.handleSubmitTx},
-		{"POST /mine", s.handleMine},
-		{"GET /mempool", s.handleGetMempool},
-		{"GET /blocks", s.handleGetBlocks},
-		{"GET /block/{ref}", s.handleGetBlock},
-		{"GET /tx/{id}", s.handleGetTx},
-		{"GET /tx/{id}/proof", s.handleGetTxProof},
-		{"GET /balance/{addr}", s.handleGetBalance},
-		{"GET /contracts/{id}", s.handleGetContract},
-		{"GET /health", s.handleHealth},
-		{"GET /metrics", s.handleMetrics},
-		{"GET /events", s.handleEvents},
-		{"POST /p2p/hello", s.handleP2PHello},
-		{"GET /p2p/peers", s.handleP2PPeers},
-		{"POST /legacy/bpm", s.handleLegacyBPM},
-	}
-}
-
 // Handler returns the routes of s.
 //
 // Each path also registers a method-less fallback: it is less specific than the method
@@ -214,6 +191,29 @@ func (s *Server) HTTPServer(ctx context.Context, addr string) *http.Server {
 		ReadTimeout:    10 * time.Second,
 		WriteTimeout:   10 * time.Second,
 		MaxHeaderBytes: 1 << 20,
+	}
+}
+
+// routes lists the method patterns of Handler; contract_test.go checks them against openapi.yaml.
+func (s *Server) routes() []route {
+	return []route{
+		{"GET /{$}", s.handleGetBlockchain},
+		{"POST /{$}", s.handleWriteBlock},
+		{"POST /tx", s.handleSubmitTx},
+		{"POST /mine", s.handleMine},
+		{"GET /mempool", s.handleGetMempool},
+		{"GET /blocks", s.handleGetBlocks},
+		{"GET /block/{ref}", s.handleGetBlock},
+		{"GET /tx/{id}", s.handleGetTx},
+		{"GET /tx/{id}/proof", s.handleGetTxProof},
+		{"GET /balance/{addr}", s.handleGetBalance},
+		{"GET /contracts/{id}", s.handleGetContract},
+		{"GET /health", s.handleHealth},
+		{"GET /metrics", s.handleMetrics},
+		{"GET /events", s.handleEvents},
+		{"POST /p2p/hello", s.handleP2PHello},
+		{"GET /p2p/peers", s.handleP2PPeers},
+		{"POST /legacy/bpm", s.handleLegacyBPM},
 	}
 }
 

@@ -182,40 +182,6 @@ func (s *Service) Contract(id string) (code []byte, storage map[uint64]uint64, o
 	return slices.Clone(c.Code), maps.Clone(c.Storage), true
 }
 
-// applyContracts adds d to the contract state once its block is committed.
-func (s *Service) applyContracts(d vm.Delta) {
-	s.contractsMu.Lock()
-	defer s.contractsMu.Unlock()
-
-	s.contracts.Apply(d)
-}
-
-// confirmedDelta is the contract delta of a block holding txs over the
-// confirmed state. Outside writeSem a block mined meanwhile only makes the
-// answer stale, as for the UTXO checks.
-func (s *Service) confirmedDelta(txs []domain.Transaction) (vm.Delta, error) {
-	s.contractsMu.RLock()
-	defer s.contractsMu.RUnlock()
-
-	return vm.BlockDelta(s.contracts, &domain.Block{Transactions: txs})
-}
-
-// genesis builds the first block, with an allocation transaction when configured.
-func (s *Service) genesis() *domain.Block {
-	now := time.Now()
-
-	block := &domain.Block{Timestamp: now, Transactions: []domain.Transaction{}}
-	if len(s.allocations) > 0 {
-		alloc := domain.Transaction{Outputs: s.allocations, Timestamp: now}
-		alloc.ID = alloc.CalculateHash()
-		block.Transactions = append(block.Transactions, alloc)
-	}
-
-	block.MerkleRoot = domain.MerkleRoot(block.Transactions)
-
-	return block
-}
-
 // verifyInputs checks the signature of every input against the output it
 // spends. It must run after a successful BlockDelta over txs and view, so every
 // input resolves either in view or in an earlier transaction of txs.
@@ -279,20 +245,6 @@ func (s *Service) BlockByHash(hash string) (*domain.Block, error) {
 	return s.retained(b)
 }
 
-// retained returns b, or storage.ErrPruned when the repository keeps only its header.
-func (s *Service) retained(b *domain.Block) (*domain.Block, error) {
-	below, err := s.repo.PrunedBelow()
-	if err != nil {
-		return nil, err
-	}
-
-	if b.Index < below {
-		return nil, storage.ErrPruned
-	}
-
-	return b, nil
-}
-
 // BlocksRange returns up to limit blocks starting at height from. Blocks below
 // the pruned height come as headers, with no transactions.
 func (s *Service) BlocksRange(from, limit int) ([]*domain.Block, error) {
@@ -317,28 +269,6 @@ func (s *Service) Transaction(id string) (*domain.Transaction, string, int, erro
 	tx := b.Transactions[i]
 
 	return &tx, b.Hash, b.Index, nil
-}
-
-// locate finds the block holding the transaction id and its position there,
-// through the persisted index. It returns storage.ErrNotFound when none does.
-func (s *Service) locate(id string) (*domain.Block, int, error) {
-	h, err := s.repo.TxHeight(id)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	b, err := s.repo.ByHeight(h)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	for i := range b.Transactions {
-		if b.Transactions[i].CalculateHash() == id {
-			return b, i, nil
-		}
-	}
-
-	return nil, 0, storage.ErrNotFound
 }
 
 // InclusionProof proves that a transaction belongs to the block at BlockIndex:
@@ -400,74 +330,12 @@ func (s *Service) TransactionsByAddress(addr string) ([]domain.Transaction, erro
 	return txs, nil
 }
 
-// addressTxs reads the transactions of addr from the index and the blocks.
-func (s *Service) addressTxs(addr string) ([]domain.Transaction, error) {
-	ids, err := s.repo.TxsByAddress(addr)
-	if err != nil {
-		return nil, err
-	}
-
-	txs := make([]domain.Transaction, 0, len(ids))
-	blocks := map[int]*domain.Block{}
-
-	for _, id := range ids {
-		h, err := s.repo.TxHeight(id)
-		if err != nil {
-			return nil, err
-		}
-
-		b, ok := blocks[h]
-		if !ok {
-			if b, err = s.repo.ByHeight(h); err != nil {
-				return nil, err
-			}
-
-			blocks[h] = b
-		}
-
-		i := slices.IndexFunc(b.Transactions, func(tx domain.Transaction) bool { return tx.CalculateHash() == id })
-		if i < 0 {
-			return nil, storage.ErrNotFound
-		}
-
-		txs = append(txs, b.Transactions[i])
-	}
-
-	return txs, nil
-}
-
 // readAttempts bounds how many times consistent repeats a read that raced a write.
 const readAttempts = 5
 
 // ErrTipMoving is returned by the index queries when blocks kept landing while
 // they read, so no attempt saw a single chain.
 var ErrTipMoving = errors.New("chain: tip kept moving while reading")
-
-// consistent runs read until the chain tip is the same before and after it, so
-// a read that spans several repository calls never mixes two chains. An error
-// from a read that raced a write is retried too; one that does not is returned.
-// After readAttempts attempts it gives up with ErrTipMoving.
-func (s *Service) consistent(read func() error) error {
-	for range readAttempts {
-		before, err := s.repo.Last()
-		if err != nil {
-			return err
-		}
-
-		readErr := read()
-
-		after, err := s.repo.Last()
-		if err != nil {
-			return err
-		}
-
-		if before.Hash == after.Hash {
-			return readErr
-		}
-	}
-
-	return ErrTipMoving
-}
 
 // Balance returns the unspent outputs owned by addr, sorted by (TxID, Index),
 // plus their sum, read from the repository's address index, which also covers
@@ -499,30 +367,6 @@ func (s *Service) Balance(addr string) (uint64, []UTXO) {
 	}
 
 	return balance, utxos
-}
-
-// lock takes the write turn, bounded by ctx. The returned func releases it.
-func (s *Service) lock(ctx context.Context) (func(), error) {
-	select {
-	case s.writeSem <- struct{}{}:
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-
-	release := func() { <-s.writeSem }
-
-	if s.diverged {
-		release()
-		return nil, ErrStateDiverged
-	}
-
-	// select picks at random when both cases are ready; do not mine for a dead ctx.
-	if err := ctx.Err(); err != nil {
-		release()
-		return nil, err
-	}
-
-	return release, nil
 }
 
 // Mine seals txs into a new block and appends it to the chain.
@@ -611,6 +455,277 @@ func (s *Service) MinePending(ctx context.Context) (*domain.Block, error) {
 	}
 
 	return s.mineLocked(ctx, s.dropStale(txs))
+}
+
+// ReplaceChain switches the local chain to candidate, a full chain starting at
+// the local genesis, when it carries strictly more accumulated work after the
+// fork point (the first height where the two differ); equal work keeps the
+// local chain. Every candidate block from the fork on is verified by the
+// consensus, the block rules, the UTXO rules and its input signatures, against
+// the UTXO state of the candidate branch itself, before anything is written.
+// The first failure returns its error and leaves the repository and the UTXO
+// set untouched. The swap is one Reorg, which reverts the stored deltas of the
+// dropped blocks and commits the candidate's; a failure of it stops the service
+// like Mine does. Calls
+// are serialized with Mine; waiting for the turn is bounded by ctx.
+// Transactions of the dropped blocks are returned in Reorg.Orphaned; the pool is not revalidated.
+func (s *Service) ReplaceChain(ctx context.Context, candidate []*domain.Block) (*Reorg, error) {
+	release, err := s.lock(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	local, err := s.repo.All()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(local) == 0 {
+		return nil, storage.ErrEmpty
+	}
+
+	fork, err := forkPoint(local, candidate)
+	if err != nil {
+		return nil, err
+	}
+	// A candidate that ends where the chains still agree has no work of its own.
+	if fork == len(candidate) {
+		return nil, ErrInsufficientWork
+	}
+
+	// forkState is the UTXO set at the fork, the base the candidate is checked
+	// against. A fork below the pruned history fails with storage.ErrReorgTooDeep
+	// before anything is written.
+	forkState, err := s.repo.ForkState(fork)
+	if err != nil {
+		return nil, fmt.Errorf("chain: fork at height %d: %w", fork, err)
+	}
+
+	forkContracts, err := vm.BuildState(local[:fork])
+	if err != nil {
+		return nil, fmt.Errorf("chain: fork at height %d: %w", fork, err)
+	}
+
+	// The shared prefix is the local one, whatever else the candidate carries there.
+	history := make([]*domain.Block, fork, len(candidate))
+	copy(history, local[:fork])
+
+	now := time.Now()
+
+	var deltas []domain.UTXODelta
+
+	for _, b := range candidate[fork:] {
+		if b == nil {
+			return nil, ErrInvalidBlock
+		}
+
+		if err := s.consensus.Verify(history, b); err != nil {
+			return nil, err
+		}
+
+		if err := domain.ValidateBlockRules(b, history[len(history)-1], now); err != nil {
+			return nil, err
+		}
+
+		delta, err := domain.BlockDelta(forkState, b, false)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := verifyInputs(forkState, b.Transactions); err != nil {
+			return nil, err
+		}
+
+		contractDelta, err := vm.BlockDelta(forkContracts, b)
+		if err != nil {
+			return nil, err
+		}
+
+		forkState.Apply(delta)
+		forkContracts.Apply(contractDelta)
+
+		deltas = append(deltas, delta)
+		history = append(history, b)
+	}
+
+	if domain.ChainWork(candidate[fork:]).Cmp(domain.ChainWork(local[fork:])) <= 0 {
+		return nil, ErrInsufficientWork
+	}
+
+	connected := slices.Clone(candidate[fork:])
+	if err := s.repo.Reorg(fork, connected, deltas); err != nil {
+		return nil, s.writeFailed(err)
+	}
+
+	s.contractsMu.Lock()
+	s.contracts = forkContracts
+	s.contractsMu.Unlock()
+
+	disconnected := slices.Clone(local[fork:])
+
+	return &Reorg{
+		ForkHeight:   fork,
+		Disconnected: disconnected,
+		Connected:    connected,
+		Orphaned:     orphaned(disconnected, connected),
+	}, nil
+}
+
+// applyContracts adds d to the contract state once its block is committed.
+func (s *Service) applyContracts(d vm.Delta) {
+	s.contractsMu.Lock()
+	defer s.contractsMu.Unlock()
+
+	s.contracts.Apply(d)
+}
+
+// confirmedDelta is the contract delta of a block holding txs over the
+// confirmed state. Outside writeSem a block mined meanwhile only makes the
+// answer stale, as for the UTXO checks.
+func (s *Service) confirmedDelta(txs []domain.Transaction) (vm.Delta, error) {
+	s.contractsMu.RLock()
+	defer s.contractsMu.RUnlock()
+
+	return vm.BlockDelta(s.contracts, &domain.Block{Transactions: txs})
+}
+
+// genesis builds the first block, with an allocation transaction when configured.
+func (s *Service) genesis() *domain.Block {
+	now := time.Now()
+
+	block := &domain.Block{Timestamp: now, Transactions: []domain.Transaction{}}
+	if len(s.allocations) > 0 {
+		alloc := domain.Transaction{Outputs: s.allocations, Timestamp: now}
+		alloc.ID = alloc.CalculateHash()
+		block.Transactions = append(block.Transactions, alloc)
+	}
+
+	block.MerkleRoot = domain.MerkleRoot(block.Transactions)
+
+	return block
+}
+
+// retained returns b, or storage.ErrPruned when the repository keeps only its header.
+func (s *Service) retained(b *domain.Block) (*domain.Block, error) {
+	below, err := s.repo.PrunedBelow()
+	if err != nil {
+		return nil, err
+	}
+
+	if b.Index < below {
+		return nil, storage.ErrPruned
+	}
+
+	return b, nil
+}
+
+// locate finds the block holding the transaction id and its position there,
+// through the persisted index. It returns storage.ErrNotFound when none does.
+func (s *Service) locate(id string) (*domain.Block, int, error) {
+	h, err := s.repo.TxHeight(id)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	b, err := s.repo.ByHeight(h)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	for i := range b.Transactions {
+		if b.Transactions[i].CalculateHash() == id {
+			return b, i, nil
+		}
+	}
+
+	return nil, 0, storage.ErrNotFound
+}
+
+// addressTxs reads the transactions of addr from the index and the blocks.
+func (s *Service) addressTxs(addr string) ([]domain.Transaction, error) {
+	ids, err := s.repo.TxsByAddress(addr)
+	if err != nil {
+		return nil, err
+	}
+
+	txs := make([]domain.Transaction, 0, len(ids))
+	blocks := map[int]*domain.Block{}
+
+	for _, id := range ids {
+		h, err := s.repo.TxHeight(id)
+		if err != nil {
+			return nil, err
+		}
+
+		b, ok := blocks[h]
+		if !ok {
+			if b, err = s.repo.ByHeight(h); err != nil {
+				return nil, err
+			}
+
+			blocks[h] = b
+		}
+
+		i := slices.IndexFunc(b.Transactions, func(tx domain.Transaction) bool { return tx.CalculateHash() == id })
+		if i < 0 {
+			return nil, storage.ErrNotFound
+		}
+
+		txs = append(txs, b.Transactions[i])
+	}
+
+	return txs, nil
+}
+
+// consistent runs read until the chain tip is the same before and after it, so
+// a read that spans several repository calls never mixes two chains. An error
+// from a read that raced a write is retried too; one that does not is returned.
+// After readAttempts attempts it gives up with ErrTipMoving.
+func (s *Service) consistent(read func() error) error {
+	for range readAttempts {
+		before, err := s.repo.Last()
+		if err != nil {
+			return err
+		}
+
+		readErr := read()
+
+		after, err := s.repo.Last()
+		if err != nil {
+			return err
+		}
+
+		if before.Hash == after.Hash {
+			return readErr
+		}
+	}
+
+	return ErrTipMoving
+}
+
+// lock takes the write turn, bounded by ctx. The returned func releases it.
+func (s *Service) lock(ctx context.Context) (func(), error) {
+	select {
+	case s.writeSem <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
+	release := func() { <-s.writeSem }
+
+	if s.diverged {
+		release()
+		return nil, ErrStateDiverged
+	}
+
+	// select picks at random when both cases are ready; do not mine for a dead ctx.
+	if err := ctx.Err(); err != nil {
+		release()
+		return nil, err
+	}
+
+	return release, nil
 }
 
 // fit picks the pool transactions whose sealed block fits domain.MaxBlockBytes.
@@ -818,121 +933,6 @@ func (s *Service) withCoinbase(height int, txs []domain.Transaction, delta domai
 	full, err := domain.BlockDelta(s.repo, &domain.Block{Index: height, Transactions: txs}, false)
 
 	return txs, full, err
-}
-
-// ReplaceChain switches the local chain to candidate, a full chain starting at
-// the local genesis, when it carries strictly more accumulated work after the
-// fork point (the first height where the two differ); equal work keeps the
-// local chain. Every candidate block from the fork on is verified by the
-// consensus, the block rules, the UTXO rules and its input signatures, against
-// the UTXO state of the candidate branch itself, before anything is written.
-// The first failure returns its error and leaves the repository and the UTXO
-// set untouched. The swap is one Reorg, which reverts the stored deltas of the
-// dropped blocks and commits the candidate's; a failure of it stops the service
-// like Mine does. Calls
-// are serialized with Mine; waiting for the turn is bounded by ctx.
-// Transactions of the dropped blocks are returned in Reorg.Orphaned; the pool is not revalidated.
-func (s *Service) ReplaceChain(ctx context.Context, candidate []*domain.Block) (*Reorg, error) {
-	release, err := s.lock(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-
-	local, err := s.repo.All()
-	if err != nil {
-		return nil, err
-	}
-
-	if len(local) == 0 {
-		return nil, storage.ErrEmpty
-	}
-
-	fork, err := forkPoint(local, candidate)
-	if err != nil {
-		return nil, err
-	}
-	// A candidate that ends where the chains still agree has no work of its own.
-	if fork == len(candidate) {
-		return nil, ErrInsufficientWork
-	}
-
-	// forkState is the UTXO set at the fork, the base the candidate is checked
-	// against. A fork below the pruned history fails with storage.ErrReorgTooDeep
-	// before anything is written.
-	forkState, err := s.repo.ForkState(fork)
-	if err != nil {
-		return nil, fmt.Errorf("chain: fork at height %d: %w", fork, err)
-	}
-
-	forkContracts, err := vm.BuildState(local[:fork])
-	if err != nil {
-		return nil, fmt.Errorf("chain: fork at height %d: %w", fork, err)
-	}
-
-	// The shared prefix is the local one, whatever else the candidate carries there.
-	history := make([]*domain.Block, fork, len(candidate))
-	copy(history, local[:fork])
-
-	now := time.Now()
-
-	var deltas []domain.UTXODelta
-
-	for _, b := range candidate[fork:] {
-		if b == nil {
-			return nil, ErrInvalidBlock
-		}
-
-		if err := s.consensus.Verify(history, b); err != nil {
-			return nil, err
-		}
-
-		if err := domain.ValidateBlockRules(b, history[len(history)-1], now); err != nil {
-			return nil, err
-		}
-
-		delta, err := domain.BlockDelta(forkState, b, false)
-		if err != nil {
-			return nil, err
-		}
-
-		if err := verifyInputs(forkState, b.Transactions); err != nil {
-			return nil, err
-		}
-
-		contractDelta, err := vm.BlockDelta(forkContracts, b)
-		if err != nil {
-			return nil, err
-		}
-
-		forkState.Apply(delta)
-		forkContracts.Apply(contractDelta)
-
-		deltas = append(deltas, delta)
-		history = append(history, b)
-	}
-
-	if domain.ChainWork(candidate[fork:]).Cmp(domain.ChainWork(local[fork:])) <= 0 {
-		return nil, ErrInsufficientWork
-	}
-
-	connected := slices.Clone(candidate[fork:])
-	if err := s.repo.Reorg(fork, connected, deltas); err != nil {
-		return nil, s.writeFailed(err)
-	}
-
-	s.contractsMu.Lock()
-	s.contracts = forkContracts
-	s.contractsMu.Unlock()
-
-	disconnected := slices.Clone(local[fork:])
-
-	return &Reorg{
-		ForkHeight:   fork,
-		Disconnected: disconnected,
-		Connected:    connected,
-		Orphaned:     orphaned(disconnected, connected),
-	}, nil
 }
 
 // forkPoint returns the first height where candidate and local differ, which is

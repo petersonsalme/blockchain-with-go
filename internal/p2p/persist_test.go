@@ -93,6 +93,11 @@ type stepFile struct {
 	calls  []string
 }
 
+func (f *stepFile) Write(p []byte) (int, error) { return len(p), f.step("write") }
+func (f *stepFile) Chmod(os.FileMode) error     { return f.step("chmod") }
+func (f *stepFile) Sync() error                 { return f.step("sync") }
+func (f *stepFile) Close() error                { f.closed++; return f.step("close") }
+
 func (f *stepFile) step(name string) error {
 	f.calls = append(f.calls, name)
 	if f.fail == name {
@@ -101,10 +106,6 @@ func (f *stepFile) step(name string) error {
 
 	return nil
 }
-func (f *stepFile) Write(p []byte) (int, error) { return len(p), f.step("write") }
-func (f *stepFile) Chmod(os.FileMode) error     { return f.step("chmod") }
-func (f *stepFile) Sync() error                 { return f.step("sync") }
-func (f *stepFile) Close() error                { f.closed++; return f.step("close") }
 
 func TestWriteAndCloseSteps(t *testing.T) {
 	for _, fail := range []string{"write", "chmod", "sync", "close"} {
