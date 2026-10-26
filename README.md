@@ -258,15 +258,15 @@ Every `SNAPSHOT_INTERVAL` blocks the node stores a snapshot of the UTXO set toge
 A full node can export its stored snapshot, and a new node can start from it instead of replaying the whole chain:
 
 ```sh
-$ DATA_DIR=./full go run ./cmd/node -snapshot-export snapshot.json
+$ DATA_DIR=./full go run ./cmd/bwg node --snapshot-export snapshot.json
 snapshot: height 990 hash 3f5c...
-$ DATA_DIR=./fresh PRUNE_KEEP_BLOCKS=100 go run ./cmd/node -snapshot-import snapshot.json -snapshot-hash 3f5c...
+$ DATA_DIR=./fresh PRUNE_KEEP_BLOCKS=100 go run ./cmd/bwg node --snapshot-import snapshot.json --snapshot-hash 3f5c...
 restored: height 990
 ```
 
-`-snapshot-import` needs an empty `DATA_DIR`. It checks the file's hash against `-snapshot-hash` and every header against the consensus (`CONSENSUS` and its settings must match the exporting node), then writes the headers and the UTXO set; blocks after the snapshot height arrive like any other blocks. Neither flag opens an HTTP port; both exit with a non-zero code and an error on stderr when a check fails, leaving `chain.db` empty on import.
+`--snapshot-import` needs an empty `DATA_DIR`. It checks the file's hash against `--snapshot-hash` and every header against the consensus (`CONSENSUS` and its settings must match the exporting node), then writes the headers and the UTXO set; blocks after the snapshot height arrive like any other blocks. Neither flag opens an HTTP port; both exit with a non-zero code and an error on stderr when a check fails, leaving `chain.db` empty on import.
 
-**Trust model:** blocks do not commit to the UTXO set, so no consensus rule can prove a snapshot is honest. The hash only proves the file is the one a full node reported. Take `-snapshot-hash` from a full node you trust (its `-snapshot-export` output), never from the same place as the file. This is the same model as Bitcoin Core's `assumeutxo`.
+**Trust model:** blocks do not commit to the UTXO set, so no consensus rule can prove a snapshot is honest. The hash only proves the file is the one a full node reported. Take `--snapshot-hash` from a full node you trust (its `--snapshot-export` output), never from the same place as the file. This is the same model as Bitcoin Core's `assumeutxo`.
 
 ### CLI (bwg)
 
