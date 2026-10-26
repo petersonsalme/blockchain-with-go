@@ -245,7 +245,7 @@ var _ = Describe("contract state", func() {
 			_, err := vm.BuildState([]*domain.Block{blockOf(), blockOf(deployTx([]byte{0xEE}))})
 			Expect(err).To(MatchError(vm.ErrInvalidCode))
 			Expect(err.Error()).To(ContainSubstring("block 1"))
-			Expect(errors.Unwrap(err)).NotTo(BeNil())
+			Expect(errors.Unwrap(err)).NotTo(Succeed())
 		})
 	})
 })

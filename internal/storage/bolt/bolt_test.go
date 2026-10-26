@@ -407,7 +407,7 @@ var _ = Describe("Bolt Repository", func() {
 			for range 50 {
 				all, err := repo.All()
 				Expect(err).NotTo(HaveOccurred())
-				Expect(len(all)).To(BeNumerically(">=", 1))
+				Expect(all).ToNot(BeEmpty())
 
 				for j, b := range all {
 					Expect(b.Index).To(Equal(j))
