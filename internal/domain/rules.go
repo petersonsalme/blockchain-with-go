@@ -24,12 +24,12 @@ func MaxBlockBytes() int {
 		return DefaultMaxBlockBytes
 	}
 
-	max, err := strconv.Atoi(raw)
-	if err != nil || max <= 0 {
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit <= 0 {
 		return DefaultMaxBlockBytes
 	}
 
-	return max
+	return limit
 }
 
 // Size returns the length in bytes of the block's JSON encoding.
@@ -42,18 +42,18 @@ func (b *Block) Size() (int, error) {
 	return len(encoded), nil
 }
 
-// ValidateSize rejects blocks whose serialized size is greater than max.
-func ValidateSize(b *Block, max int) error {
+// ValidateSize rejects blocks whose serialized size is greater than limit.
+func ValidateSize(b *Block, limit int) error {
 	size, err := b.Size()
 	if err != nil {
 		return err
 	}
 
-	if size > max {
+	if size > limit {
 		return &ValidationError{
 			Code:    CodeBlockTooLarge,
-			Message: fmt.Sprintf("block size %d exceeds the maximum of %d bytes", size, max),
-			Details: map[string]any{"size": size, "max": max},
+			Message: fmt.Sprintf("block size %d exceeds the maximum of %d bytes", size, limit),
+			Details: map[string]any{"size": size, "max": limit},
 		}
 	}
 

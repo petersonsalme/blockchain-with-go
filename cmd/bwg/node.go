@@ -221,7 +221,7 @@ func parseValidators(raw string) ([]ed25519.PublicKey, error) {
 
 	var keys []ed25519.PublicKey
 
-	for _, item := range strings.Split(raw, ",") {
+	for item := range strings.SplitSeq(raw, ",") {
 		item = strings.TrimSpace(item)
 
 		key, err := hex.DecodeString(item)
@@ -297,7 +297,7 @@ func parseGenesisAllocations(raw string) ([]domain.TxOut, error) {
 
 	var outs []domain.TxOut
 
-	for _, item := range strings.Split(raw, ",") {
+	for item := range strings.SplitSeq(raw, ",") {
 		item = strings.TrimSpace(item)
 
 		addr, value, ok := strings.Cut(item, ":")

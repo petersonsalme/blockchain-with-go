@@ -217,7 +217,7 @@ func (s *Server) HTTPServer(ctx context.Context, addr string) *http.Server {
 	}
 }
 
-func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
+func respondWithJSON(w http.ResponseWriter, code int, payload any) {
 	response, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -606,7 +606,7 @@ func checkTx(w http.ResponseWriter, tx *domain.Transaction) bool {
 	}
 
 	if err := tx.Validate(); err != nil {
-		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: fmt.Sprintf("invalid transaction: %s", err.Error())})
+		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid transaction: " + err.Error()})
 		return false
 	}
 	// Timestamp is signed, so the node must not fill it in.

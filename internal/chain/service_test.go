@@ -619,8 +619,6 @@ var _ = Describe("Service", func() {
 			txs := [][]domain.Transaction{f.tx(), f.tx()}
 
 			for i, svc := range []*Service{a, b} {
-				i, svc := i, svc
-
 				go func() {
 					defer GinkgoRecover()
 
@@ -655,7 +653,7 @@ var _ = Describe("Service", func() {
 
 			var wg sync.WaitGroup
 
-			for i := 0; i < n; i++ {
+			for range n {
 				txs := f.tx()
 
 				wg.Add(1)

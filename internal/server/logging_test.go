@@ -28,7 +28,7 @@ func decodeLog(t *testing.T, buf *bytes.Buffer) []logRecord {
 
 	var out []logRecord
 
-	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(buf.String()), "\n") {
 		if line == "" {
 			continue
 		}

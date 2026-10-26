@@ -75,7 +75,7 @@ var _ = Describe("DiffUTXO", func() {
 			pool[i] = domain.OutPoint{TxID: "tx" + strconv.Itoa(i/3), Index: uint32(i % 3)}
 		}
 
-		for seed := int64(0); seed < 300; seed++ {
+		for seed := range int64(300) {
 			r := rand.New(rand.NewSource(seed))
 			from, to := randomSet(r, pool), randomSet(r, pool)
 			fromBefore := clone(from)

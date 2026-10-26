@@ -2,6 +2,7 @@ package storagetest
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"sort"
 	"sync"
@@ -122,7 +123,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 		const writers, perWriter = 8, 30
 
 		var wg sync.WaitGroup
-		for w := 0; w < writers; w++ {
+		for range writers {
 			wg.Add(2)
 
 			go func() {
@@ -152,7 +153,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 				defer GinkgoRecover()
 				defer wg.Done()
 
-				for i := 0; i < perWriter; i++ {
+				for range perWriter {
 					_, err := repo.All()
 					Expect(err).NotTo(HaveOccurred())
 
@@ -182,7 +183,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 		BeforeEach(func() {
 			blocks = nil
 
-			for i := 0; i < 5; i++ {
+			for i := range 5 {
 				b := &domain.Block{Index: i, Hash: fmt.Sprintf("h%d", i)}
 				if i > 0 {
 					b.PrevHash = blocks[i-1].Hash
@@ -308,7 +309,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 				defer GinkgoRecover()
 				defer wg.Done()
 
-				for i := 0; i < 100; i++ {
+				for range 100 {
 					page, err := repo.Range(0, 1000)
 					Expect(err).NotTo(HaveOccurred())
 
@@ -329,7 +330,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 		// link builds n blocks from index `from`, chained to prev, with hashes tag0, tag1, ...
 		link := func(tag string, from, n int, prev string) []*domain.Block {
 			out := make([]*domain.Block, 0, n)
-			for i := 0; i < n; i++ {
+			for i := range n {
 				b := &domain.Block{Index: from + i, PrevHash: prev, Hash: fmt.Sprintf("%s%d", tag, from+i)}
 				out = append(out, b)
 				prev = b.Hash
@@ -513,7 +514,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 			stop := make(chan struct{})
 
 			var readers, writers sync.WaitGroup
-			for r := 0; r < 4; r++ {
+			for range 4 {
 				readers.Add(1)
 
 				go func() {
@@ -548,7 +549,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 				defer GinkgoRecover()
 				defer writers.Done()
 
-				for i := 0; i < rounds; i++ {
+				for i := range rounds {
 					tag := fmt.Sprintf("v%d-", i)
 					Expect(repo.ReplaceFrom(2, link(tag, 2, 1+i%4, "h1"))).To(Succeed())
 				}
@@ -557,7 +558,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 				defer GinkgoRecover()
 				defer writers.Done()
 
-				for i := 0; i < rounds; i++ {
+				for i := range rounds {
 					last, err := repo.Last()
 					Expect(err).NotTo(HaveOccurred())
 
@@ -587,7 +588,7 @@ func newIndexedWorld() *indexedWorld { return &indexedWorld{set: domain.UTXOSet{
 // forkAt returns a world holding the first height blocks of w.
 func (w *indexedWorld) forkAt(height int) *indexedWorld {
 	f := newIndexedWorld()
-	for i := 0; i < height; i++ {
+	for i := range height {
 		f.blocks = append(f.blocks, w.blocks[i])
 		f.deltas = append(f.deltas, w.deltas[i])
 		f.set.Apply(w.deltas[i])
@@ -785,9 +786,7 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 		}
 		copySet := func(src domain.UTXOSet) domain.UTXOSet {
 			set := domain.UTXOSet{}
-			for op, o := range src {
-				set[op] = o
-			}
+			maps.Copy(set, src)
 
 			return set
 		}
@@ -1060,9 +1059,7 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 			}, storage.ErrUTXOConflict),
 			Entry("a delta that creates an existing output", func(fx *indexedFixture) (*domain.Block, domain.UTXODelta) {
 				d := domain.UTXODelta{Spent: map[domain.OutPoint]domain.TxOut{}, Created: map[domain.OutPoint]domain.TxOut{}}
-				for op, o := range fx.main.deltas[2].Created {
-					d.Created[op] = o
-				}
+				maps.Copy(d.Created, fx.main.deltas[2].Created)
 
 				return fx.main.blocks[3], d
 			}, storage.ErrUTXOConflict),
@@ -1214,9 +1211,7 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 			}, storage.ErrUTXOConflict),
 			Entry("a delta that creates an output the set keeps", 2, func(fx *indexedFixture) ([]*domain.Block, []domain.UTXODelta) {
 				keep := domain.UTXODelta{Spent: map[domain.OutPoint]domain.TxOut{}, Created: map[domain.OutPoint]domain.TxOut{}}
-				for op, o := range fx.main.deltas[1].Created {
-					keep.Created[op] = o
-				}
+				maps.Copy(keep.Created, fx.main.deltas[1].Created)
 
 				return fx.alt.blocks[2:3], []domain.UTXODelta{keep}
 			}, storage.ErrUTXOConflict),
@@ -1336,7 +1331,7 @@ func prunedWorld(addrs []string, n int, tag string, salt int64) *indexedWorld {
 	w := newIndexedWorld()
 
 	outs := make([]domain.TxOut, 0, 2*len(addrs))
-	for i := 0; i < 2*len(addrs); i++ {
+	for i := range 2 * len(addrs) {
 		outs = append(outs, domain.TxOut{Amount: 1_000_000_000, Address: addrs[i%len(addrs)]})
 	}
 
@@ -1348,7 +1343,7 @@ func prunedWorld(addrs []string, n int, tag string, salt int64) *indexedWorld {
 }
 
 func (w *indexedWorld) extend(addrs []string, n int, tag string, salt int64) {
-	for i := 0; i < n; i++ {
+	for i := range n {
 		w.step(addrs, salt+int64(i), tag)
 	}
 }
@@ -1518,7 +1513,7 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 	BeforeEach(func() {
 		addrs = nil
 
-		for i := 0; i < 3; i++ {
+		for range 3 {
 			w, err := wallet.New()
 			Expect(err).NotTo(HaveOccurred())
 

@@ -263,12 +263,12 @@ func TestBookConcurrent(t *testing.T) {
 	b := NewBook(Limits{MaxInbound: 4, MaxOutbound: 3, MaxAddrs: 20}, nil)
 
 	var wg sync.WaitGroup
-	for g := 0; g < 8; g++ {
+	for g := range 8 {
 		wg.Add(1)
 		go func(g int) {
 			defer wg.Done()
 
-			for i := 0; i < 200; i++ {
+			for i := range 200 {
 				id := (g*7 + i) % 15
 				_ = b.Connect(hAt(id, fmt.Sprintf("http://h%d:1", id)), id%2 == 0)
 				b.AddAddrs(fmt.Sprintf("http://x%d:1", i))

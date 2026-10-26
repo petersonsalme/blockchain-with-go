@@ -82,7 +82,7 @@ func parseSeedPeers(raw string) ([]string, error) {
 
 	var seeds []string
 
-	for _, item := range strings.Split(raw, ",") {
+	for item := range strings.SplitSeq(raw, ",") {
 		item = strings.TrimSpace(item)
 
 		addr, err := p2p.NormalizeAddr(item)
@@ -122,12 +122,9 @@ func startDialer(ctx context.Context, node *p2p.Node) (stop func()) {
 
 	var wg sync.WaitGroup
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		node.Run(ctx)
-	}()
+	})
 
 	return func() {
 		cancel()

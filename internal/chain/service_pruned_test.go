@@ -19,7 +19,6 @@ const prunedTip = 8
 
 var _ = Describe("Service on a pruned repository", func() {
 	for _, be := range backends {
-		be := be
 		if !be.pruned {
 			continue
 		}
@@ -58,7 +57,7 @@ var _ = Describe("Service on a pruned repository", func() {
 					before := utxoSnapshot(repo)
 
 					var txss [][]domain.Transaction
-					for j := 0; j < prunedTip; j++ {
+					for j := range prunedTip {
 						txss = append(txss, []domain.Transaction{spend(f.owner, f.ops[j], 8)})
 					}
 
@@ -79,7 +78,7 @@ var _ = Describe("Service on a pruned repository", func() {
 					local := mustAll(repo)
 
 					var txss [][]domain.Transaction
-					for j := 0; j < prunedTip-4+1; j++ {
+					for j := range prunedTip - 4 + 1 {
 						txss = append(txss, []domain.Transaction{spend(f.owner, f.ops[4+j], 8)})
 					}
 
@@ -197,7 +196,6 @@ var _ = Describe("Service on a pruned repository", func() {
 
 	// Mine plus ReplaceChain on a complete and on a pruned service end in the same state.
 	for _, be := range backends {
-		be := be
 		if !be.pruned {
 			continue
 		}
@@ -231,7 +229,7 @@ var _ = Describe("Service on a pruned repository", func() {
 			local := mustAll(fullRepo)
 
 			var txss [][]domain.Transaction
-			for j := 0; j < prunedTip-below+2; j++ {
+			for j := range prunedTip - below + 2 {
 				txss = append(txss, []domain.Transaction{spend(f.owner, f.ops[below-1+j], 8)})
 			}
 

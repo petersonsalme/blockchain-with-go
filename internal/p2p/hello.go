@@ -69,7 +69,7 @@ func isHex(s string, n int) bool {
 		return false
 	}
 
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		c := s[i]
 		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			return false
@@ -135,7 +135,7 @@ func validHost(h string) bool {
 		return !strings.Contains(h, "%") && net.ParseIP(h) != nil
 	}
 
-	for i := 0; i < len(h); i++ {
+	for i := range len(h) {
 		c := h[i]
 		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' && c != '.' {
 			return false

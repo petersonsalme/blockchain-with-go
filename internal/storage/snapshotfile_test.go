@@ -16,7 +16,7 @@ func fileFixture() ([]*domain.Block, storage.Snapshot) {
 	var headers []*domain.Block
 
 	prev := ""
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		b := &domain.Block{Index: i, Timestamp: time.Unix(1_700_000_000+int64(i), 0).UTC(), MerkleRoot: "mr", PrevHash: prev, Transactions: []domain.Transaction{}}
 		b.Hash = b.CalculateHash()
 		prev = b.Hash

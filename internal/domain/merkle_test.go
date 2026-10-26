@@ -132,7 +132,7 @@ var _ = Describe("Merkle tree", func() {
 		})
 
 		It("matches the reference for 0..33 transactions", func() {
-			for n := 0; n <= 33; n++ {
+			for n := range 34 {
 				txs := merkleTxs(n)
 				Expect(domain.MerkleRoot(txs)).To(Equal(refRoot(txs)), "n=%d", n)
 			}
@@ -146,7 +146,7 @@ var _ = Describe("Merkle tree", func() {
 		})
 
 		It("does not modify its input", func() {
-			for n := 0; n <= 9; n++ {
+			for n := range 10 {
 				txs := merkleTxs(n)
 				snapshot := cloneTxs(txs)
 				domain.MerkleRoot(txs)

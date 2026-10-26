@@ -404,7 +404,7 @@ var _ = Describe("Bolt Repository", func() {
 			defer GinkgoRecover()
 			defer wg.Done()
 
-			for i := 0; i < 50; i++ {
+			for range 50 {
 				all, err := repo.All()
 				Expect(err).NotTo(HaveOccurred())
 				Expect(len(all)).To(BeNumerically(">=", 1))

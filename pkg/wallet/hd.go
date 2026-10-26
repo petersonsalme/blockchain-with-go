@@ -40,7 +40,7 @@ func parsePath(path string) ([]uint32, error) {
 
 		n, err := strconv.ParseUint(numStr, 10, 31)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrInvalidPath, err)
+			return nil, fmt.Errorf("%w: %w", ErrInvalidPath, err)
 		}
 
 		indices = append(indices, uint32(n))

@@ -146,12 +146,10 @@ func replay(chain []*domain.Block) domain.UTXOSet {
 
 var _ = Describe("Service.ReplaceChain", func() {
 	for _, be := range backends {
-		be := be
 		Describe(be.name, func() {
 			BeforeEach(func() { newRepo = be.open })
 
 			for _, ec := range engineCases {
-				ec := ec
 				Describe(ec.name, func() {
 					var fx *forkFixture
 
@@ -335,7 +333,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 							return func(err error) {
 								var ve *domain.ValidationError
 								Expect(errors.As(err, &ve)).To(BeTrue(), "%v", err)
-								Expect(string(ve.Code)).To(Equal(code))
+								Expect(ve.Code).To(Equal(code))
 							}
 						}
 						is := func(target error) func(error) {
@@ -476,7 +474,6 @@ var _ = Describe("Service.ReplaceChain", func() {
 							"input that only the local branch created", "input that the candidate already spent",
 							"invalid first block of the tail, valid after it", "block older than its parent",
 						} {
-							i, name := i, name
 							It("rejects "+name+" and changes nothing", func() {
 								r := rows()[i]
 								Expect(r.name).To(Equal(name))
@@ -633,7 +630,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 					svc, err := NewService(repo, fixedDifficulty{d})
 					Expect(err).NotTo(HaveOccurred())
 
-					for i := 0; i < n; i++ {
+					for range n {
 						_, err := svc.Mine(context.Background(), []domain.Transaction{})
 						Expect(err).NotTo(HaveOccurred())
 					}
@@ -691,8 +688,6 @@ var _ = Describe("Service.ReplaceChain", func() {
 					var wg sync.WaitGroup
 
 					for _, cand := range candidates {
-						cand := cand
-
 						wg.Add(1)
 
 						go func() {
@@ -706,9 +701,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 						}()
 					}
 
-					for k := 0; k < 4; k++ {
-						k := k
-
+					for k := range 4 {
 						wg.Add(1)
 
 						go func() {

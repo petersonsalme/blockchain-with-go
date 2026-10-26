@@ -33,7 +33,7 @@ func benchRepo(b *testing.B, n int) (*bolt.Repository, []string) {
 
 	var prevTx *domain.Transaction
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		tx := domain.Transaction{
 			Timestamp: time.Unix(1_700_000_000+int64(i), 0).UTC(),
 			Outputs:   []domain.TxOut{{Amount: 1000, Address: w.Address()}},
@@ -73,21 +73,21 @@ func BenchmarkLookups(b *testing.B) {
 	for _, n := range []int{1_000, 20_000} {
 		repo, txids := benchRepo(b, n)
 		b.Run(fmt.Sprintf("ByHash/%d", n), func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
+			for i := range b.N {
 				if _, err := repo.ByHash(fmt.Sprintf("h%d", i%n)); err != nil {
 					b.Fatal(err)
 				}
 			}
 		})
 		b.Run(fmt.Sprintf("ByHeight/%d", n), func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
+			for i := range b.N {
 				if _, err := repo.ByHeight(i % n); err != nil {
 					b.Fatal(err)
 				}
 			}
 		})
 		b.Run(fmt.Sprintf("TxHeight/%d", n), func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
+			for i := range b.N {
 				if _, err := repo.TxHeight(txids[i%n]); err != nil {
 					b.Fatal(err)
 				}

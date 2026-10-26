@@ -3,6 +3,7 @@ package vm_test
 import (
 	"encoding/hex"
 	"errors"
+	"maps"
 	"reflect"
 	"time"
 
@@ -42,9 +43,7 @@ func cloneState(s vm.State) vm.State {
 
 	for id, c := range s {
 		st := map[uint64]uint64{}
-		for k, v := range c.Storage {
-			st[k] = v
-		}
+		maps.Copy(st, c.Storage)
 
 		out[id] = vm.Contract{Code: append([]byte(nil), c.Code...), Storage: st}
 	}

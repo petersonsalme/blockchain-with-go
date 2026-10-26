@@ -165,7 +165,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 
 			tested := false
 
-			for attempt := 0; attempt < 100; attempt++ {
+			for range 100 {
 				candidate := domain.Block{
 					Index:        parent.Index + 1,
 					Timestamp:    time.Now(),

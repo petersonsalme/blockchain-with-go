@@ -35,7 +35,6 @@ func (s *stubRepo) Reindex() error {
 
 var _ = Describe("Service UTXO rules", func() {
 	for _, be := range backends {
-		be := be
 		Describe(be.name, func() {
 			BeforeEach(func() { newRepo = be.open })
 
@@ -469,7 +468,7 @@ var _ = Describe("Service UTXO rules", func() {
 				})
 
 				It("keeps the set equal to a rebuild from the chain after many blocks", func() {
-					for i := 0; i < 5; i++ {
+					for range 5 {
 						_, err := mine(f.tx()[0])
 						Expect(err).NotTo(HaveOccurred())
 					}
@@ -485,7 +484,7 @@ var _ = Describe("Service UTXO rules", func() {
 						ok, spent atomic.Int32
 					)
 
-					for i := 0; i < n; i++ {
+					for i := range n {
 						tx := spend(f.owner, f.ops[0], uint64(1+i%9))
 						tx.Timestamp = tx.Timestamp.Add(time.Duration(i) * time.Nanosecond)
 						tx.ID = tx.CalculateHash()

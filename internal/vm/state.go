@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 )
@@ -57,9 +58,7 @@ func (s *State) Apply(d Delta) {
 
 	for id, writes := range d.Writes {
 		c := (*s)[id]
-		for k, v := range writes {
-			c.Storage[k] = v
-		}
+		maps.Copy(c.Storage, writes)
 	}
 }
 
@@ -163,9 +162,7 @@ func (d *Delta) call(view StateView, op *domain.ContractOp) error {
 		d.Writes[op.Target] = map[uint64]uint64{}
 	}
 
-	for k, v := range res.Writes {
-		d.Writes[op.Target][k] = v
-	}
+	maps.Copy(d.Writes[op.Target], res.Writes)
 
 	return nil
 }

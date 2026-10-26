@@ -57,7 +57,7 @@ func TestRunServesAndShutsDownGracefully(t *testing.T) {
 		resp *http.Response
 		err  error
 	)
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		resp, err = http.Get(url)
 		if err == nil {
 			break
@@ -459,7 +459,7 @@ func TestRunServesAndShutsDownGracefullyWithDataDir(t *testing.T) {
 		resp *http.Response
 		err  error
 	)
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		resp, err = http.Get(url)
 		if err == nil {
 			break

@@ -161,11 +161,11 @@ func (prunedChain) BlockByHash(string) (*domain.Block, error) { return nil, stor
 // spyMineChain counts Mine calls and returns a valid mock block.
 type spyMineChain struct {
 	brokenChain
-	mineCalls int64
+	mineCalls atomic.Int64
 }
 
 func (s *spyMineChain) Mine(ctx context.Context, txs []domain.Transaction) (*domain.Block, error) {
-	atomic.AddInt64(&s.mineCalls, 1)
+	s.mineCalls.Add(1)
 	return &domain.Block{Index: 1, Hash: "0000000000000000000000000000000000000000000000000000000000000001"}, nil
 }
 
@@ -454,7 +454,7 @@ var _ = Describe("Server", func() {
 			codes := make(chan int, n)
 
 			var wg sync.WaitGroup
-			for i := 0; i < n; i++ {
+			for range n {
 				wg.Add(1)
 
 				go func() {
@@ -696,7 +696,7 @@ var _ = Describe("Server", func() {
 			return rec
 		}
 		mineN := func(n int) {
-			for i := 0; i < n; i++ {
+			for range n {
 				rec := httptest.NewRecorder()
 				router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(funds.payload())))
 				Expect(rec.Code).To(Equal(http.StatusCreated))
@@ -1179,7 +1179,7 @@ var _ = Describe("Server", func() {
 
 				stop := make(chan struct{})
 
-				for w := 0; w < writers; w++ {
+				for range writers {
 					wg.Add(1)
 
 					go func() {
@@ -1193,14 +1193,14 @@ var _ = Describe("Server", func() {
 				}
 
 				var rg sync.WaitGroup
-				for r := 0; r < readers; r++ {
+				for range readers {
 					rg.Add(1)
 
 					go func() {
 						defer GinkgoRecover()
 						defer rg.Done()
 
-						for i := 0; i < rounds; i++ {
+						for range rounds {
 							select {
 							case <-stop:
 								return
@@ -1394,7 +1394,7 @@ var _ = Describe("Server", func() {
 			clientIP := "192.168.10.50:9999"
 
 			// Send N = 3 requests: all should be allowed and call Mine
-			for i := 0; i < 3; i++ {
+			for range 3 {
 				req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(funds.payload()))
 				req.RemoteAddr = clientIP
 				rec := httptest.NewRecorder()
@@ -1402,7 +1402,7 @@ var _ = Describe("Server", func() {
 				Expect(rec.Code).To(Equal(http.StatusCreated))
 			}
 
-			Expect(atomic.LoadInt64(&spy.mineCalls)).To(Equal(int64(3)))
+			Expect(spy.mineCalls.Load()).To(Equal(int64(3)))
 
 			// Request N+1 (4th) from same IP at same instant must be rate limited (429)
 			req4 := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(funds.payload()))
@@ -1419,7 +1419,7 @@ var _ = Describe("Server", func() {
 			Expect(errBody["error"]).To(Equal("rate limit exceeded"))
 
 			// Barred request must not call Mine (Inv.3)
-			Expect(atomic.LoadInt64(&spy.mineCalls)).To(Equal(int64(3)))
+			Expect(spy.mineCalls.Load()).To(Equal(int64(3)))
 
 			// The bucket is per IP, not per route: every route of Handler() is limited.
 			// Without the limiter these routes answer 500 (broken Blocks) or 200/4xx, never 429.
@@ -1438,7 +1438,7 @@ var _ = Describe("Server", func() {
 				Expect(rec.Result().Header.Get("Retry-After")).To(Equal("20"), "%s %s", rt.method, rt.path)
 			}
 
-			Expect(atomic.LoadInt64(&spy.mineCalls)).To(Equal(int64(3)))
+			Expect(spy.mineCalls.Load()).To(Equal(int64(3)))
 
 			// Advance clock by 20s (60s/N) so 1 token recovers
 			currentTime = currentTime.Add(20 * time.Second)
@@ -1450,7 +1450,7 @@ var _ = Describe("Server", func() {
 			h.ServeHTTP(rec5, req5)
 
 			Expect(rec5.Code).To(Equal(http.StatusCreated))
-			Expect(atomic.LoadInt64(&spy.mineCalls)).To(Equal(int64(4)))
+			Expect(spy.mineCalls.Load()).To(Equal(int64(4)))
 		})
 
 		It("rate limits the 405 and 404 routes too (ADR-0006)", func() {
@@ -1487,7 +1487,7 @@ var _ = Describe("Server", func() {
 			h := srv.Handler()
 			clientIP := "192.168.10.50:9999"
 
-			for i := 0; i < 100; i++ {
+			for range 100 {
 				req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(funds.payload()))
 				req.RemoteAddr = clientIP
 				rec := httptest.NewRecorder()
@@ -1495,7 +1495,7 @@ var _ = Describe("Server", func() {
 				Expect(rec.Code).To(Equal(http.StatusCreated))
 			}
 
-			Expect(atomic.LoadInt64(&spy.mineCalls)).To(Equal(int64(100)))
+			Expect(spy.mineCalls.Load()).To(Equal(int64(100)))
 		})
 	})
 
@@ -1815,7 +1815,7 @@ var _ = Describe("Server", func() {
 
 			var wg sync.WaitGroup
 
-			for i := 0; i < n; i++ {
+			for i := range n {
 				body := bodies[i]
 
 				wg.Add(1)

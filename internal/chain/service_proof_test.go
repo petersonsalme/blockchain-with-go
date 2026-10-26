@@ -24,7 +24,7 @@ var _ = Describe("Service.TxProof", func() {
 
 	mineBlock := func(n int) {
 		var txs []domain.Transaction
-		for i := 0; i < n; i++ {
+		for range n {
 			txs = append(txs, f.tx()...)
 		}
 

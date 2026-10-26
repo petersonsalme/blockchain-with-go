@@ -50,9 +50,9 @@ func MnemonicFromEntropy(entropy []byte) (string, error) {
 	}
 
 	words := make([]string, numWords)
-	for i := 0; i < numWords; i++ {
+	for i := range numWords {
 		idx := 0
-		for j := 0; j < 11; j++ {
+		for j := range 11 {
 			idx = (idx << 1) | getBit(i*11+j)
 		}
 
@@ -127,7 +127,7 @@ func mnemonicToEntropy(mnemonic string) ([]byte, error) {
 	data := make([]byte, totalBytes)
 
 	for i, idx := range indices {
-		for j := 0; j < 11; j++ {
+		for j := range 11 {
 			bit := (idx >> (10 - j)) & 1
 			if bit == 1 {
 				bitPos := i*11 + j

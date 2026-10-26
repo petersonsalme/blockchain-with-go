@@ -273,7 +273,7 @@ func MineParallel(ctx context.Context, b *domain.Block, difficulty, workers int)
 
 	var wg sync.WaitGroup
 
-	for i := 0; i < workers; i++ {
+	for i := range workers {
 		c := *b
 		c.Difficulty = difficulty
 

@@ -55,8 +55,6 @@ var _ = Describe("Weak Ed25519 public keys on inputs", func() {
 		"y=p-y8 sign 1": "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
 	}
 	for name, pub := range smallOrder {
-		pub := pub
-
 		It("rejects small-order key "+name, func() {
 			Expect(domain.VerifyInputSignature(weakTx(pub), 0, spent)).To(MatchError(domain.ErrInvalidPublicKey))
 		})
@@ -71,8 +69,6 @@ var _ = Describe("Weak Ed25519 public keys on inputs", func() {
 		"y=2^255-1 sign 1": hexLE(0xff, 0xff, 0xff),
 	}
 	for name, pub := range nonCanonical {
-		pub := pub
-
 		It("rejects non-canonical key "+name, func() {
 			Expect(domain.VerifyInputSignature(weakTx(pub), 0, spent)).To(MatchError(domain.ErrInvalidPublicKey))
 		})

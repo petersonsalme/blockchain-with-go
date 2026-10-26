@@ -5,6 +5,24 @@ linters:
     - wsl_v5
     - whitespace
     - godot
+    - gosec
+    - errorlint
+    - forcetypeassert
+    - nilerr
+    - modernize
+    - intrange
+    - perfsprint
+    - unconvert
+    - unparam
+    - copyloopvar
+    - testifylint
+    - thelper
+    - tparallel
+    - usetesting
+    - misspell
+    - revive
+    - gocritic
+    - sloglint
   settings:
     nlreturn:
       # Same threshold as wsl_v5's branch-max-lines: a return in a block of up to 2 lines needs no blank line.
@@ -13,8 +31,46 @@ linters:
       enable:
         - leading-whitespace
         - trailing-whitespace
+    gosec:
+      excludes:
+        # Reviewed: sizes are bounded by MaxBlockBytes and the paths come from operator config, not requests.
+        - G101
+        - G115
+        - G304
+        - G306
+        - G703
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: increment-decrement
+        - name: var-declaration
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: indent-error-flow
+        - name: errorf
+        - name: empty-block
+        - name: superfluous-else
+        - name: unreachable-code
+        - name: redefines-builtin-id
   exclusions:
     rules:
+      # Keys with surrounding spaces are deliberate trimming cases.
+      - path: cmd/bwg/p2p_test.go
+        linters: [gocritic]
+        text: mapKey
+      # Test fixtures use fixed seeds, local URLs and small constants.
+      - path: _test\.go
+        linters: [gosec, unparam, forcetypeassert, thelper]
+      - path: _test\.go
+        linters: [revive]
+        text: "(redefines-builtin-id|context-as-argument|empty-block)"
+      - path: internal/storage/storagetest/
+        linters: [unparam]
       # Ginkgo/Gomega contract suites use dot imports by convention.
       - path: internal/(consensus/consensustest|storage/storagetest)/
         linters: [staticcheck]

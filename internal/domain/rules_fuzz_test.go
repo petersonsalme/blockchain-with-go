@@ -16,7 +16,7 @@ import (
 func fuzzTime(sec, nsec int64) time.Time {
 	const span = 13000 * 365 * 24 * 3600
 
-	sec = sec % span
+	sec %= span
 
 	return time.Unix(sec+2*span/13, nsec%1_000_000_000).UTC()
 }
@@ -35,7 +35,7 @@ func FuzzValidateBlockRules(f *testing.F) {
 		now := fuzzTime(nowSec, nowNsec)
 
 		b := &domain.Block{Index: index, Timestamp: ts, PrevHash: parent.Hash}
-		for i := 0; i < int(nTx); i++ {
+		for i := range nTx {
 			b.Transactions = append(b.Transactions, domain.Transaction{
 				Timestamp: ts,
 				Outputs:   []domain.TxOut{{Amount: uint64(i), Address: strings.Repeat("a", int(txSize)*8)}},

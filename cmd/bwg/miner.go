@@ -42,7 +42,7 @@ func runMiner(cmd *cobra.Command, _ []string) error {
 	for mined := uint(0); count == 0 || mined < count; {
 		resp, err := api.MinePendingWithResponse(ctx)
 		if ctx.Err() != nil {
-			return nil
+			return nil //nolint:nilerr // cancelling the context is the normal way to stop the miner
 		}
 
 		if err != nil {

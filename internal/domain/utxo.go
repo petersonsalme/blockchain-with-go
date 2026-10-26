@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"maps"
 	"math"
 
 	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
@@ -149,9 +150,7 @@ func (s UTXOSet) Apply(d UTXODelta) {
 		delete(s, op)
 	}
 
-	for op, out := range d.Created {
-		s[op] = out
-	}
+	maps.Copy(s, d.Created)
 }
 
 // Revert undoes Apply.
@@ -160,9 +159,7 @@ func (s UTXOSet) Revert(d UTXODelta) {
 		delete(s, op)
 	}
 
-	for op, out := range d.Spent {
-		s[op] = out
-	}
+	maps.Copy(s, d.Spent)
 }
 
 // DiffUTXO returns the delta that takes from to to: Spent holds the outputs of

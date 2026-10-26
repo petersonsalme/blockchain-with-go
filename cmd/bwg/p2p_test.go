@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -92,7 +93,7 @@ func newTestService(t *testing.T, blocks int, genesis *domain.Block) *chain.Serv
 		t.Fatal(err)
 	}
 
-	for i := 0; i < blocks; i++ {
+	for range blocks {
 		if _, err := svc.Mine(context.Background(), nil); err != nil {
 			t.Fatal(err)
 		}
@@ -378,13 +379,7 @@ func TestAddressExchangeConnectsThirdNode(t *testing.T) {
 }
 
 func containsAddr(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(list, s)
 }
 
 func TestRunStartsAndStopsTheDialer(t *testing.T) {

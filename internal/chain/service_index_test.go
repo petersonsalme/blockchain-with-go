@@ -129,8 +129,6 @@ var _ = Describe("Service persisted indexes", func() {
 	}
 
 	for name, open := range repos {
-		open := open
-
 		Describe(name, func() {
 			var (
 				repo      storage.IndexedRepository

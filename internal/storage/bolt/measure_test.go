@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -38,7 +39,7 @@ func TestMeasureSnapshotCost(t *testing.T) {
 
 		prev := ""
 
-		for i := 0; i < blocks; i++ {
+		for i := range blocks {
 			tx := domain.Transaction{Timestamp: time.Unix(1_700_000_000+int64(i), 0).UTC()}
 			d := domain.UTXODelta{Spent: map[domain.OutPoint]domain.TxOut{}, Created: map[domain.OutPoint]domain.TxOut{}}
 			total := uint64(1) << 50
@@ -48,7 +49,7 @@ func TestMeasureSnapshotCost(t *testing.T) {
 				queue = queue[1:]
 				total = amounts[in]
 				tx.Inputs = []domain.TxIn{{PrevTxID: in.TxID, OutIndex: in.Index}}
-				d.Spent[in] = domain.TxOut{Amount: total, Address: "addr" + fmt.Sprint(in.Index)}
+				d.Spent[in] = domain.TxOut{Amount: total, Address: "addr" + strconv.FormatUint(uint64(in.Index), 10)}
 			}
 
 			tx.Outputs = []domain.TxOut{{Amount: total / 2, Address: "addr0"}, {Amount: total - total/2, Address: "addr1"}}

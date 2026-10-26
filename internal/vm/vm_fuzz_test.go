@@ -2,6 +2,7 @@ package vm_test
 
 import (
 	"encoding/binary"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -28,7 +29,7 @@ func FuzzExecuteDeterministic(f *testing.F) {
 		res1, err1 := vm.Execute(code, args, store, gas)
 
 		res2, err2 := vm.Execute(code, args, store, gas)
-		if err1 != err2 || !reflect.DeepEqual(res1, res2) {
+		if !errors.Is(err1, err2) || !reflect.DeepEqual(res1, res2) {
 			t.Fatalf("not deterministic: (%v, %v) vs (%v, %v)", res1, err1, res2, err2)
 		}
 
@@ -41,7 +42,7 @@ func FuzzExecuteDeterministic(f *testing.F) {
 		}
 
 		if gas == 0 || gas > domain.MaxContractGas {
-			if err1 != vm.ErrInvalidGas {
+			if !errors.Is(err1, vm.ErrInvalidGas) {
 				t.Fatalf("gas %d: want ErrInvalidGas, got %v", gas, err1)
 			}
 		}

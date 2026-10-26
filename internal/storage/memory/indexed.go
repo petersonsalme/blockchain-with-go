@@ -2,6 +2,7 @@ package memory
 
 import (
 	"cmp"
+	"maps"
 	"slices"
 	"strings"
 
@@ -46,9 +47,7 @@ func newIndex() index {
 
 func cloneOuts(m map[domain.OutPoint]domain.TxOut) map[domain.OutPoint]domain.TxOut {
 	out := make(map[domain.OutPoint]domain.TxOut, len(m))
-	for op, o := range m {
-		out[op] = o
-	}
+	maps.Copy(out, m)
 
 	return out
 }
@@ -59,9 +58,7 @@ func (ix index) clone() index {
 	c.utxos = domain.UTXOSet(cloneOuts(ix.utxos))
 	for a, outs := range ix.addrutxo {
 		m := make(map[domain.OutPoint]uint64, len(outs))
-		for op, amount := range outs {
-			m[op] = amount
-		}
+		maps.Copy(m, outs)
 
 		c.addrutxo[a] = m
 	}
@@ -70,9 +67,7 @@ func (ix index) clone() index {
 		c.undo[h] = domain.UTXODelta{Spent: cloneOuts(d.Spent), Created: cloneOuts(d.Created)}
 	}
 
-	for id, h := range ix.txs {
-		c.txs[id] = h
-	}
+	maps.Copy(c.txs, ix.txs)
 
 	for a, entries := range ix.addrtx {
 		c.addrtx[a] = append([]addrEntry(nil), entries...)
@@ -332,7 +327,7 @@ func (r *Repository) Reorg(height int, blocks []*domain.Block, deltas []domain.U
 
 	ix.dropSnapshotFrom(height)
 	// The cap limit forces append to copy; the pruning below edits only this copy.
-	chain := append(r.blocks[:height:height], blocks...)
+	chain := slices.Concat(r.blocks[:height], blocks)
 	for i, b := range blocks {
 		if err := ix.apply(b, deltas[i]); err != nil {
 			return err

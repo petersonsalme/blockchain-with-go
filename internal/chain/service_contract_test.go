@@ -84,7 +84,6 @@ var _ = Describe("Service contracts", func() {
 	missing := hex.EncodeToString(make([]byte, 32))
 
 	for _, be := range backends {
-		be := be
 		Describe(be.name, func() {
 			var (
 				repo storage.IndexedRepository
@@ -391,9 +390,7 @@ var _ = Describe("Service contracts", func() {
 				stop := make(chan struct{})
 
 				for range 4 {
-					wg.Add(1)
-					go func() {
-						defer wg.Done()
+					wg.Go(func() {
 						defer GinkgoRecover()
 
 						for {
@@ -406,7 +403,7 @@ var _ = Describe("Service contracts", func() {
 							_, _, _ = svc.Contract(id)
 							_ = svc.Submit(withContract(f.owner, f.ops[fundedOutputs-1], 9, callOp(id, 100)))
 						}
-					}()
+					})
 				}
 
 				for range 5 {

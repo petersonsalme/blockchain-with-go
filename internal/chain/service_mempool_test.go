@@ -245,7 +245,7 @@ var _ = Describe("Service mempool", func() {
 		})
 
 		It("leaves no pool transaction spending outside the UTXO set", func() {
-			for i := 0; i < 6; i++ {
+			for i := range 6 {
 				Expect(svc.Submit(spendOp(i, uint64(9-i)))).To(Succeed())
 			}
 
@@ -292,7 +292,7 @@ var _ = Describe("Service mempool", func() {
 		})
 
 		It("never fails MinePending whatever the interleaving of Submit, Mine and MinePending", func() {
-			for round := 0; round < 25; round++ {
+			for range 25 {
 				rp := mempool.New(0)
 				rsvc, rf := funded(memory.New(), pow.NewProofOfWork(1), WithMempool(rp))
 				a, b := spend(rf.owner, rf.ops[0], 9), spend(rf.owner, rf.ops[0], 8)
@@ -348,7 +348,7 @@ var _ = Describe("Service mempool", func() {
 
 				included := 0
 
-				for k := 0; k <= 18; k++ {
+				for k := range 19 {
 					limit := emptySize + 8 + k*txSize/3
 					GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(limit))
 

@@ -25,7 +25,6 @@ func coinbaseTx(amount uint64) domain.Transaction {
 
 var _ = Describe("Service coinbase rule", func() {
 	for _, be := range backends {
-		be := be
 		Describe(be.name, func() {
 			var (
 				repo storage.IndexedRepository

@@ -144,9 +144,9 @@ func TestNewConsensusPoAInvalidConfig(t *testing.T) {
 		"empty item":            {validators: func(s *wallet.Wallet) string { return hexKey(s) + "," }, wantVar: poaValidatorsEnvVar, wantItem: func(*wallet.Wallet) string { return `""` }},
 		"duplicate":             {validators: dup, wantVar: poaValidatorsEnvVar, wantItem: hexKey},
 		"signer not in set":     {validators: func(*wallet.Wallet) string { o, _ := wallet.New(); return hexKey(o) }, wantVar: poaKeystoreEnvVar},
-		"keystore missing":      {validators: func(s *wallet.Wallet) string { return hexKey(s) }, mutate: func(t *testing.T, p string) { t.Setenv(poaKeystoreEnvVar, p+".missing") }, wantVar: poaKeystoreEnvVar},
-		"wrong password":        {validators: func(s *wallet.Wallet) string { return hexKey(s) }, mutate: func(t *testing.T, p string) { t.Setenv(poaKeystorePasswordEnvVar, "nope") }, wantVar: poaKeystorePasswordEnvVar},
-		"invalid keystore file": {validators: func(s *wallet.Wallet) string { return hexKey(s) }, mutate: func(t *testing.T, p string) { writeFile(t, p, "garbage") }, wantVar: poaKeystoreEnvVar},
+		"keystore missing":      {validators: hexKey, mutate: func(t *testing.T, p string) { t.Setenv(poaKeystoreEnvVar, p+".missing") }, wantVar: poaKeystoreEnvVar},
+		"wrong password":        {validators: hexKey, mutate: func(t *testing.T, p string) { t.Setenv(poaKeystorePasswordEnvVar, "nope") }, wantVar: poaKeystorePasswordEnvVar},
+		"invalid keystore file": {validators: hexKey, mutate: func(t *testing.T, p string) { writeFile(t, p, "garbage") }, wantVar: poaKeystoreEnvVar},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -258,7 +258,7 @@ func mineFirstBlock(t *testing.T) []domain.Block {
 }
 
 func TestEndToEndPoA(t *testing.T) {
-	w, _ := poaEnv(t, func(self *wallet.Wallet) string { return hexKey(self) })
+	w, _ := poaEnv(t, hexKey)
 	blocks := mineFirstBlock(t)
 
 	b := blocks[1]

@@ -22,7 +22,7 @@ func zeroBits(hash string) int {
 	raw, err := hex.DecodeString(hash)
 	Expect(err).NotTo(HaveOccurred())
 
-	for i := 0; i < len(raw)*8; i++ {
+	for i := range len(raw) * 8 {
 		if raw[i/8]&(0x80>>(i%8)) != 0 {
 			return i
 		}
@@ -226,7 +226,7 @@ var _ = Describe("ProofOfWork", func() {
 			Expect(b.Nonce).To(BeNumerically(">", 0))
 
 			solved := b.Nonce
-			for n := 0; n < solved; n++ {
+			for n := range solved {
 				b.Nonce = n
 				Expect(zeroBits(b.CalculateHash())).To(BeNumerically("<", 2), "nonce %d already solves the difficulty", n)
 			}

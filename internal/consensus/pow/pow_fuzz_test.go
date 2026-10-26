@@ -118,8 +118,8 @@ func FuzzVerifyTamper(f *testing.F) {
 	f.Add(uint8(0), int64(1_700_000_000), int64(0), "", uint8(1), uint8(1), uint8(2), uint8(2), "addr", uint64(1), uint32(1), uint8(9))
 	f.Add(uint8(7), int64(1_600_000_000), int64(999), "00ab", uint8(2), uint8(0), uint8(0), uint8(0), "", uint64(0), uint32(0), uint8(4))
 
-	for sel := uint8(0); sel < 13; sel++ {
-		f.Add(uint8(1), int64(1_700_000_000), int64(1), "p", uint8(sel%3), uint8(2), uint8(2), uint8(2), "z", uint64(5), uint32(3), sel)
+	for sel := range uint8(13) {
+		f.Add(uint8(1), int64(1_700_000_000), int64(1), "p", sel%3, uint8(2), uint8(2), uint8(2), "z", uint64(5), uint32(3), sel)
 	}
 
 	f.Fuzz(func(t *testing.T, index uint8, sec, nsec int64, prevHash string, diff, nTx, nIn, nOut uint8, s string, amount uint64, outIndex uint32, sel uint8) {
@@ -127,13 +127,13 @@ func FuzzVerifyTamper(f *testing.F) {
 		prev := &domain.Block{Index: int(index), Hash: prevHash}
 
 		b := domain.Block{Index: int(index) + 1, Timestamp: ts, PrevHash: prevHash}
-		for i := 0; i < int(nTx%3); i++ {
+		for i := range int(nTx % 3) {
 			tx := domain.Transaction{Timestamp: ts.Add(time.Duration(i))}
-			for j := 0; j < int(nIn%3); j++ {
+			for j := range int(nIn % 3) {
 				tx.Inputs = append(tx.Inputs, domain.TxIn{PrevTxID: s + strings.Repeat("p", i), OutIndex: outIndex + uint32(j), Signature: s + strings.Repeat("g", j)})
 			}
 
-			for j := 0; j < int(nOut%3); j++ {
+			for j := range int(nOut % 3) {
 				tx.Outputs = append(tx.Outputs, domain.TxOut{Amount: amount + uint64(j), Address: s})
 			}
 
@@ -152,7 +152,7 @@ func FuzzVerifyTamper(f *testing.F) {
 		tampered := cloneBlock(b)
 
 		want := tamper(&tampered, sel)
-		if want == errTxEdit {
+		if errors.Is(want, errTxEdit) {
 			if err := p.Verify([]*domain.Block{prev}, &tampered); err != nil {
 				t.Fatalf("tamper %d: Verify = %v, want nil", sel%13, err)
 			}

@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"maps"
 	"math"
 	"math/rand"
 	"time"
@@ -35,9 +36,7 @@ func blockOf(index int, txs ...domain.Transaction) *domain.Block {
 
 func clone(s domain.UTXOSet) domain.UTXOSet {
 	c := domain.UTXOSet{}
-	for k, v := range s {
-		c[k] = v
-	}
+	maps.Copy(c, s)
 
 	return c
 }
@@ -361,7 +360,7 @@ var _ = Describe("UTXO rules", func() {
 			next := func() int { n++; return n }
 
 			var gtxs []domain.Transaction
-			for i := 0; i < 1+r.Intn(3); i++ {
+			for range 1 + r.Intn(3) {
 				gtxs = append(gtxs, newTx(next(), nil, domain.TxOut{Amount: uint64(1 + r.Intn(1000)), Address: as[r.Intn(3)]}))
 			}
 
@@ -374,7 +373,7 @@ var _ = Describe("UTXO rules", func() {
 
 				var txs []domain.Transaction
 
-				for t := 0; t < 1+r.Intn(3); t++ {
+				for range 1 + r.Intn(3) {
 					var (
 						ops []domain.OutPoint
 						sum uint64
@@ -418,7 +417,7 @@ var _ = Describe("UTXO rules", func() {
 		}
 
 		It("holds for 200 random chains", func() {
-			for seed := int64(0); seed < 200; seed++ {
+			for seed := range int64(200) {
 				r := rand.New(rand.NewSource(seed))
 				blocks := randomChain(r)
 
@@ -475,7 +474,7 @@ var _ = Describe("UTXO rules", func() {
 		})
 
 		It("leaves the view identical whether BlockDelta fails or succeeds", func() {
-			for seed := int64(0); seed < 200; seed++ {
+			for seed := range int64(200) {
 				r := rand.New(rand.NewSource(seed))
 				blocks := randomChain(r)
 				view, err := domain.BuildUTXOSet(blocks[:len(blocks)-1])

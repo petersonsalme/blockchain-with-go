@@ -5,6 +5,7 @@ import (
 	"math"
 	"math/rand/v2"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,9 +19,13 @@ import (
 // mkTx builds a transaction with the given ID spending (prev, idx). pad grows its size.
 func mkTx(id, prev string, idx uint32, pad int) domain.Transaction {
 	addr := ""
+
+	var addrSb21 strings.Builder
 	for range pad {
-		addr += "x"
+		addrSb21.WriteString("x")
 	}
+
+	addr += addrSb21.String()
 
 	return domain.Transaction{
 		ID:        id,
@@ -365,10 +370,7 @@ var _ = Describe("Pool", func() {
 
 			var wg sync.WaitGroup
 			for g := range 8 {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-
+				wg.Go(func() {
 					for i := range 200 {
 						id := fmt.Sprintf("g%dt%d", g, i)
 						_ = p.Add(mkTx(id, fmt.Sprintf("p%d", i%30), 0, 0), uint64(i))
@@ -377,7 +379,7 @@ var _ = Describe("Pool", func() {
 						p.Remove(id)
 						p.Prune(&domain.Block{}, view{})
 					}
-				}()
+				})
 			}
 
 			wg.Wait()

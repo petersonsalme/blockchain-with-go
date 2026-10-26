@@ -34,7 +34,7 @@ func writeChain(t *testing.T, dir string) map[string][]string {
 
 	want := map[string][]string{}
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if err := repo.Commit(blocks[i], deltas[i]); err != nil {
 			t.Fatal(err)
 		}

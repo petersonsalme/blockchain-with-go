@@ -55,17 +55,17 @@ var _ = Describe("Rate Limiting", func() {
 		It("allows up to N requests and returns 429 on N+1 within the same instant", func() {
 			const n = 5
 
-			var handlerCalls int64
+			var handlerCalls atomic.Int64
 
 			dummyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				atomic.AddInt64(&handlerCalls, 1)
+				handlerCalls.Add(1)
 				w.WriteHeader(http.StatusOK)
 			})
 
 			limiter := newRateLimiter(n, nowFunc)
 			wrapped := limiter.middleware(dummyHandler)
 
-			for i := 0; i < n; i++ {
+			for range n {
 				req := httptest.NewRequest("GET", "/", nil)
 				req.RemoteAddr = "192.168.1.100:1234"
 				rec := httptest.NewRecorder()
@@ -74,7 +74,7 @@ var _ = Describe("Rate Limiting", func() {
 				Expect(rec.Code).To(Equal(http.StatusOK))
 			}
 
-			Expect(atomic.LoadInt64(&handlerCalls)).To(Equal(int64(n)))
+			Expect(handlerCalls.Load()).To(Equal(int64(n)))
 
 			// Request N+1 from same IP at same instant
 			req := httptest.NewRequest("GET", "/", nil)
@@ -96,7 +96,7 @@ var _ = Describe("Rate Limiting", func() {
 			Expect(body["error"]).To(Equal("rate limit exceeded"))
 
 			// Handler must not be called when rejected
-			Expect(atomic.LoadInt64(&handlerCalls)).To(Equal(int64(n)))
+			Expect(handlerCalls.Load()).To(Equal(int64(n)))
 		})
 
 		It("recovers tokens after advancing clock by 60s/N", func() {
@@ -108,7 +108,7 @@ var _ = Describe("Rate Limiting", func() {
 			}))
 
 			// Exhaust all tokens
-			for i := 0; i < n; i++ {
+			for range n {
 				req := httptest.NewRequest("GET", "/", nil)
 				req.RemoteAddr = "10.0.0.1:1234"
 				rec := httptest.NewRecorder()
@@ -162,7 +162,7 @@ var _ = Describe("Rate Limiting", func() {
 			}))
 
 			// Exhaust all 7 tokens at t=0
-			for i := 0; i < n; i++ {
+			for range n {
 				req := httptest.NewRequest("GET", "/", nil)
 				req.RemoteAddr = "10.0.0.7:1234"
 				rec := httptest.NewRecorder()
@@ -205,7 +205,7 @@ var _ = Describe("Rate Limiting", func() {
 			}))
 
 			// Send 2 requests spaced by 1s to ensure an existing bucket with lastCheck is active
-			for i := 0; i < 2; i++ {
+			for range 2 {
 				req := httptest.NewRequest("GET", "/", nil)
 				req.RemoteAddr = "10.0.0.5:1234"
 				rec := httptest.NewRecorder()
@@ -222,7 +222,7 @@ var _ = Describe("Rate Limiting", func() {
 			// Fire 30 requests at the same instant from the same IP
 			okCount, limitedCount := 0, 0
 
-			for i := 0; i < 30; i++ {
+			for range 30 {
 				req := httptest.NewRequest("GET", "/", nil)
 				req.RemoteAddr = "10.0.0.5:1234"
 				rec := httptest.NewRecorder()
@@ -250,7 +250,7 @@ var _ = Describe("Rate Limiting", func() {
 			}))
 
 			// Exhaust IP A
-			for i := 0; i < n; i++ {
+			for range n {
 				req := httptest.NewRequest("GET", "/", nil)
 				req.RemoteAddr = "192.168.1.1:1000"
 				rec := httptest.NewRecorder()
@@ -283,7 +283,7 @@ var _ = Describe("Rate Limiting", func() {
 
 			handler := srv.Handler()
 
-			for i := 0; i < 150; i++ {
+			for range 150 {
 				req := httptest.NewRequest("GET", "/health", nil)
 				req.RemoteAddr = "127.0.0.1:5000"
 				rec := httptest.NewRecorder()
@@ -375,7 +375,7 @@ var _ = Describe("Rate Limiting", func() {
 			// The clock goes 10s back: no refill and no token loss from the negative elapsed time
 			currentTime = t0.Add(-10 * time.Second)
 
-			for i := 0; i < n-1; i++ {
+			for range n - 1 {
 				Expect(send("10.9.9.9:1")).To(Equal(http.StatusOK))
 			}
 
@@ -396,18 +396,15 @@ var _ = Describe("Rate Limiting", func() {
 			codes := make(chan int, concurrent)
 
 			var wg sync.WaitGroup
-			for i := 0; i < concurrent; i++ {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-
+			for range concurrent {
+				wg.Go(func() {
 					req := httptest.NewRequest("GET", "/", nil)
 					req.RemoteAddr = "172.16.0.1:4000"
 					rec := httptest.NewRecorder()
 					wrapped.ServeHTTP(rec, req)
 
 					codes <- rec.Code
-				}()
+				})
 			}
 
 			wg.Wait()
@@ -438,8 +435,8 @@ var _ = Describe("Rate Limiting", func() {
 
 			allowedTotal := 0
 			// Advance in small steps over 60 seconds
-			for step := 0; step < 60; step++ {
-				for r := 0; r < 2; r++ {
+			for range 60 {
+				for range 2 {
 					req := httptest.NewRequest("GET", "/", nil)
 					req.RemoteAddr = "192.168.50.1:1234"
 					rec := httptest.NewRecorder()

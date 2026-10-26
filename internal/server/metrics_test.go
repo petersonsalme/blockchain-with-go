@@ -76,7 +76,7 @@ func scrape(t *testing.T, h http.Handler) map[string]float64 {
 
 	out := map[string]float64{}
 
-	for _, line := range strings.Split(strings.TrimSuffix(rec.Body.String(), "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSuffix(rec.Body.String(), "\n"), "\n") {
 		if strings.HasPrefix(line, "#") {
 			continue
 		}
@@ -118,7 +118,7 @@ func TestMetricsFormat(t *testing.T) {
 
 	helped, typed, sampled := map[string]bool{}, map[string]string{}, map[string]bool{}
 
-	for _, line := range strings.Split(strings.TrimSuffix(body, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSuffix(body, "\n"), "\n") {
 		switch {
 		case helpLine.MatchString(line):
 			helped[helpLine.FindStringSubmatch(line)[1]] = true
@@ -401,14 +401,11 @@ func TestMetricsConcurrentScrape(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for i := range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			for range 20 {
 				do(h, http.MethodGet, []string{"/", "/nope", "/metrics", "/health"}[i%4], "")
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

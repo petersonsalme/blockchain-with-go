@@ -34,7 +34,7 @@ func FromSeed(seed []byte) (*Wallet, error) {
 
 // PublicKey returns the wallet public key.
 func (w *Wallet) PublicKey() ed25519.PublicKey {
-	return w.priv.Public().(ed25519.PublicKey)
+	return w.priv.Public().(ed25519.PublicKey) //nolint:forcetypeassert // ed25519.PrivateKey.Public always returns an ed25519.PublicKey
 }
 
 // Address returns the checksummed address of the wallet.

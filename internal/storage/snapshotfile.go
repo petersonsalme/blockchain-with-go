@@ -54,7 +54,7 @@ func WriteSnapshotFile(w io.Writer, headers []*domain.Block, s Snapshot) error {
 func ReadSnapshotFile(r io.Reader) ([]*domain.Block, Snapshot, error) {
 	var f snapshotFile
 	if err := json.NewDecoder(r).Decode(&f); err != nil {
-		return nil, Snapshot{}, fmt.Errorf("%w: %v", ErrInvalidSnapshot, err)
+		return nil, Snapshot{}, fmt.Errorf("%w: %w", ErrInvalidSnapshot, err)
 	}
 
 	if len(f.Headers) == 0 || slices.Contains(f.Headers, nil) {

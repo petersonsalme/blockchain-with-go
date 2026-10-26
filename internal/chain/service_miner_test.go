@@ -19,7 +19,6 @@ import (
 
 var _ = Describe("Service with a miner address", func() {
 	for _, be := range backends {
-		be := be
 		Describe(be.name, func() {
 			var (
 				repo  storage.IndexedRepository
@@ -152,7 +151,7 @@ var _ = Describe("Service with a miner address", func() {
 
 				included := 0
 
-				for k := 0; k <= 18; k++ {
+				for k := range 19 {
 					limit := emptySize + 100 + k*txSize/3
 					GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(limit))
 

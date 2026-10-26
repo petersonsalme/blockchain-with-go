@@ -62,7 +62,7 @@ var _ = Describe("Service difficulty retargeting", func() {
 		eng := pow.New(1).WithRetarget(2, time.Hour)
 		svc, f := funded(repo, eng)
 
-		for i := 0; i < 4; i++ {
+		for range 4 {
 			_, err := svc.Mine(context.Background(), f.tx())
 			Expect(err).NotTo(HaveOccurred())
 		}
