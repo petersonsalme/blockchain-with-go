@@ -281,12 +281,12 @@ func TestNodeErrorsAreMarkedForTheFatalLog(t *testing.T) {
 	for _, args := range [][]string{{"node"}, {"node", "--bogus"}} {
 		var (
 			out     bytes.Buffer
-			stopped nodeStopped
+			stopped nodeStoppedError
 		)
 
 		err := execute(context.Background(), discardLogger(), args, &out)
 		if !errors.As(err, &stopped) {
-			t.Fatalf("%v: err = %v, want a nodeStopped error", args, err)
+			t.Fatalf("%v: err = %v, want a nodeStoppedError error", args, err)
 		}
 
 		if out.Len() != 0 {

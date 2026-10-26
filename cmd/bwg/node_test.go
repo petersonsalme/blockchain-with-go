@@ -525,7 +525,7 @@ func TestFinish(t *testing.T) {
 		logged bool
 	}{
 		{"nil", nil, -1, false},
-		{"node error", nodeStopped{errors.New("boom")}, 1, true},
+		{"node error", nodeStoppedError{errors.New("boom")}, 1, true},
 		{"other command error", errors.New("bad flag"), 1, false},
 	}
 	for _, c := range cases {

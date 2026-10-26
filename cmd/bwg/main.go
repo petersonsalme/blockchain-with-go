@@ -24,7 +24,7 @@ func main() {
 // finish exits 1 on err. A node error is logged as a JSON "node stopped" line;
 // other commands have already printed theirs through cobra.
 func finish(err error, logger *slog.Logger, exit func(code int)) {
-	if stopped, ok := errors.AsType[nodeStopped](err); ok {
+	if stopped, ok := errors.AsType[nodeStoppedError](err); ok {
 		fatalIf(stopped.err, logger, exit)
 	} else if err != nil {
 		exit(1)

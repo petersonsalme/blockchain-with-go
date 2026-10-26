@@ -31,12 +31,12 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
 )
 
-// nodeStopped marks an error returned by the node command, so main logs it as
+// nodeStoppedError marks an error returned by the node command, so main logs it as
 // "node stopped" instead of leaving it to cobra's text output.
-type nodeStopped struct{ err error }
+type nodeStoppedError struct{ err error }
 
-func (e nodeStopped) Error() string { return e.err.Error() }
-func (e nodeStopped) Unwrap() error { return e.err }
+func (e nodeStoppedError) Error() string { return e.err.Error() }
+func (e nodeStoppedError) Unwrap() error { return e.err }
 
 // fatalIf logs err at error level and calls exit(1) unless err is nil.
 func fatalIf(err error, logger *slog.Logger, exit func(code int)) {
@@ -71,7 +71,7 @@ func newNodeCmd(logger *slog.Logger) *cobra.Command {
 			}
 
 			if err != nil {
-				return nodeStopped{err}
+				return nodeStoppedError{err}
 			}
 
 			return nil
@@ -81,7 +81,7 @@ func newNodeCmd(logger *slog.Logger) *cobra.Command {
 	cmd.Flags().StringVar(&snapshotExport, "snapshot-export", "", "write the snapshot stored in DATA_DIR/chain.db to FILE and exit")
 	cmd.Flags().StringVar(&snapshotImport, "snapshot-import", "", "restore an empty DATA_DIR/chain.db from the snapshot FILE and exit; needs --snapshot-hash")
 	cmd.Flags().StringVar(&hash, "snapshot-hash", "", "hash the --snapshot-import file must carry (hex)")
-	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return nodeStopped{err} })
+	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return nodeStoppedError{err} })
 
 	return cmd
 }
