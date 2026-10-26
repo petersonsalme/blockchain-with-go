@@ -877,6 +877,18 @@ var _ = Describe("Server", func() {
 				Expect(get("/headers?from=3&limit=2").Body.String()).NotTo(ContainSubstring(`"next"`))
 			})
 
+			It("returns an empty page without next when from is past the tip", func() {
+				rec := get("/headers?from=10")
+				Expect(rec.Code).To(Equal(http.StatusOK))
+				Expect(rec.Body.String()).To(ContainSubstring(`"blocks": []`))
+				Expect(rec.Body.String()).NotTo(ContainSubstring(`"next"`))
+
+				p := getPage("/headers?from=10")
+				Expect(p.Blocks).To(BeEmpty())
+				Expect(p.From).To(Equal(10))
+				Expect(p.Next).To(BeNil())
+			})
+
 			It("caps limit at 1000", func() {
 				p := getPage("/headers?limit=1000")
 				Expect(p.Limit).To(Equal(1000))
@@ -887,19 +899,20 @@ var _ = Describe("Server", func() {
 			})
 
 			It("leaves the blocks of GET /blocks untouched", func() {
-				all, err := repo.All()
-				Expect(err).NotTo(HaveOccurred())
+				before := getPage("/blocks")
+				Expect(before.Blocks).NotTo(BeEmpty())
+				Expect(before.Blocks[len(before.Blocks)-1].Transactions).NotTo(BeEmpty())
 
 				_ = getPage("/headers")
 
-				blocksPage := getPage("/blocks")
-				Expect(blocksPage.Blocks).To(HaveLen(len(all)))
+				after := getPage("/blocks")
+				Expect(after.Blocks).To(HaveLen(len(before.Blocks)))
 
-				for i, b := range blocksPage.Blocks {
-					Expect(b.Transactions).To(HaveLen(len(all[i].Transactions)))
+				for i, b := range after.Blocks {
+					Expect(b.Transactions).To(HaveLen(len(before.Blocks[i].Transactions)))
 
 					for j, tx := range b.Transactions {
-						Expect(tx.ID).To(Equal(all[i].Transactions[j].ID))
+						Expect(tx.ID).To(Equal(before.Blocks[i].Transactions[j].ID))
 					}
 				}
 			})
