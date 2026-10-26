@@ -28,6 +28,7 @@ const MiningTimeoutEnvVar = "MINING_TIMEOUT"
 const (
 	defaultPageLimit = 20
 	maxPageLimit     = 100
+	maxHeaderLimit   = 1000
 	// hashLen is the length of a hex-encoded SHA-256 block hash.
 	hashLen = 64
 )
@@ -164,6 +165,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/mine", methodNotAllowed("POST"))
 	mux.Handle("/mempool", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/blocks", methodNotAllowed("GET, HEAD"))
+	mux.Handle("/headers", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/block/{ref}", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/tx/{id}", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/tx/{id}/proof", methodNotAllowed("GET, HEAD"))
@@ -221,6 +223,7 @@ func (s *Server) routes() []route {
 		{"POST /mine", s.handleMine},
 		{"GET /mempool", s.handleGetMempool},
 		{"GET /blocks", s.handleGetBlocks},
+		{"GET /headers", s.handleGetHeaders},
 		{"GET /block/{ref}", s.handleGetBlock},
 		{"GET /tx/{id}", s.handleGetTx},
 		{"GET /tx/{id}/proof", s.handleGetTxProof},
@@ -307,6 +310,54 @@ func (s *Server) handleGetBlocks(w http.ResponseWriter, r *http.Request) {
 	resp := pageResponse{Blocks: blocks, From: from, Limit: limit}
 	if len(blocks) > limit {
 		resp.Blocks = blocks[:limit]
+		next := from + limit
+		resp.Next = &next
+	}
+
+	respondWithJSON(w, http.StatusOK, resp)
+}
+
+// handleGetHeaders serves one page of block headers without transactions.
+func (s *Server) handleGetHeaders(w http.ResponseWriter, r *http.Request) {
+	from, err := queryInt(r, "from", 0)
+	if err != nil {
+		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error(), Code: invalidQueryCode})
+		return
+	}
+
+	limit, err := queryInt(r, "limit", maxHeaderLimit)
+	if err == nil && limit == 0 {
+		err = errors.New("limit must be positive")
+	}
+
+	if err != nil {
+		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error(), Code: invalidQueryCode})
+		return
+	}
+
+	limit = min(limit, maxHeaderLimit)
+
+	// One extra block tells whether a next page exists, atomically with the page.
+	blocks, err := s.chain.BlocksRange(from, limit+1)
+	if err != nil {
+		respondWithJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+		return
+	}
+
+	hasMore := len(blocks) > limit
+	if hasMore {
+		blocks = blocks[:limit]
+	}
+
+	headers := make([]*domain.Block, len(blocks))
+	for i, b := range blocks {
+		h := *b
+		h.Transactions = nil
+		headers[i] = &h
+	}
+
+	resp := pageResponse{Blocks: headers, From: from, Limit: limit}
+	if hasMore {
 		next := from + limit
 		resp.Next = &next
 	}

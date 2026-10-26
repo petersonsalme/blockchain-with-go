@@ -840,6 +840,99 @@ var _ = Describe("Server", func() {
 			})
 		})
 
+		Describe("GET /headers", func() {
+			BeforeEach(func() { mineN(4) }) // heights 0..4
+
+			It("returns every header without transactions", func() {
+				rec := get("/headers")
+				Expect(rec.Code).To(Equal(http.StatusOK))
+				Expect(strings.Count(rec.Body.String(), `"Transactions": null`)).To(Equal(5))
+
+				p := getPage("/headers")
+				Expect(p.From).To(Equal(0))
+				Expect(p.Limit).To(Equal(1000))
+				Expect(p.Blocks).To(HaveLen(5))
+				Expect(p.Next).To(BeNil())
+				expectLinked(p)
+
+				for _, b := range p.Blocks {
+					Expect(b.Transactions).To(BeNil())
+				}
+			})
+
+			It("returns the window and a next cursor while more headers exist", func() {
+				p := getPage("/headers?from=1&limit=2")
+				Expect(p.From).To(Equal(1))
+				Expect(p.Limit).To(Equal(2))
+				Expect(p.Blocks).To(HaveLen(2))
+				Expect(p.Next).NotTo(BeNil())
+				Expect(*p.Next).To(Equal(3))
+				expectLinked(p)
+			})
+
+			It("omits next when the page ends exactly at the tip", func() {
+				p := getPage("/headers?from=3&limit=2")
+				Expect(p.Blocks).To(HaveLen(2))
+				Expect(p.Next).To(BeNil())
+				Expect(get("/headers?from=3&limit=2").Body.String()).NotTo(ContainSubstring(`"next"`))
+			})
+
+			It("caps limit at 1000", func() {
+				p := getPage("/headers?limit=1000")
+				Expect(p.Limit).To(Equal(1000))
+				p = getPage("/headers?limit=1001")
+				Expect(p.Limit).To(Equal(1000))
+				p = getPage("/headers?limit=9223372036854775807")
+				Expect(p.Limit).To(Equal(1000))
+			})
+
+			It("leaves the blocks of GET /blocks untouched", func() {
+				all, err := repo.All()
+				Expect(err).NotTo(HaveOccurred())
+
+				_ = getPage("/headers")
+
+				blocksPage := getPage("/blocks")
+				Expect(blocksPage.Blocks).To(HaveLen(len(all)))
+
+				for i, b := range blocksPage.Blocks {
+					Expect(b.Transactions).To(HaveLen(len(all[i].Transactions)))
+
+					for j, tx := range b.Transactions {
+						Expect(tx.ID).To(Equal(all[i].Transactions[j].ID))
+					}
+				}
+			})
+
+			DescribeTable("rejects bad query values with 400 invalid_query",
+				func(target string) {
+					expectError(get(target), http.StatusBadRequest, "invalid_query")
+				},
+				Entry("zero limit", "/headers?limit=0"),
+				Entry("non-integer limit", "/headers?limit=abc"),
+				Entry("non-integer from", "/headers?from=abc"),
+			)
+
+			It("returns 405 for POST /headers with Allow GET, HEAD", func() {
+				req := httptest.NewRequest(http.MethodPost, "/headers", nil)
+				rec := httptest.NewRecorder()
+				router.ServeHTTP(rec, req)
+				Expect(rec.Code).To(Equal(http.StatusMethodNotAllowed))
+				Expect(rec.Body.String()).To(BeEmpty())
+				Expect(rec.Header().Get("Allow")).To(Equal("GET, HEAD"))
+			})
+
+			It("returns 500 when the chain cannot be read", func() {
+				srv, err := NewServer(brokenChain{}, Config{})
+				Expect(err).NotTo(HaveOccurred())
+
+				h := srv.Handler()
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/headers", nil))
+				Expect(rec.Code).To(Equal(http.StatusInternalServerError))
+			})
+		})
+
 		Describe("GET /block/{ref}", func() {
 			BeforeEach(func() { mineN(2) })
 
