@@ -613,7 +613,7 @@ var _ = Describe("Server", func() {
 			s, err := NewServer(svc, Config{RateLimit: 10})
 			Expect(err).NotTo(HaveOccurred())
 
-			req := httptest.NewRequest("POST", "/", strings.NewReader(`{"Transactions":[{"ID":"`+strings.Repeat("a", 1000)+`"}]}`))
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"Transactions":[{"ID":"`+strings.Repeat("a", 1000)+`"}]}`))
 			rec := httptest.NewRecorder()
 			s.Handler().ServeHTTP(rec, req)
 

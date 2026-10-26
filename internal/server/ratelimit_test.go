@@ -66,7 +66,7 @@ var _ = Describe("Rate Limiting", func() {
 			wrapped := limiter.middleware(dummyHandler)
 
 			for range n {
-				req := httptest.NewRequest("GET", "/", nil)
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
 				req.RemoteAddr = "192.168.1.100:1234"
 				rec := httptest.NewRecorder()
 				wrapped.ServeHTTP(rec, req)
@@ -77,7 +77,7 @@ var _ = Describe("Rate Limiting", func() {
 			Expect(handlerCalls.Load()).To(Equal(int64(n)))
 
 			// Request N+1 from same IP at same instant
-			req := httptest.NewRequest("GET", "/", nil)
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
 			req.RemoteAddr = "192.168.1.100:1234"
 			rec := httptest.NewRecorder()
 			wrapped.ServeHTTP(rec, req)
@@ -109,7 +109,7 @@ var _ = Describe("Rate Limiting", func() {
 
 			// Exhaust all tokens
 			for range n {
-				req := httptest.NewRequest("GET", "/", nil)
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
 				req.RemoteAddr = "10.0.0.1:1234"
 				rec := httptest.NewRecorder()
 				wrapped.ServeHTTP(rec, req)
@@ -117,7 +117,7 @@ var _ = Describe("Rate Limiting", func() {
 			}
 
 			// 31st request is rate limited
-			req := httptest.NewRequest("GET", "/", nil)
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
 			req.RemoteAddr = "10.0.0.1:1234"
 			rec := httptest.NewRecorder()
 			wrapped.ServeHTTP(rec, req)
@@ -128,7 +128,7 @@ var _ = Describe("Rate Limiting", func() {
 			currentTime = currentTime.Add(1 * time.Second)
 
 			// Still rate limited, but Retry-After is 1s
-			req = httptest.NewRequest("GET", "/", nil)
+			req = httptest.NewRequest(http.MethodGet, "/", nil)
 			req.RemoteAddr = "10.0.0.1:1234"
 			rec = httptest.NewRecorder()
 			wrapped.ServeHTTP(rec, req)
@@ -139,14 +139,14 @@ var _ = Describe("Rate Limiting", func() {
 			currentTime = currentTime.Add(1 * time.Second)
 
 			// Same IP receives normal response again
-			req = httptest.NewRequest("GET", "/", nil)
+			req = httptest.NewRequest(http.MethodGet, "/", nil)
 			req.RemoteAddr = "10.0.0.1:1234"
 			rec = httptest.NewRecorder()
 			wrapped.ServeHTTP(rec, req)
 			Expect(rec.Code).To(Equal(http.StatusOK))
 
 			// Next immediate request is rate limited again
-			req = httptest.NewRequest("GET", "/", nil)
+			req = httptest.NewRequest(http.MethodGet, "/", nil)
 			req.RemoteAddr = "10.0.0.1:1234"
 			rec = httptest.NewRecorder()
 			wrapped.ServeHTTP(rec, req)
@@ -163,7 +163,7 @@ var _ = Describe("Rate Limiting", func() {
 
 			// Exhaust all 7 tokens at t=0
 			for range n {
-				req := httptest.NewRequest("GET", "/", nil)
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
 				req.RemoteAddr = "10.0.0.7:1234"
 				rec := httptest.NewRecorder()
 				wrapped.ServeHTTP(rec, req)
@@ -174,7 +174,7 @@ var _ = Describe("Rate Limiting", func() {
 			// missing = 1.0 token, refillRate = 7/60 tokens/s
 			// wait time = 1.0 / (7/60) = 60/7 ≈ 8.5714s
 			// Ceil must round up to 9s (Floor would give 8s)
-			req := httptest.NewRequest("GET", "/", nil)
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
 			req.RemoteAddr = "10.0.0.7:1234"
 			rec := httptest.NewRecorder()
 			wrapped.ServeHTTP(rec, req)
@@ -188,7 +188,7 @@ var _ = Describe("Rate Limiting", func() {
 			// Ceil must round up to 1s (Floor would give 0s, violating >= 1)
 			currentTime = currentTime.Add(8 * time.Second)
 
-			req = httptest.NewRequest("GET", "/", nil)
+			req = httptest.NewRequest(http.MethodGet, "/", nil)
 			req.RemoteAddr = "10.0.0.7:1234"
 			rec = httptest.NewRecorder()
 			wrapped.ServeHTTP(rec, req)
@@ -206,7 +206,7 @@ var _ = Describe("Rate Limiting", func() {
 
 			// Send 2 requests spaced by 1s to ensure an existing bucket with lastCheck is active
 			for range 2 {
-				req := httptest.NewRequest("GET", "/", nil)
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
 				req.RemoteAddr = "10.0.0.5:1234"
 				rec := httptest.NewRecorder()
 				wrapped.ServeHTTP(rec, req)
@@ -223,7 +223,7 @@ var _ = Describe("Rate Limiting", func() {
 			okCount, limitedCount := 0, 0
 
 			for range 30 {
-				req := httptest.NewRequest("GET", "/", nil)
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
 				req.RemoteAddr = "10.0.0.5:1234"
 				rec := httptest.NewRecorder()
 				wrapped.ServeHTTP(rec, req)
@@ -251,21 +251,21 @@ var _ = Describe("Rate Limiting", func() {
 
 			// Exhaust IP A
 			for range n {
-				req := httptest.NewRequest("GET", "/", nil)
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
 				req.RemoteAddr = "192.168.1.1:1000"
 				rec := httptest.NewRecorder()
 				wrapped.ServeHTTP(rec, req)
 				Expect(rec.Code).To(Equal(http.StatusOK))
 			}
 
-			reqA := httptest.NewRequest("GET", "/", nil)
+			reqA := httptest.NewRequest(http.MethodGet, "/", nil)
 			reqA.RemoteAddr = "192.168.1.1:1000"
 			recA := httptest.NewRecorder()
 			wrapped.ServeHTTP(recA, reqA)
 			Expect(recA.Code).To(Equal(http.StatusTooManyRequests))
 
 			// IP B is still allowed
-			reqB := httptest.NewRequest("GET", "/", nil)
+			reqB := httptest.NewRequest(http.MethodGet, "/", nil)
 			reqB.RemoteAddr = "192.168.1.2:1000"
 			recB := httptest.NewRecorder()
 			wrapped.ServeHTTP(recB, reqB)
@@ -284,7 +284,7 @@ var _ = Describe("Rate Limiting", func() {
 			handler := srv.Handler()
 
 			for range 150 {
-				req := httptest.NewRequest("GET", "/health", nil)
+				req := httptest.NewRequest(http.MethodGet, "/health", nil)
 				req.RemoteAddr = "127.0.0.1:5000"
 				rec := httptest.NewRecorder()
 				handler.ServeHTTP(rec, req)
@@ -300,7 +300,7 @@ var _ = Describe("Rate Limiting", func() {
 				w.WriteHeader(http.StatusOK)
 			}))
 
-			req1 := httptest.NewRequest("GET", "/", nil)
+			req1 := httptest.NewRequest(http.MethodGet, "/", nil)
 			req1.RemoteAddr = "1.1.1.1:1234"
 			req1.Header.Set("X-Forwarded-For", "2.2.2.2")
 
@@ -309,7 +309,7 @@ var _ = Describe("Rate Limiting", func() {
 			Expect(rec1.Code).To(Equal(http.StatusOK))
 
 			// Same RemoteAddr but different X-Forwarded-For must be blocked
-			req2 := httptest.NewRequest("GET", "/", nil)
+			req2 := httptest.NewRequest(http.MethodGet, "/", nil)
 			req2.RemoteAddr = "1.1.1.1:1234"
 			req2.Header.Set("X-Forwarded-For", "3.3.3.3")
 
@@ -326,7 +326,7 @@ var _ = Describe("Rate Limiting", func() {
 				w.WriteHeader(http.StatusOK)
 			}))
 
-			req1 := httptest.NewRequest("GET", "/", nil)
+			req1 := httptest.NewRequest(http.MethodGet, "/", nil)
 			req1.RemoteAddr = "10.20.30.40"
 			rec1 := httptest.NewRecorder()
 			wrapped.ServeHTTP(rec1, req1)
@@ -338,14 +338,14 @@ var _ = Describe("Rate Limiting", func() {
 			Expect(limiter.buckets).To(HaveLen(1))
 			limiter.mu.Unlock()
 
-			req2 := httptest.NewRequest("GET", "/", nil)
+			req2 := httptest.NewRequest(http.MethodGet, "/", nil)
 			req2.RemoteAddr = "10.20.30.40"
 			rec2 := httptest.NewRecorder()
 			wrapped.ServeHTTP(rec2, req2)
 			Expect(rec2.Code).To(Equal(http.StatusTooManyRequests))
 
 			// A different port-less address has its own bucket
-			req3 := httptest.NewRequest("GET", "/", nil)
+			req3 := httptest.NewRequest(http.MethodGet, "/", nil)
 			req3.RemoteAddr = "10.20.30.41"
 			rec3 := httptest.NewRecorder()
 			wrapped.ServeHTTP(rec3, req3)
@@ -360,7 +360,7 @@ var _ = Describe("Rate Limiting", func() {
 				w.WriteHeader(http.StatusOK)
 			}))
 			send := func(addr string) int {
-				req := httptest.NewRequest("GET", "/", nil)
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
 				req.RemoteAddr = addr
 				rec := httptest.NewRecorder()
 				wrapped.ServeHTTP(rec, req)
@@ -398,7 +398,7 @@ var _ = Describe("Rate Limiting", func() {
 			var wg sync.WaitGroup
 			for range concurrent {
 				wg.Go(func() {
-					req := httptest.NewRequest("GET", "/", nil)
+					req := httptest.NewRequest(http.MethodGet, "/", nil)
 					req.RemoteAddr = "172.16.0.1:4000"
 					rec := httptest.NewRecorder()
 					wrapped.ServeHTTP(rec, req)
@@ -437,7 +437,7 @@ var _ = Describe("Rate Limiting", func() {
 			// Advance in small steps over 60 seconds
 			for range 60 {
 				for range 2 {
-					req := httptest.NewRequest("GET", "/", nil)
+					req := httptest.NewRequest(http.MethodGet, "/", nil)
 					req.RemoteAddr = "192.168.50.1:1234"
 					rec := httptest.NewRecorder()
 					wrapped.ServeHTTP(rec, req)
@@ -464,7 +464,7 @@ var _ = Describe("Rate Limiting", func() {
 			}))
 
 			// Request from IP A
-			reqA := httptest.NewRequest("GET", "/", nil)
+			reqA := httptest.NewRequest(http.MethodGet, "/", nil)
 			reqA.RemoteAddr = "1.2.3.4:1234"
 			recA := httptest.NewRecorder()
 			wrapped.ServeHTTP(recA, reqA)
@@ -478,7 +478,7 @@ var _ = Describe("Rate Limiting", func() {
 			currentTime = currentTime.Add(1 * time.Second)
 
 			// Request from IP B
-			reqB := httptest.NewRequest("GET", "/", nil)
+			reqB := httptest.NewRequest(http.MethodGet, "/", nil)
 			reqB.RemoteAddr = "5.6.7.8:1234"
 			recB := httptest.NewRecorder()
 			wrapped.ServeHTTP(recB, reqB)
@@ -493,7 +493,7 @@ var _ = Describe("Rate Limiting", func() {
 			currentTime = currentTime.Add(60 * time.Second)
 
 			// Request from IP C: triggers lazy eviction under mutex
-			reqC := httptest.NewRequest("GET", "/", nil)
+			reqC := httptest.NewRequest(http.MethodGet, "/", nil)
 			reqC.RemoteAddr = "9.9.9.9:1234"
 			recC := httptest.NewRecorder()
 			wrapped.ServeHTTP(recC, reqC)
@@ -516,7 +516,7 @@ var _ = Describe("Rate Limiting", func() {
 				w.WriteHeader(http.StatusOK)
 			}))
 			send := func(addr string) int {
-				req := httptest.NewRequest("GET", "/", nil)
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
 				req.RemoteAddr = addr
 				rec := httptest.NewRecorder()
 				wrapped.ServeHTTP(rec, req)
@@ -556,7 +556,7 @@ var _ = Describe("Rate Limiting", func() {
 				w.WriteHeader(http.StatusOK)
 			}))
 			send := func(addr string) int {
-				req := httptest.NewRequest("GET", "/", nil)
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
 				req.RemoteAddr = addr
 				rec := httptest.NewRecorder()
 				wrapped.ServeHTTP(rec, req)
@@ -603,7 +603,7 @@ var _ = Describe("Rate Limiting", func() {
 				w.WriteHeader(http.StatusOK)
 			}))
 			send := func(addr string) int {
-				req := httptest.NewRequest("GET", "/", nil)
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
 				req.RemoteAddr = addr
 				rec := httptest.NewRecorder()
 				wrapped.ServeHTTP(rec, req)
