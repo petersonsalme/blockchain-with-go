@@ -97,7 +97,7 @@ $ CONSENSUS=poa POA_VALIDATORS=<hex> POA_KEYSTORE=validator.key POA_KEYSTORE_PAS
 
 ### HD wallet (BIP-39 + SLIP-0010)
 
-The `wallet` package supports hierarchical deterministic (HD) wallets using BIP-39 English mnemonics (12 or 24 words) and SLIP-0010 ed25519 key derivation. A seed is generated with an optional passphrase and keys are derived along hardened-only paths such as `m/44'/1'/0'/0'/0'` (see [ADR-0014](docs/adr/0014-hd-wallet-slip10.md)). The derived key is a standard `*wallet.Wallet` that can be saved with `Save`, persisting the derived key rather than the mnemonic.
+The `wallet` package supports hierarchical deterministic (HD) wallets using BIP-39 English mnemonics (12 or 24 words) and SLIP-0010 ed25519 key derivation. A seed is generated with an optional passphrase and keys are derived along hardened-only paths such as `m/44'/1'/0'/0'/0'` (see [ADR-0017](docs/adr/0017-hd-wallet-slip10.md)). The derived key is a standard `*wallet.Wallet` that can be saved with `Save`, persisting the derived key rather than the mnemonic.
 
 ```go
 m, err := wallet.NewMnemonic(24)
@@ -137,9 +137,9 @@ Design decisions live in [`docs/adr/`](docs/adr/0009-merkle-tree.md):
 | [0009](docs/adr/0009-merkle-tree.md) | Transaction Merkle tree in the block header (RFC 6962 odd-node rule) |
 | [0010](docs/adr/0010-prometheus-metrics.md) | Prometheus metrics written by hand, no client library |
 | [0012](docs/adr/0012-difficulty-bits.md) | Proof-of-work difficulty counts leading zero bits; defaults realigned with `MINING_TIMEOUT` |
-| [0014](docs/adr/0014-hd-wallet-slip10.md) | HD wallet: BIP-39 mnemonics with SLIP-0010 ed25519 derivation (hardened only) |
 | [0015](docs/adr/0015-coinbase-and-halving.md) | Coinbase reward capped at `Subsidy(height) + fees`, with halving every 210,000 blocks |
 | [0016](docs/adr/0016-bwg-cli-composition-root.md) | One `bwg` binary is the composition root; `bwg node` replaces `cmd/node` |
+| [0017](docs/adr/0017-hd-wallet-slip10.md) | HD wallet: BIP-39 mnemonics with SLIP-0010 ed25519 derivation (hardened only) |
 
 ## Configuration & Environment Variables
 

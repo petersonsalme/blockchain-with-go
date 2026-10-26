@@ -1,4 +1,4 @@
-# ADR-0014: HD wallet with BIP-39 mnemonics and SLIP-0010 ed25519 derivation
+# ADR-0017: HD wallet with BIP-39 mnemonics and SLIP-0010 ed25519 derivation
 
 Status: Accepted
 
