@@ -17,6 +17,7 @@ import (
 // shutdownChain blocks Mine until its ctx is cancelled and holds Tip until released.
 type shutdownChain struct {
 	brokenChain
+
 	mining      chan struct{}
 	healthSeen  chan struct{}
 	releaseTip  chan struct{}

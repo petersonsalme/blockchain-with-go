@@ -161,6 +161,7 @@ func (prunedChain) BlockByHash(string) (*domain.Block, error) { return nil, stor
 // spyMineChain counts Mine calls and returns a valid mock block.
 type spyMineChain struct {
 	brokenChain
+
 	mineCalls atomic.Int64
 }
 
@@ -179,6 +180,7 @@ func (coinbaseCapChain) Mine(context.Context, []domain.Transaction) (*domain.Blo
 // recordingChain records the transactions each Mine call receives.
 type recordingChain struct {
 	brokenChain
+
 	mu  sync.Mutex
 	txs [][]domain.Transaction
 }

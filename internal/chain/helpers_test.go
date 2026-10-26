@@ -220,6 +220,7 @@ func replayRepo(repo storage.IndexedRepository) domain.UTXOSet {
 // failingWrites fails Commit and Reorg on demand.
 type failingWrites struct {
 	storage.IndexedRepository
+
 	commitErr, reorgErr error
 }
 

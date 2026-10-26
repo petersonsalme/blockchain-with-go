@@ -15,6 +15,7 @@ import (
 // tipRepo serves a fixed history and an empty UTXO set.
 type tipRepo struct {
 	storage.IndexedRepository
+
 	blocks []*domain.Block
 }
 

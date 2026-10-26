@@ -328,6 +328,7 @@ func TestMetricsTipFailureOmitsGauge(t *testing.T) {
 // miningChain answers Mine with a fixed outcome.
 type miningChain struct {
 	brokenChain
+
 	err error
 }
 

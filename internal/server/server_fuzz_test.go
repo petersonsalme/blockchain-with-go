@@ -18,6 +18,7 @@ import (
 // reaches only Mine.
 type fuzzChain struct {
 	Chain
+
 	mined int
 }
 

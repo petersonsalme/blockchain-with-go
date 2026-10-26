@@ -219,6 +219,7 @@ func TestHubPublishSkipsUnmarshalableValues(t *testing.T) {
 // spyWriter is a ResponseWriter whose write, flush and deadline behaviour tests control.
 type spyWriter struct {
 	*httptest.ResponseRecorder
+
 	mu          sync.Mutex
 	deadlines   []time.Time
 	flushes     int

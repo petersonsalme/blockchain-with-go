@@ -20,6 +20,7 @@ import (
 // allFailingRepo fails All once armed.
 type allFailingRepo struct {
 	storage.IndexedRepository
+
 	armed atomic.Bool
 }
 
@@ -34,6 +35,7 @@ func (r *allFailingRepo) All() ([]*domain.Block, error) {
 // snapshotRepo fails Last, or returns an empty All, once armed.
 type snapshotRepo struct {
 	storage.IndexedRepository
+
 	failLast, emptyAll atomic.Bool
 }
 

@@ -22,6 +22,7 @@ import (
 // append-order checks of the in-memory repository. Reindex replays the chain.
 type stubRepo struct {
 	storage.IndexedRepository
+
 	blocks []*domain.Block
 }
 

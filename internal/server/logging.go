@@ -12,6 +12,7 @@ const unmatchedRoute = "unmatched"
 // statusRecorder remembers the status code a handler sent.
 type statusRecorder struct {
 	http.ResponseWriter
+
 	status      int
 	wroteHeader bool
 }

@@ -21,6 +21,7 @@ import (
 // indexSpy counts the full scans and fails the index reads on demand.
 type indexSpy struct {
 	storage.IndexedRepository
+
 	all     atomic.Int32
 	byTxErr error
 	// utxoErr fails UTXOsByAddress.

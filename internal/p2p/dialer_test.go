@@ -71,6 +71,7 @@ func serve(n *Node, hellos *atomic.Int64) http.Handler {
 
 type testNode struct {
 	*Node
+
 	srv    *httptest.Server
 	book   *Book
 	hellos *atomic.Int64

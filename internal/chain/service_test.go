@@ -57,6 +57,7 @@ func (errOnlyCtx) Err() error { return context.Canceled }
 // failingRepo fails Commit, Last and the reads on demand.
 type failingRepo struct {
 	storage.IndexedRepository
+
 	commitErr                error
 	lastErr                  error
 	txErr                    error

@@ -59,6 +59,7 @@ func callOp(target string, gas uint64) *domain.ContractOp {
 // poisonedAll makes All return a fixed chain once set.
 type poisonedAll struct {
 	storage.IndexedRepository
+
 	chain []*domain.Block
 }
 
