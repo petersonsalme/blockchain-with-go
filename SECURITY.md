@@ -10,6 +10,8 @@ Nodes talk to each other over plain HTTP with no authentication or encryption ([
 
 Gossip ([ADR-0018](docs/adr/0018-block-and-tx-gossip.md)) ties each request to a connected peer by its `node_id`, but the id is not a secret: anyone who knows a connected peer's id can send gossip in its name (`node_id` is spoofable). The rate limiter and the validation before relay (a block must extend the tip and pass every check, a transaction must be admitted by the pool) are the protection.
 
+Sync ([ADR-0019](docs/adr/0019-initial-sync-and-forks.md)) bans a peer that sends invalid headers or blocks, by `node_id` and address, for one hour. The ban lives in memory and is forgotten on restart; a hostile peer can return with a new id from another address. Headers are not checked by the consensus before the bodies arrive, so a peer that claims fake work can cost the bodies of the claimed branch before it is banned. A peer whose branch has more work but a lower height is never tried.
+
 ## Reporting a vulnerability
 
 If you find a security issue, you are welcome to report it privately through GitHub's

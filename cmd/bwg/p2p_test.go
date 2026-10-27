@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -25,6 +26,7 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/internal/p2p"
 	"github.com/petersonsalme/blockchain-with-go/internal/server"
+	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/memory"
 )
 
@@ -540,5 +542,45 @@ func TestNewP2PNodeLogsToTheGivenLogger(t *testing.T) {
 
 	if buf.Len() == 0 {
 		t.Fatal("dial failure was not logged to the process logger")
+	}
+}
+
+func TestMapSyncError(t *testing.T) {
+	other := errors.New("boom")
+
+	cases := []struct {
+		name string
+		err  error
+		want error // the p2p sentinel the result must satisfy; nil for a pass-through
+	}{
+		{"insufficient work", chain.ErrInsufficientWork, p2p.ErrInsufficientWork},
+		{"not on tip", chain.ErrNotOnTip, p2p.ErrNotOnTip},
+		{"state diverged", chain.ErrStateDiverged, p2p.ErrLocalFailure},
+		{"conflict", storage.ErrConflict, p2p.ErrLocalFailure},
+		{"reorg too deep", storage.ErrReorgTooDeep, p2p.ErrLocalFailure},
+		{"empty", storage.ErrEmpty, p2p.ErrLocalFailure},
+		{"wrapped", fmt.Errorf("ctx: %w", chain.ErrInsufficientWork), p2p.ErrInsufficientWork},
+		{"invalid block", chain.ErrInvalidBlock, nil},
+		{"other", other, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := mapSyncError(c.err)
+			if c.want == nil {
+				if !errors.Is(got, c.err) || errors.Is(got, p2p.ErrInsufficientWork) || errors.Is(got, p2p.ErrNotOnTip) || errors.Is(got, p2p.ErrLocalFailure) {
+					t.Fatalf("got %v, want the error unchanged", got)
+				}
+
+				return
+			}
+
+			if !errors.Is(got, c.want) || !errors.Is(got, c.err) {
+				t.Fatalf("got %v, want %v wrapping %v", got, c.want, c.err)
+			}
+		})
+	}
+
+	if mapSyncError(nil) != nil {
+		t.Fatal("nil must stay nil")
 	}
 }

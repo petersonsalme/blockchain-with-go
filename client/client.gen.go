@@ -3176,6 +3176,8 @@ type P2pHelloResponse struct {
 	JSON200 *Hello
 	// JSON400 the response for an HTTP 400 `application/json` response
 	JSON400 *ErrorResponse
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ErrorResponse
 	// JSON404 the response for an HTTP 404 `application/json` response
 	JSON404 *ErrorResponse
 	// JSON409 the response for an HTTP 409 `application/json` response
@@ -3200,6 +3202,11 @@ func (r P2pHelloResponse) GetJSON200() *Hello {
 // GetJSON400 returns the response for an HTTP 400 `application/json` response
 func (r P2pHelloResponse) GetJSON400() *ErrorResponse {
 	return r.JSON400
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r P2pHelloResponse) GetJSON403() *ErrorResponse {
+	return r.JSON403
 }
 
 // GetJSON404 returns the response for an HTTP 404 `application/json` response
@@ -5042,6 +5049,13 @@ func ParseP2pHelloResponse(rsp *http.Response) (*P2pHelloResponse, error) {
 			return nil, err
 		}
 		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest ErrorResponse

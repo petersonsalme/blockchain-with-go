@@ -304,6 +304,7 @@ func contractCases() []contractCase {
 
 		{method: "POST", route: "/p2p/hello", status: 200, serve: p2pPost(Config{P2P: &fakePeers{local: fakeLocal}})},
 		{method: "POST", route: "/p2p/hello", status: 400, serve: p2pPost(Config{P2P: &fakePeers{err: p2p.ErrBadHello}})},
+		{method: "POST", route: "/p2p/hello", status: 403, serve: p2pPost(Config{P2P: &fakePeers{err: p2p.ErrBanned}})},
 		{method: "POST", route: "/p2p/hello", status: 404, serve: p2pPost(Config{})},
 		{method: "POST", route: "/p2p/hello", status: 409, serve: p2pPost(Config{P2P: &fakePeers{err: p2p.ErrSelf}})},
 		{method: "POST", route: "/p2p/hello", status: 413, serve: func() (http.Handler, string, string) {

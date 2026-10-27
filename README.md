@@ -494,6 +494,7 @@ curl -X POST localhost:8080/p2p/hello -d '{"version":1,"node_id":"<32 hex>","gen
 |---|---|---|
 | `200` | | Accepted: the caller is now an inbound peer. |
 | `400` | `invalid_hello` | Invalid JSON, unknown field or malformed hello. |
+| `403` | `peer_banned` | The caller was banned for misbehaving during sync (ADR-0019). |
 | `404` | `p2p_disabled` | The node has no peer-to-peer layer. |
 | `409` | `incompatible_version` | Different protocol version. |
 | `409` | `genesis_mismatch` | Different genesis block. |
@@ -511,6 +512,10 @@ A refused hello leaves the peer list unchanged.
 ```
 
 Other methods answer `405` with `Allow: POST` and `Allow: GET, HEAD`; the rate limiter, the body limit, the log and the metrics apply as on every other route.
+
+### Sync and ban
+
+Initial block download and fork resolution ([ADR-0019](docs/adr/0019-initial-sync-and-forks.md)). At the end of every dialer round (`PEER_INTERVAL`) a node asks the connected peer with the highest tip it does not know for `GET /headers`, then for the bodies in batches of 16 through `GET /blocks`. A peer on a fork is followed only when its branch has strictly more accumulated work; with equal work the first branch seen stays. Blocks are applied only through `AcceptBlock` or `ReplaceChain`, and the transactions of the blocks dropped by a switch go back to the pool. A peer that sends invalid headers or blocks is banned for one hour: it is disconnected and its `POST /p2p/hello` answers `403 peer_banned`. A slow or unreachable peer is only disconnected. No new environment variable is needed.
 
 ### POST /p2p/inv, POST /p2p/block and POST /p2p/tx
 

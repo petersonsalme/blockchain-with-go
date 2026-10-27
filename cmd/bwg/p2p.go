@@ -15,6 +15,7 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/chain"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/internal/p2p"
+	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 )
 
 // Peer-to-peer configuration (ADR-0013).
@@ -46,6 +47,46 @@ func (l chainLedger) AcceptBlock(ctx context.Context, b *domain.Block) error {
 	return err
 }
 
+// syncLedger adapts *chain.Service to p2p.SyncLedger (ADR-0019). The embedded
+// ledger provides Tip, BlocksRange and HasBlock.
+type syncLedger struct{ chainLedger }
+
+// AcceptBlock appends b, translating the failures sync tells apart.
+func (l syncLedger) AcceptBlock(ctx context.Context, b *domain.Block) error {
+	return mapSyncError(l.Service.AcceptBlock(ctx, b))
+}
+
+// ReplaceChain switches to candidate and resubmits the transactions of the dropped
+// blocks to the pool, ignoring refusals.
+func (l syncLedger) ReplaceChain(ctx context.Context, candidate []*domain.Block) error {
+	reorg, err := l.Service.ReplaceChain(ctx, candidate)
+	if err != nil {
+		return mapSyncError(err)
+	}
+
+	for _, tx := range reorg.Orphaned {
+		_ = l.Submit(tx) // a refused transaction (already mined, now invalid) is dropped
+	}
+
+	return nil
+}
+
+// mapSyncError wraps the chain and storage errors that are not the peer's fault in their
+// p2p counterpart, keeping the original in the chain; any other error passes unchanged.
+func mapSyncError(err error) error {
+	switch {
+	case errors.Is(err, chain.ErrInsufficientWork):
+		return fmt.Errorf("%w: %w", p2p.ErrInsufficientWork, err)
+	case errors.Is(err, chain.ErrNotOnTip):
+		return fmt.Errorf("%w: %w", p2p.ErrNotOnTip, err)
+	case errors.Is(err, chain.ErrStateDiverged), errors.Is(err, storage.ErrConflict),
+		errors.Is(err, storage.ErrReorgTooDeep), errors.Is(err, storage.ErrEmpty):
+		return fmt.Errorf("%w: %w", p2p.ErrLocalFailure, err)
+	default:
+		return err
+	}
+}
+
 // newP2PNode builds the peer-to-peer node of this process from the environment,
 // with gossip over svc. Its book starts with the addresses in DATA_DIR/peers.json plus SEED_PEERS; a
 // corrupt file, a bad seed or a bad listen address fails the start.
@@ -64,6 +105,7 @@ func newP2PNode(svc *chain.Service, dataDir string, logger *slog.Logger) (*p2p.N
 		p2p.WithInterval(parsePeerInterval(os.Getenv(peerIntervalEnvVar))),
 		p2p.WithLogger(logger),
 		p2p.WithLedger(chainLedger{svc}),
+		p2p.WithSyncLedger(syncLedger{chainLedger{svc}}),
 	}
 
 	if strings.TrimSpace(dataDir) != "" {

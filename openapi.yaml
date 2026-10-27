@@ -494,6 +494,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/errorResponse"
+        "403":
+          description: The sender is banned for misbehaving during sync (`peer_banned`, ADR-0019).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
         "404":
           description: The node has no peer-to-peer layer (`p2p_disabled`).
           content:
