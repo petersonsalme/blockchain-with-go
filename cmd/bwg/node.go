@@ -253,15 +253,20 @@ func parseValidators(raw string) ([]ed25519.PublicKey, error) {
 // genesisAllocationsEnvVar lists the genesis outputs as address:amount[,address:amount...].
 const genesisAllocationsEnvVar = "GENESIS_ALLOCATIONS"
 
-// newService builds the chain service, funding the genesis block of an empty
-// repository from GENESIS_ALLOCATIONS.
+// newService builds the chain service, funding and timestamping the genesis block
+// of an empty repository from GENESIS_ALLOCATIONS and GENESIS_TIME.
 func newService(repo storage.IndexedRepository, engine consensus.Consensus) (*chain.Service, error) {
 	outs, err := parseGenesisAllocations(os.Getenv(genesisAllocationsEnvVar))
 	if err != nil {
 		return nil, err
 	}
 
-	opts := []chain.Option{chain.WithGenesisAllocations(outs)}
+	at, err := parseGenesisTime(os.Getenv(genesisTimeEnvVar), time.Now())
+	if err != nil {
+		return nil, err
+	}
+
+	opts := []chain.Option{chain.WithGenesisAllocations(outs), chain.WithGenesisTime(at)}
 
 	miner, err := parseMinerAddress(os.Getenv(minerAddressEnvVar))
 	if err != nil {
@@ -327,6 +332,29 @@ func parseGenesisAllocations(raw string) ([]domain.TxOut, error) {
 	}
 
 	return outs, nil
+}
+
+// genesisTimeEnvVar is the RFC 3339 timestamp of the genesis block of an empty repository (ADR-0020).
+const genesisTimeEnvVar = "GENESIS_TIME"
+
+// parseGenesisTime parses raw as an RFC 3339 instant no later than now. A blank
+// value yields the zero time, which keeps the clock.
+func parseGenesisTime(raw string, now time.Time) (time.Time, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return time.Time{}, nil
+	}
+
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%s: invalid time %q: want RFC 3339, e.g. 2026-01-01T00:00:00Z: %w", genesisTimeEnvVar, s, err)
+	}
+
+	if t.After(now) {
+		return time.Time{}, fmt.Errorf("%s: %q is later than the current time", genesisTimeEnvVar, s)
+	}
+
+	return t, nil
 }
 
 // dataDirEnvVar holds the optional directory where chain.db is stored.
