@@ -1,0 +1,46 @@
+# Three-node bwg network for local runs and the e2e test (e2e/compose_test.go).
+# Ports are published on 127.0.0.1 only; nodes reach each other by service name.
+x-node: &node
+  build: .
+  environment: &env
+    DATA_DIR: /data
+    GENESIS_TIME: "2026-01-01T00:00:00Z"
+    CONSENSUS: pow
+    POW_DIFFICULTY: "1"
+    POW_RETARGET_INTERVAL: "0"
+    PEER_INTERVAL: 1s
+
+services:
+  node1:
+    <<: *node
+    image: bwg:compose
+    environment:
+      <<: *env
+      P2P_LISTEN_ADDR: http://node1:8080
+    ports: ["127.0.0.1:18081:8080"]
+    volumes: ["node1-data:/data"]
+
+  node2:
+    <<: *node
+    image: bwg:compose
+    environment:
+      <<: *env
+      P2P_LISTEN_ADDR: http://node2:8080
+      SEED_PEERS: http://node1:8080
+    ports: ["127.0.0.1:18082:8080"]
+    volumes: ["node2-data:/data"]
+
+  node3:
+    <<: *node
+    image: bwg:compose
+    environment:
+      <<: *env
+      P2P_LISTEN_ADDR: http://node3:8080
+      SEED_PEERS: http://node2:8080
+    ports: ["127.0.0.1:18083:8080"]
+    volumes: ["node3-data:/data"]
+
+volumes:
+  node1-data:
+  node2-data:
+  node3-data:

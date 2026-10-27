@@ -310,6 +310,20 @@ $ curl -s localhost:8080/health
 
 Pass any other variable with `-e` (for example `-e CONSENSUS=poa -e POA_VALIDATORS=...`). Other subcommands run with the same image: `docker run --rm -e DATA_DIR=/data -v bwg-data:/data bwg node --reindex`. `scripts/docker-smoke.sh` builds the image and checks the non-root user and `GET /health` in both modes; CI runs it in the `docker` job.
 
+### Rede de 3 nós (docker compose)
+
+`docker-compose.yml` sobe `node1`, `node2` e `node3` com a imagem do `Dockerfile`, cada um com seu volume em `/data`, o mesmo `GENESIS_TIME`, `CONSENSUS=pow` com `POW_DIFFICULTY=1` e `PEER_INTERVAL=1s`. Os peers semente são `node2` → `node1` e `node3` → `node2`; as portas ficam só em `127.0.0.1` (18081, 18082, 18083).
+
+```shell
+$ docker compose up -d --build                  # sobe a rede
+$ curl -s localhost:18081/health                # node1; use 18082 e 18083 para os outros
+$ curl -s -X POST localhost:18081/mine          # minera um bloco; os outros dois o recebem
+$ go test -tags e2e -count=1 -timeout 10m ./e2e/...   # e2e: propagação, nó religado e convergência
+$ docker compose down -v                        # derruba e apaga os volumes
+```
+
+O teste e2e usa o projeto `bwg-e2e` e o derruba ao terminar; o CI o roda no job `e2e`.
+
 ### Releases
 
 Pushing a tag `v*` (for example `git tag v0.1.0 && git push origin v0.1.0`) runs `.github/workflows/release.yml`, which uses [goreleaser](https://goreleaser.com) (`.goreleaser.yaml`) to build static `bwg` binaries for linux, darwin and windows on amd64 and arm64 and publish them, with `checksums.txt`, as a GitHub release. To try it locally without publishing:
