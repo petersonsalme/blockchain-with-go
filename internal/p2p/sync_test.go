@@ -40,7 +40,7 @@ func grow(base []*domain.Block, validator string, diffs ...int) []*domain.Block 
 		prev := out[len(out)-1]
 		out = append(out, sealed(&domain.Block{
 			Index: prev.Index + 1, Timestamp: syncT0.Add(time.Duration(prev.Index+1) * time.Second),
-			MerkleRoot: domain.MerkleRoot(nil), PrevHash: blockHash(prev), Difficulty: d, Validator: validator,
+			MerkleRoot: domain.MerkleRoot(nil), PrevHash: linkHash(prev), Difficulty: d, Validator: validator,
 		}))
 	}
 
@@ -138,7 +138,7 @@ func (l *syncLedger) AcceptBlock(_ context.Context, b *domain.Block) error {
 		}
 	}
 
-	if b.PrevHash != blockHash(l.blocks[len(l.blocks)-1]) {
+	if b.PrevHash != linkHash(l.blocks[len(l.blocks)-1]) {
 		return ErrNotOnTip
 	}
 
@@ -362,6 +362,54 @@ func TestSyncDownloadsHeadersThenBodies(t *testing.T) {
 
 	if n.Sync(context.Background()) {
 		t.Fatal("a second Sync with nothing new reported a change")
+	}
+}
+
+// emptyGenesis is the chain as chain.Service builds it: the genesis block is
+// never sealed (Hash == "") and block 1 links to it with PrevHash == "".
+func emptyGenesis(blocks int) []*domain.Block {
+	canonical := grow(nil, "A", ones(blocks)...)
+	canonical[0].Hash = ""
+	canonical[1].PrevHash = ""
+	canonical[1].Hash = canonical[1].CalculateHash()
+
+	for i := 2; i < len(canonical); i++ {
+		canonical[i].PrevHash = canonical[i-1].Hash
+		canonical[i].Hash = canonical[i].CalculateHash()
+	}
+
+	return canonical
+}
+
+func TestSyncFromAnUnsealedGenesis(t *testing.T) {
+	canonical := emptyGenesis(5)
+	l := newSyncLedger(canonical[:1])
+	n := newSyncNode(t, l)
+	n.connectTo(t, idA, newSyncPeer(t, canonical))
+
+	if !n.Sync(context.Background()) || l.height() != 5 {
+		t.Fatalf("synced to %d, want 5", l.height())
+	}
+
+	if !hasPeer(n, idA) {
+		t.Fatal("an honest peer was banned")
+	}
+}
+
+func TestCheckHeaderLinksToAnUnsealedGenesis(t *testing.T) {
+	canonical := emptyGenesis(2)
+
+	err := checkHeader(canonical[1], 0, 1, canonical[0])
+	if err != nil {
+		t.Fatalf("honest child of the genesis rejected: %v", err)
+	}
+
+	bad := *canonical[1]
+	bad.PrevHash = "ff"
+
+	err = checkHeader(&bad, 0, 1, canonical[0])
+	if err == nil {
+		t.Fatal("a child with a wrong PrevHash was accepted")
 	}
 }
 

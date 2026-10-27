@@ -410,11 +410,21 @@ func checkHeader(h *domain.Block, i, from int, prev *domain.Block) error {
 		return misbehaved("header %d has difficulty %d", h.Index, h.Difficulty)
 	}
 
-	if prev != nil && h.PrevHash != blockHash(prev) {
+	if prev != nil && h.PrevHash != linkHash(prev) {
 		return misbehaved("header %d does not link to its parent", h.Index)
 	}
 
 	return nil
+}
+
+// linkHash is the hash a child must carry in PrevHash. The genesis block is
+// never sealed and its child links to the stored Hash, which is empty by design.
+func linkHash(prev *domain.Block) string {
+	if prev.Index == 0 {
+		return prev.Hash
+	}
+
+	return blockHash(prev)
 }
 
 // fetchBodies returns the blocks for headers, checked against them.
