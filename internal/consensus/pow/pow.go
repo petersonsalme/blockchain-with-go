@@ -259,7 +259,14 @@ func MineWithContext(ctx context.Context, b *domain.Block, difficulty int) error
 // MineParallel returns only after all of them stopped. Any valid nonce is
 // accepted, so the one found may differ between runs when workers > 1. On
 // success it stores nonce, difficulty and hash on b; on error b is unchanged.
-func MineParallel(ctx context.Context, b *domain.Block, difficulty, workers int) error { //nolint:contextcheck // a nil context from callers that have none means no cancellation
+func MineParallel(ctx context.Context, b *domain.Block, difficulty, workers int) error {
+	return mineParallel(ctx, b, difficulty, workers, nil)
+}
+
+// mineParallel is MineParallel with onTry, which, when not nil, every worker
+// calls with the search context, its start offset and the nonce before
+// hashing it. Only tests set it.
+func mineParallel(ctx context.Context, b *domain.Block, difficulty, workers int, onTry func(ctx context.Context, worker, nonce int)) error { //nolint:contextcheck // a nil context from callers that have none means no cancellation
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -283,6 +290,10 @@ func MineParallel(ctx context.Context, b *domain.Block, difficulty, workers int)
 			defer wg.Done()
 
 			for c.Nonce = start; searchCtx.Err() == nil; c.Nonce += workers {
+				if onTry != nil {
+					onTry(searchCtx, start, c.Nonce)
+				}
+
 				if hash := c.CalculateHash(); solvesDifficulty(hash, difficulty) {
 					c.Hash = hash
 					found <- c
