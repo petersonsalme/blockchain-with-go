@@ -567,7 +567,7 @@ func TestMapSyncError(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			got := mapSyncError(c.err)
 			if c.want == nil {
-				if got != c.err {
+				if !errors.Is(got, c.err) || errors.Is(got, p2p.ErrInsufficientWork) || errors.Is(got, p2p.ErrNotOnTip) || errors.Is(got, p2p.ErrLocalFailure) {
 					t.Fatalf("got %v, want the error unchanged", got)
 				}
 

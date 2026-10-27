@@ -77,7 +77,9 @@ func startGossipNode(t *testing.T, ctx context.Context, genesis *domain.Block, a
 	t.Helper()
 	t.Setenv("POW_DIFFICULTY", "1")
 	t.Setenv(seedPeersEnvVar, seed)
-	t.Setenv(peerIntervalEnvVar, "1h") // only the first round of Run happens
+	// The first round can sync a block that gossip is also delivering (the gossip copy then answers
+	// not_on_tip and is not relayed, ADR-0019); a short interval lets the next round catch the rest up.
+	t.Setenv(peerIntervalEnvVar, "200ms")
 
 	repo := memory.New()
 	if genesis != nil {

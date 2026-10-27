@@ -97,11 +97,11 @@ func startSyncNode(t *testing.T, ctx context.Context, genesis *domain.Block, all
 	return n
 }
 
-func (s *syncNode) mineBlocks(t *testing.T, count int) {
+func (s *syncNode) mineBlocks(ctx context.Context, t *testing.T, count int) {
 	t.Helper()
 
 	for range count {
-		_, err := s.svc.MinePending(context.Background())
+		_, err := s.svc.MinePending(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -135,7 +135,7 @@ func TestEmptyNodeSyncsToTheTipOfTheNetwork(t *testing.T) {
 	t.Cleanup(cancel)
 
 	a := startSyncNode(t, ctx, nil, nil, "", false)
-	a.mineBlocks(t, 40)
+	a.mineBlocks(ctx, t, 40)
 
 	c := startSyncNode(t, ctx, genesisOf(t, a), nil, a.url(), false)
 
@@ -184,8 +184,8 @@ func startForkedPair(t *testing.T, ctx context.Context, blocksA, blocksB int) *f
 		t.Fatal(err)
 	}
 
-	a.mineBlocks(t, blocksA)
-	b.mineBlocks(t, blocksB)
+	a.mineBlocks(ctx, t, blocksA)
+	b.mineBlocks(ctx, t, blocksB)
 
 	return &forkedPair{a: a, b: b, spend: spend}
 }

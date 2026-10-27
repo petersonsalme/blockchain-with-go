@@ -1,6 +1,6 @@
 # ADR-0019: Initial block download and fork resolution over HTTP
 
-Status: Proposed (ENG-32)
+Status: Accepted (ENG-32)
 
 ## Context
 
