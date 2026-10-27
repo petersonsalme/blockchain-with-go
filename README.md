@@ -310,19 +310,19 @@ $ curl -s localhost:8080/health
 
 Pass any other variable with `-e` (for example `-e CONSENSUS=poa -e POA_VALIDATORS=...`). Other subcommands run with the same image: `docker run --rm -e DATA_DIR=/data -v bwg-data:/data bwg node --reindex`. `scripts/docker-smoke.sh` builds the image and checks the non-root user and `GET /health` in both modes; CI runs it in the `docker` job.
 
-### Rede de 3 nós (docker compose)
+### Three-node network (docker compose)
 
-`docker-compose.yml` sobe `node1`, `node2` e `node3` com a imagem do `Dockerfile`, cada um com seu volume em `/data`, o mesmo `GENESIS_TIME`, `CONSENSUS=pow` com `POW_DIFFICULTY=1` e `PEER_INTERVAL=1s`. Os peers semente são `node2` → `node1` e `node3` → `node2`; as portas ficam só em `127.0.0.1` (18081, 18082, 18083).
+`docker-compose.yml` starts `node1`, `node2` and `node3` from the `Dockerfile` image, each with its own volume at `/data`, the same `GENESIS_TIME`, `CONSENSUS=pow` with `POW_DIFFICULTY=1` and `PEER_INTERVAL=1s`. The seed peers are `node2` → `node1` and `node3` → `node2`; the ports are bound to `127.0.0.1` only (18081, 18082, 18083).
 
 ```shell
-$ docker compose up -d --build                  # sobe a rede
-$ curl -s localhost:18081/health                # node1; use 18082 e 18083 para os outros
-$ curl -s -X POST localhost:18081/mine          # minera um bloco; os outros dois o recebem
-$ go test -tags e2e -count=1 -timeout 10m ./e2e/...   # e2e: propagação, nó religado e convergência
-$ docker compose down -v                        # derruba e apaga os volumes
+$ docker compose up -d --build                  # brings the network up
+$ curl -s localhost:18081/health                # node1; use 18082 and 18083 for the others
+$ curl -s -X POST localhost:18081/mine          # mines one block; the other two receive it
+$ go test -tags e2e -count=1 -timeout 10m ./e2e/...   # e2e: propagation, restarted node and convergence
+$ docker compose down -v                        # stops the network and deletes the volumes
 ```
 
-O teste e2e usa o projeto `bwg-e2e` e o derruba ao terminar; o CI o roda no job `e2e`.
+The e2e test uses the `bwg-e2e` project and tears it down when it finishes; CI runs it in the `e2e` job.
 
 ### Releases
 
