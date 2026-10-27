@@ -77,10 +77,7 @@ $ curl -s $N:18081/p2p/peers
 
 ## Mining and coinbase
 
-```shell
-$ $B miner --node $N:18081 --count 1
-block 4 1665dee5b1d6d13d75e0c38068c1fe679d446e4bf642cfc495486022587f3819 txs=2
-```
+The `Wallet: new, balance, send` section below shows a real `miner` run (a block with two transactions: the coinbase plus one transfer).
 
 `miner` calls `POST /mine`; `--count 0` mines until `Ctrl+C`, `--interval 2s` pauses between blocks. `txs` counts the coinbase plus the mempool transactions the block took. Only node1 has `MINER_ADDRESS`: a block mined on node2 (`curl -s -X POST $N:18082/mine`) has no coinbase (its `Transactions` is `[]`) and all nodes accept it. Look at: the coinbase transaction at position 0 of the block page in the explorer.
 

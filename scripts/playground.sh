@@ -10,6 +10,11 @@ cd "$(dirname "$0")/.."
 dir=.playground
 mkdir -p "$dir"
 
+if [ -f "$dir/miner.key" ] && [ ! -f "$dir/miner.addr" ]; then
+  echo "playground: $dir/miner.key exists but $dir/miner.addr is missing; restore miner.addr or delete $dir/miner.key to create a new miner wallet" >&2
+  exit 1
+fi
+
 go build -o "$dir/bwg" ./cmd/bwg
 
 if [ ! -f "$dir/miner.key" ]; then
