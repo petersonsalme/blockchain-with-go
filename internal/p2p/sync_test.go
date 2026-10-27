@@ -406,10 +406,11 @@ func TestCheckHeaderLinksToAnUnsealedGenesis(t *testing.T) {
 
 	bad := *canonical[1]
 	bad.PrevHash = "ff"
+	bad.Hash = bad.CalculateHash()
 
 	err = checkHeader(&bad, 0, 1, canonical[0])
-	if err == nil {
-		t.Fatal("a child with a wrong PrevHash was accepted")
+	if err == nil || !strings.Contains(err.Error(), "does not link to its parent") {
+		t.Fatalf("want header 1 does not link to its parent, got %v", err)
 	}
 }
 
