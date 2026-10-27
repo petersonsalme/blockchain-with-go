@@ -141,6 +141,7 @@ Design decisions live in [`docs/adr/`](docs/adr/0009-merkle-tree.md):
 | [0015](docs/adr/0015-coinbase-and-halving.md) | Coinbase reward capped at `Subsidy(height) + fees`, with halving every 210,000 blocks |
 | [0016](docs/adr/0016-bwg-cli-composition-root.md) | One `bwg` binary is the composition root; `bwg node` replaces `cmd/node` |
 | [0017](docs/adr/0017-hd-wallet-slip10.md) | HD wallet: BIP-39 mnemonics with SLIP-0010 ed25519 derivation (hardened only) |
+| [0020](docs/adr/0020-genesis-time.md) | Deterministic genesis time from `GENESIS_TIME` |
 
 ## Configuration & Environment Variables
 
@@ -159,6 +160,7 @@ The application can be configured via environment variables (e.g., in a `.env` f
 | `POA_KEYSTORE_PASSWORD` | Password that unlocks `POA_KEYSTORE`; required with `CONSENSUS=poa` | empty |
 | `MINING_TIMEOUT` | Maximum duration allowed for mining a block (e.g., `10s`, `500ms`, or integer seconds) | `10s` |
 | `GENESIS_ALLOCATIONS` | Genesis outputs as `address:amount[,address:amount...]`. Each address must be a valid wallet address and each amount an integer from 1 to 2^64−1; an invalid item stops the node at startup. Whitespace around each item and around `:` is ignored. Only used when the chain is empty (the genesis is created); ignored otherwise | empty (genesis without transactions) |
+| `GENESIS_TIME` | Timestamp of the genesis block and of its allocation transaction, as RFC 3339 (e.g. `2026-01-01T00:00:00Z`). Nodes started with the same `GENESIS_TIME` and `GENESIS_ALLOCATIONS` on empty storage share the genesis and can pair ([ADR-0020](docs/adr/0020-genesis-time.md)). An invalid value or one later than the current time stops the node at startup. Only used when the chain is empty; ignored otherwise | empty (the clock at genesis creation) |
 | `MINER_ADDRESS` | Wallet address that receives the coinbase (`Subsidy(height) + fees`) of every block this node mines. Blank or only spaces adds no coinbase; an invalid address stops the node at startup, naming the variable | empty (no coinbase) |
 | `DATA_DIR` | Directory for persistent disk storage (stores `chain.db` and the known peer addresses in `peers.json`; a corrupt `peers.json` stops the node). When empty, the in-memory repository is used | empty (in-memory storage) |
 | `SNAPSHOT_INTERVAL` | Blocks between stored UTXO snapshots (non-negative integer; `0` disables them). With `PRUNE_KEEP_BLOCKS=K`, the snapshot of height `t − K` is stored when block `t` is committed. An invalid value stops the node at startup | `1000` |
