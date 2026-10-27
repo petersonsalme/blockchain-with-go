@@ -1,0 +1,17 @@
+# Optional tuning, added after compose.playground.yml (docs/playground.md).
+# Retargeting is a consensus rule: it is set on all three nodes, start from a clean chain.
+services:
+  node1:
+    environment:
+      RATE_LIMIT: "30"
+      MINING_WORKERS: "2"
+      POW_RETARGET_INTERVAL: "10"
+      TARGET_BLOCK_TIME: 2s
+  node2:
+    environment:
+      POW_RETARGET_INTERVAL: "10"
+      TARGET_BLOCK_TIME: 2s
+  node3:
+    environment:
+      POW_RETARGET_INTERVAL: "10"
+      TARGET_BLOCK_TIME: 2s

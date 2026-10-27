@@ -1,0 +1,64 @@
+# Playground override (docs/playground.md). Use with the base file:
+#   docker compose -p bwg-playground --env-file .playground/compose.env \
+#     -f docker-compose.yml -f compose.playground.yml up -d --build
+# Only node1 mines with a coinbase; the genesis stays empty (no GENESIS_ALLOCATIONS).
+services:
+  node1:
+    environment:
+      MINER_ADDRESS: ${MINER_ADDRESS:?run scripts/playground.sh or set MINER_ADDRESS}
+
+  # Snapshots and pruning on one extra node only: pruning cannot be undone.
+  snap1:
+    profiles: [snapshots]
+    image: bwg:compose
+    environment:
+      DATA_DIR: /data
+      GENESIS_TIME: "2026-01-01T00:00:00Z"
+      CONSENSUS: pow
+      POW_DIFFICULTY: "1"
+      POW_RETARGET_INTERVAL: "0"
+      PEER_INTERVAL: 1s
+      P2P_LISTEN_ADDR: http://snap1:8080
+      SEED_PEERS: http://node1:8080
+      SNAPSHOT_INTERVAL: "10"
+      PRUNE_KEEP_BLOCKS: "100"
+    ports: ["127.0.0.1:18084:8080"]
+    volumes: ["snap1-data:/data"]
+
+  # Proof of Authority: a separate chain, tied to its own validator set, so it
+  # cannot share a data directory or peers with the PoW nodes. Two validators,
+  # one key each. poa.env and the keystores come from the helper in
+  # docs/playground.md (PoA section); nothing here is committed.
+  poa1:
+    profiles: [poa]
+    image: bwg:compose
+    env_file: .playground/poa.env
+    environment:
+      DATA_DIR: /data
+      GENESIS_TIME: "2026-01-01T00:00:00Z"
+      CONSENSUS: poa
+      POA_KEYSTORE: /poa/poa1.key
+      PEER_INTERVAL: 1s
+      P2P_LISTEN_ADDR: http://poa1:8080
+    ports: ["127.0.0.1:18091:8080"]
+    volumes: ["poa1-data:/data", "./.playground/poa:/poa:ro"]
+
+  poa2:
+    profiles: [poa]
+    image: bwg:compose
+    env_file: .playground/poa.env
+    environment:
+      DATA_DIR: /data
+      GENESIS_TIME: "2026-01-01T00:00:00Z"
+      CONSENSUS: poa
+      POA_KEYSTORE: /poa/poa2.key
+      PEER_INTERVAL: 1s
+      P2P_LISTEN_ADDR: http://poa2:8080
+      SEED_PEERS: http://poa1:8080
+    ports: ["127.0.0.1:18092:8080"]
+    volumes: ["poa2-data:/data", "./.playground/poa:/poa:ro"]
+
+volumes:
+  snap1-data:
+  poa1-data:
+  poa2-data:

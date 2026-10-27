@@ -324,6 +324,8 @@ $ docker compose down -v                        # stops the network and deletes 
 
 The e2e test uses the `bwg-e2e` project and tears it down when it finishes; CI runs it in the `e2e` job.
 
+To try the network by hand, starting from an empty chain funded by mining, see [docs/playground.md](docs/playground.md).
+
 ### Releases
 
 Pushing a tag `v*` (for example `git tag v0.1.0 && git push origin v0.1.0`) runs `.github/workflows/release.yml`, which uses [goreleaser](https://goreleaser.com) (`.goreleaser.yaml`) to build static `bwg` binaries for linux, darwin and windows on amd64 and arm64 and publish them, with `checksums.txt`, as a GitHub release. To try it locally without publishing:
