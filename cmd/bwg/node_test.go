@@ -404,6 +404,99 @@ func TestBuildServiceGenesisAllocations(t *testing.T) {
 	})
 }
 
+func TestParseGenesisTime(t *testing.T) {
+	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	want := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	for _, empty := range []string{"", "  "} {
+		got, err := parseGenesisTime(empty, now)
+		if err != nil || !got.IsZero() {
+			t.Fatalf("parse(%q) = %v, %v, want zero time", empty, got, err)
+		}
+	}
+
+	for _, in := range []string{"2026-01-01T00:00:00Z", " 2026-01-01T00:00:00Z "} {
+		got, err := parseGenesisTime(in, now)
+		if err != nil || !got.Equal(want) {
+			t.Fatalf("parse(%q) = %v, %v, want %v", in, got, err, want)
+		}
+	}
+
+	for _, in := range []string{now.Format(time.RFC3339), now.Add(-time.Second).Format(time.RFC3339)} {
+		_, err := parseGenesisTime(in, now)
+		if err != nil {
+			t.Fatalf("parse(%q) = %v, want accepted", in, err)
+		}
+	}
+
+	for _, in := range []string{"2026-01-01", now.Add(time.Hour).Format(time.RFC3339)} {
+		_, err := parseGenesisTime(in, now)
+		if err == nil || !strings.Contains(err.Error(), genesisTimeEnvVar) {
+			t.Fatalf("parse(%q) = %v, want error citing GENESIS_TIME", in, err)
+		}
+	}
+}
+
+func TestRunFailsOnInvalidGenesisTime(t *testing.T) {
+	t.Setenv("PORT", freePort(t))
+	t.Setenv("POW_DIFFICULTY", "1")
+	t.Setenv(genesisTimeEnvVar, "2999-01-01T00:00:00Z")
+
+	err := run(context.Background(), discardLogger())
+	if err == nil || !strings.Contains(err.Error(), genesisTimeEnvVar) {
+		t.Fatalf("run = %v, want error citing GENESIS_TIME", err)
+	}
+}
+
+func TestBuildServiceGenesisTime(t *testing.T) {
+	t.Setenv("POW_DIFFICULTY", "1")
+
+	eng := pow.NewProofOfWorkFromEnv()
+
+	t.Run("applied on empty repository", func(t *testing.T) {
+		t.Setenv(genesisTimeEnvVar, "2026-01-01T00:00:00Z")
+
+		repo := memory.New()
+
+		_, err := newService(repo, eng)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		blocks, _ := repo.All()
+
+		want := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+		if len(blocks) == 0 || !blocks[0].Timestamp.Equal(want) {
+			t.Fatalf("genesis = %+v, want timestamp %v", blocks, want)
+		}
+	})
+
+	t.Run("ignored on populated repository", func(t *testing.T) {
+		t.Setenv(genesisTimeEnvVar, "")
+
+		repo := memory.New()
+
+		_, err := newService(repo, eng)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		before, _ := repo.All()
+
+		t.Setenv(genesisTimeEnvVar, "2026-01-01T00:00:00Z")
+
+		_, err = newService(repo, eng)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		after, _ := repo.All()
+		if len(before) == 0 || len(after) == 0 || before[0].Hash != after[0].Hash {
+			t.Fatalf("genesis hash changed: %+v -> %+v", before, after)
+		}
+	})
+}
+
 func TestOpenRepository(t *testing.T) {
 	t.Run("empty DATA_DIR chooses memory adapter", func(t *testing.T) {
 		repo, closeRepo, err := openRepository("", storage.Pruning{})

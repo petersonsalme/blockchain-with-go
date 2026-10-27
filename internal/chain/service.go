@@ -78,6 +78,13 @@ func WithGenesisAllocations(outs []domain.TxOut) Option {
 	return func(s *Service) { s.allocations = outs }
 }
 
+// WithGenesisTime makes the genesis block of an empty repository, and its
+// allocation transaction, use t as timestamp (ADR-0020). A zero t keeps the
+// clock.
+func WithGenesisTime(t time.Time) Option {
+	return func(s *Service) { s.genesisTime = t }
+}
+
 // WithMempool replaces the default pool (mempool.New(mempool.DefaultMaxTxs)).
 // The pool belongs exclusively to the Service.
 func WithMempool(p *mempool.Pool) Option {
@@ -99,6 +106,7 @@ type Service struct {
 	consensus   consensus.Consensus
 	generate    Generator
 	allocations []domain.TxOut
+	genesisTime time.Time
 	minerAddr   string
 	pool        *mempool.Pool
 	diverged    bool
@@ -698,7 +706,10 @@ func (s *Service) confirmedDelta(txs []domain.Transaction) (vm.Delta, error) {
 
 // genesis builds the first block, with an allocation transaction when configured.
 func (s *Service) genesis() *domain.Block {
-	now := time.Now()
+	now := s.genesisTime
+	if now.IsZero() {
+		now = time.Now()
+	}
 
 	block := &domain.Block{Timestamp: now, Transactions: []domain.Transaction{}}
 	if len(s.allocations) > 0 {
