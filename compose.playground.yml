@@ -1,0 +1,29 @@
+# Playground override (docs/playground.md). Use with the base file:
+#   docker compose -p bwg-playground --env-file .playground/compose.env \
+#     -f docker-compose.yml -f compose.playground.yml up -d --build
+# Only node1 mines with a coinbase; the genesis stays empty (no GENESIS_ALLOCATIONS).
+services:
+  node1:
+    environment:
+      MINER_ADDRESS: ${MINER_ADDRESS:?run scripts/playground.sh or set MINER_ADDRESS}
+
+  # Snapshots and pruning on one extra node only: pruning cannot be undone.
+  snap1:
+    profiles: [snapshots]
+    image: bwg:compose
+    environment:
+      DATA_DIR: /data
+      GENESIS_TIME: "2026-01-01T00:00:00Z"
+      CONSENSUS: pow
+      POW_DIFFICULTY: "1"
+      POW_RETARGET_INTERVAL: "0"
+      PEER_INTERVAL: 1s
+      P2P_LISTEN_ADDR: http://snap1:8080
+      SEED_PEERS: http://node1:8080
+      SNAPSHOT_INTERVAL: "10"
+      PRUNE_KEEP_BLOCKS: "100"
+    ports: ["127.0.0.1:18084:8080"]
+    volumes: ["snap1-data:/data"]
+
+volumes:
+  snap1-data:
