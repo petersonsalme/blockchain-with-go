@@ -71,6 +71,20 @@ jobs:
     - name: Build image and check GET /health
       run: scripts/docker-smoke.sh
 
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: Three-node docker compose e2e
+      run: go test -tags e2e -count=1 -timeout 10m ./e2e/...
+
   release-check:
     runs-on: ubuntu-latest
     steps:
