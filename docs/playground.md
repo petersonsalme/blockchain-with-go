@@ -160,7 +160,7 @@ $ curl -sN $N:18081/events        # terminal 1
 $ $B miner --node $N:18081 --count 1   # terminal 2
 ```
 
-Terminal 1 prints one `event: block` with a single-line `data:` JSON for the mined block (and, per the README, an `event: tx` after each accepted `POST /tx`; not run here). Events are sent only for blocks and transactions submitted to **that** node's own mining and submit endpoints: a block mined on node1 is not an event on node2's stream. The explorer uses this stream to add new blocks at the top without polling.
+Terminal 1 prints one `event: block` with a single-line `data:` JSON for the mined block (and, per the README, an `event: tx` after each accepted `POST /tx`; not run here). Every node sends the event for each block it appends, whatever the source: a block mined on node1 is also one `event: block` (same `Hash`) on node2 and node3, through gossip, sync or reorg. The explorer uses this stream to add new blocks at the top without polling.
 
 ## Metrics (`/metrics`)
 

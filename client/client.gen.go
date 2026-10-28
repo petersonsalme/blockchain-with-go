@@ -485,7 +485,7 @@ type ClientInterface interface {
 
 	// GetEvents Stream node events (server-sent events)
 	//
-	// Long-lived `text/event-stream`. The node sends `event: block` with the mined block as one-line JSON (the body of the `201` of `POST /` or `POST /mine`) after each block it mines, and `event: tx` with the admitted transaction as one-line JSON after each `202` of `POST /tx`. A client that falls more than 16 events behind is disconnected; there is no replay of missed events.
+	// Long-lived `text/event-stream`. The node sends `event: block` with the block as one-line JSON after each block it appends, and `event: tx` with the transaction as one-line JSON after each transaction it admits, whatever the source: its own mining (`POST /` or `POST /mine`), `POST /tx`, a peer through gossip (`POST /p2p/block` or `POST /p2p/tx` answered `accepted`; `known` and rejections send nothing), sync extension (one event per block) and reorg (one event per block of the new branch, oldest first). There is no `reorg` event and no `tx` event for transactions put back in the pool by a reorg. A client that falls more than 16 events behind is disconnected; there is no replay of missed events.
 	//
 	// Corresponds with GET /events (the `GetEvents` operationId).
 	GetEvents(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -760,7 +760,7 @@ func (c *Client) GetContract(ctx context.Context, id string, reqEditors ...Reque
 
 // GetEvents Stream node events (server-sent events)
 //
-// Long-lived `text/event-stream`. The node sends `event: block` with the mined block as one-line JSON (the body of the `201` of `POST /` or `POST /mine`) after each block it mines, and `event: tx` with the admitted transaction as one-line JSON after each `202` of `POST /tx`. A client that falls more than 16 events behind is disconnected; there is no replay of missed events.
+// Long-lived `text/event-stream`. The node sends `event: block` with the block as one-line JSON after each block it appends, and `event: tx` with the transaction as one-line JSON after each transaction it admits, whatever the source: its own mining (`POST /` or `POST /mine`), `POST /tx`, a peer through gossip (`POST /p2p/block` or `POST /p2p/tx` answered `accepted`; `known` and rejections send nothing), sync extension (one event per block) and reorg (one event per block of the new branch, oldest first). There is no `reorg` event and no `tx` event for transactions put back in the pool by a reorg. A client that falls more than 16 events behind is disconnected; there is no replay of missed events.
 //
 // Corresponds with GET /events (the `GetEvents` operationId).
 func (c *Client) GetEvents(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -1997,7 +1997,7 @@ type ClientWithResponsesInterface interface {
 
 	// GetEventsWithResponse Stream node events (server-sent events)
 	//
-	// Long-lived `text/event-stream`. The node sends `event: block` with the mined block as one-line JSON (the body of the `201` of `POST /` or `POST /mine`) after each block it mines, and `event: tx` with the admitted transaction as one-line JSON after each `202` of `POST /tx`. A client that falls more than 16 events behind is disconnected; there is no replay of missed events.
+	// Long-lived `text/event-stream`. The node sends `event: block` with the block as one-line JSON after each block it appends, and `event: tx` with the transaction as one-line JSON after each transaction it admits, whatever the source: its own mining (`POST /` or `POST /mine`), `POST /tx`, a peer through gossip (`POST /p2p/block` or `POST /p2p/tx` answered `accepted`; `known` and rejections send nothing), sync extension (one event per block) and reorg (one event per block of the new branch, oldest first). There is no `reorg` event and no `tx` event for transactions put back in the pool by a reorg. A client that falls more than 16 events behind is disconnected; there is no replay of missed events.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -3854,7 +3854,7 @@ func (c *ClientWithResponses) GetContractWithResponse(ctx context.Context, id st
 
 // GetEventsWithResponse Stream node events (server-sent events)
 //
-// Long-lived `text/event-stream`. The node sends `event: block` with the mined block as one-line JSON (the body of the `201` of `POST /` or `POST /mine`) after each block it mines, and `event: tx` with the admitted transaction as one-line JSON after each `202` of `POST /tx`. A client that falls more than 16 events behind is disconnected; there is no replay of missed events.
+// Long-lived `text/event-stream`. The node sends `event: block` with the block as one-line JSON after each block it appends, and `event: tx` with the transaction as one-line JSON after each transaction it admits, whatever the source: its own mining (`POST /` or `POST /mine`), `POST /tx`, a peer through gossip (`POST /p2p/block` or `POST /p2p/tx` answered `accepted`; `known` and rejections send nothing), sync extension (one event per block) and reorg (one event per block of the new branch, oldest first). There is no `reorg` event and no `tx` event for transactions put back in the pool by a reorg. A client that falls more than 16 events behind is disconnected; there is no replay of missed events.
 //
 // Returns a wrapper object for the known response body format(s).
 //

@@ -234,6 +234,10 @@ func (s *Server) handleP2PBlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if accepted {
+		s.events.publish(eventBlock, req.Block)
+	}
+
 	respondWithGossipStatus(w, accepted)
 }
 
@@ -254,6 +258,10 @@ func (s *Server) handleP2PTx(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		respondWithGossipError(w, err, "invalid_tx")
 		return
+	}
+
+	if accepted {
+		s.events.publish(eventTx, req.Tx)
 	}
 
 	respondWithGossipStatus(w, accepted)

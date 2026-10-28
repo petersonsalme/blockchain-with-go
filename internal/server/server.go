@@ -76,6 +76,8 @@ type Config struct {
 	P2P Peers
 	// Explorer holds the files served read-only at /explorer/; nil leaves the route unregistered (404).
 	Explorer fs.FS
+	// Events is the stream GET /events serves and gossip publishes to; nil makes the server its own.
+	Events *Events
 }
 
 // Server is the HTTP adapter over a Chain.
@@ -120,7 +122,12 @@ func NewServer(svc Chain, cfg Config) (*Server, error) {
 		now = time.Now
 	}
 
-	return &Server{chain: svc, miningTimeout: timeout, limiter: limiter, logger: logger, now: now, metrics: newMetrics(), events: newHub(), p2p: cfg.P2P, explorer: cfg.Explorer}, nil
+	events := cfg.Events
+	if events == nil {
+		events = NewEvents()
+	}
+
+	return &Server{chain: svc, miningTimeout: timeout, limiter: limiter, logger: logger, now: now, metrics: newMetrics(), events: events.hub, p2p: cfg.P2P, explorer: cfg.Explorer}, nil
 }
 
 // ParseMiningTimeout reads a MINING_TIMEOUT value: a Go duration or integer seconds.

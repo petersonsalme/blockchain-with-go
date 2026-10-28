@@ -112,7 +112,7 @@ func TestNewP2PNodeConfigErrors(t *testing.T) {
 	t.Run("bad seed", func(t *testing.T) {
 		t.Setenv(seedPeersEnvVar, "http://a:80,bad")
 
-		_, err := newP2PNode(svc, "", discardLogger())
+		_, err := newP2PNode(svc, "", discardLogger(), nil)
 		if err == nil || !strings.HasPrefix(err.Error(), "SEED_PEERS: invalid item ") {
 			t.Fatalf("err = %v", err)
 		}
@@ -120,7 +120,7 @@ func TestNewP2PNodeConfigErrors(t *testing.T) {
 	t.Run("bad listen address", func(t *testing.T) {
 		t.Setenv(p2pListenAddrEnvVar, "nope")
 
-		_, err := newP2PNode(svc, "", discardLogger())
+		_, err := newP2PNode(svc, "", discardLogger(), nil)
 		if !errors.Is(err, p2p.ErrBadAddr) || !strings.HasPrefix(err.Error(), "P2P_LISTEN_ADDR: ") {
 			t.Fatalf("err = %v", err)
 		}
@@ -133,7 +133,7 @@ func TestNewP2PNodeConfigErrors(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		_, err = newP2PNode(svc, dir, discardLogger())
+		_, err = newP2PNode(svc, dir, discardLogger(), nil)
 		if err == nil || !strings.Contains(err.Error(), "peers.json") {
 			t.Fatalf("err = %v", err)
 		}
@@ -148,7 +148,7 @@ func TestNewP2PNodeBookAndIdentity(t *testing.T) {
 	t.Run("without DATA_DIR only the seeds and no file", func(t *testing.T) {
 		t.Chdir(t.TempDir())
 
-		n, err := newP2PNode(svc, "  ", discardLogger())
+		n, err := newP2PNode(svc, "  ", discardLogger(), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -170,7 +170,7 @@ func TestNewP2PNodeBookAndIdentity(t *testing.T) {
 	})
 
 	t.Run("missing file is an empty list", func(t *testing.T) {
-		n, err := newP2PNode(svc, t.TempDir(), discardLogger())
+		n, err := newP2PNode(svc, t.TempDir(), discardLogger(), nil)
 		if err != nil || !reflect.DeepEqual(n.Addrs(), []string{"http://seed:1"}) {
 			t.Fatalf("addrs = %v, %v", n.Addrs(), err)
 		}
@@ -184,7 +184,7 @@ func TestNewP2PNodeBookAndIdentity(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		n, err := newP2PNode(svc, dir, discardLogger())
+		n, err := newP2PNode(svc, dir, discardLogger(), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -203,8 +203,8 @@ func TestNewP2PNodeBookAndIdentity(t *testing.T) {
 	})
 
 	t.Run("a new NodeID per start", func(t *testing.T) {
-		a, _ := newP2PNode(svc, "", discardLogger())
-		b, _ := newP2PNode(svc, "", discardLogger())
+		a, _ := newP2PNode(svc, "", discardLogger(), nil)
+		b, _ := newP2PNode(svc, "", discardLogger(), nil)
 		ha, _ := a.Hello()
 
 		hb, _ := b.Hello()
@@ -218,7 +218,7 @@ func TestNewP2PNodeAppliesLimits(t *testing.T) {
 	svc := newTestService(t, 0, nil)
 	t.Setenv(maxInboundPeersEnvVar, "1")
 
-	n, err := newP2PNode(svc, "", discardLogger())
+	n, err := newP2PNode(svc, "", discardLogger(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func startP2PNode(t *testing.T, blocks int, genesis *domain.Block) *p2pNode {
 	t.Cleanup(pn.srv.Close)
 	t.Setenv(p2pListenAddrEnvVar, pn.srv.URL)
 
-	node, err := newP2PNode(svc, "", discardLogger())
+	node, err := newP2PNode(svc, "", discardLogger(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +400,7 @@ func TestRunStartsAndStopsTheDialer(t *testing.T) {
 	svc := newTestService(t, 0, nil)
 	t.Setenv(peerIntervalEnvVar, "10ms")
 
-	node, err := newP2PNode(svc, "", discardLogger())
+	node, err := newP2PNode(svc, "", discardLogger(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -533,7 +533,7 @@ func TestNewP2PNodeLogsToTheGivenLogger(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	n, err := newP2PNode(newTestService(t, 0, nil), "", slog.New(slog.NewTextHandler(&buf, nil)))
+	n, err := newP2PNode(newTestService(t, 0, nil), "", slog.New(slog.NewTextHandler(&buf, nil)), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
