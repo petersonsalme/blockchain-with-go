@@ -13,6 +13,7 @@
 <h1><a href="/">bwg network</a></h1>
 <nav aria-label="Nodes">
 <a href="/peers">Peers</a>
+<a href="/metrics">Metrics</a>
 {{- range .Nodes}}
 <a href="/n/{{pe .Name}}/"{{if eq .Name $.Current}} aria-current="page"{{end}}>{{.Name}}</a>
 {{- end}}

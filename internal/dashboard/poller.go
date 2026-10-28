@@ -11,6 +11,15 @@ import (
 // DefaultInterval is the poll interval: node load depends on it and the node count only.
 const DefaultInterval = 2 * time.Second
 
+// HistoryTicks is how many ticks of heights the poller keeps per node.
+const HistoryTicks = 60
+
+// Series is the heights one node had at the poller's last ticks, oldest first.
+type Series struct {
+	Name    string
+	Heights []int
+}
+
 // Poller reads every node once per tick and keeps the latest snapshots. Handlers read copies
 // through View and never reach a node.
 type Poller struct {
@@ -22,6 +31,7 @@ type Poller struct {
 	mu        sync.Mutex
 	snaps     []Snapshot
 	forkTicks int
+	heights   [][]int
 }
 
 // NewPoller returns a Poller for nodes. interval and now are injected for tests.
@@ -31,7 +41,7 @@ func NewPoller(nodes []Node, fetch *Fetcher, interval time.Duration, now func() 
 		snaps[i] = Snapshot{Name: n.Name}
 	}
 
-	return &Poller{nodes: nodes, fetch: fetch, interval: interval, now: now, snaps: snaps}
+	return &Poller{nodes: nodes, fetch: fetch, interval: interval, now: now, snaps: snaps, heights: make([][]int, len(nodes))}
 }
 
 // Run ticks at once and then every interval until ctx is done.
@@ -71,11 +81,35 @@ func (p *Poller) Tick(ctx context.Context) {
 
 	p.snaps = next
 
+	for i, s := range next {
+		if s.Seen {
+			p.heights[i] = append(p.heights[i], s.Height)
+			p.heights[i] = p.heights[i][max(len(p.heights[i])-HistoryTicks, 0):]
+		}
+	}
+
 	if forkCandidate(next) && sameHeight(next) {
 		p.forkTicks++
 	} else {
 		p.forkTicks = 0
 	}
+}
+
+// History returns a copy of the height history of every node that has been seen, in NODES order.
+// It is what the height chart draws; reading it never reaches a node.
+func (p *Poller) History() []Series {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	var out []Series
+
+	for i, n := range p.nodes {
+		if len(p.heights[i]) > 0 {
+			out = append(out, Series{Name: n.Name, Heights: append([]int(nil), p.heights[i]...)})
+		}
+	}
+
+	return out
 }
 
 type healthBody struct {

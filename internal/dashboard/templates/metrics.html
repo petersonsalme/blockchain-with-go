@@ -1,0 +1,66 @@
+{{define "metrics" -}}
+<section id="metrics" hx-get="/fragments/metrics" hx-trigger="every 2s" hx-swap="outerHTML">
+<table>
+<caption>Key figures from each node's /metrics</caption>
+<thead><tr><th>Node</th><th>Blocks</th><th>Mean mining time</th><th>HTTP 2xx</th><th>HTTP 4xx</th><th>HTTP 5xx</th><th>HTTP 429</th></tr></thead>
+<tbody>
+{{- range .}}
+<tr><td>{{.Name}}</td><td>{{.Blocks}}</td><td>{{.Mining}}</td><td>{{.Req2xx}}</td><td>{{.Req4xx}}</td><td>{{.Req5xx}}</td><td>{{.Req429}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+</section>
+{{- end}}
+
+{{define "metricspage" -}}
+<h2>Metrics</h2>
+{{template "metrics" .Rows}}
+<form method="get" action="/metrics" class="inline">
+<label>Block interval of <select name="node">
+{{- range .Nodes}}
+<option value="{{.Name}}"{{if eq .Name $.Node}} selected{{end}}>{{.Name}}</option>
+{{- end}}
+</select></label>
+<button type="submit">Show</button>
+</form>
+{{template "charts" .Charts}}
+{{- end}}
+
+{{define "charts" -}}
+<section id="charts" hx-get="/fragments/charts?node={{qe .Node}}" hx-trigger="every 10s" hx-swap="outerHTML">
+<figure>
+<figcaption>Block interval of {{.Node}}: seconds between the last 50 blocks</figcaption>
+{{- if .IntervalMsg}}
+<p class="muted">{{.IntervalMsg}}</p>
+{{- else}}
+<svg class="chart" viewBox="0 0 400 120" role="img" aria-label="Block interval of {{.Node}}, largest {{.Intervals.Max}}">
+<text class="axis" x="2" y="10">{{.Intervals.Max}}</text>
+<line class="baseline" x1="0" y1="114" x2="400" y2="114"/>
+{{- range .Intervals.Bars}}
+<rect class="bar" x="{{.X}}" y="{{.Y}}" width="{{.W}}" height="{{.H}}"/>
+{{- end}}
+</svg>
+{{- end}}
+</figure>
+<figure>
+<figcaption>Height of each node over the last {{.Ticks}} polls</figcaption>
+{{- if .HasHeights}}
+<svg class="chart" viewBox="0 0 400 120" role="img" aria-label="Height of each node over recent polls, from {{.Heights.Min}} to {{.Heights.Max}}">
+<text class="axis" x="2" y="10">{{.Heights.Max}}</text>
+<text class="axis" x="2" y="126">{{.Heights.Min}}</text>
+<line class="baseline" x1="0" y1="114" x2="400" y2="114"/>
+{{- range .Heights.Lines}}
+<polyline class="line {{.Class}}" points="{{.Points}}"/>
+{{- end}}
+</svg>
+<ul class="legend">
+{{- range .Heights.Lines}}
+<li><span class="swatch {{.Class}}"></span> {{.Name}}</li>
+{{- end}}
+</ul>
+{{- else}}
+<p class="muted">No polls yet.</p>
+{{- end}}
+</figure>
+</section>
+{{- end}}

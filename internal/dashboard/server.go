@@ -32,7 +32,7 @@ type server struct {
 // HEAD. Node reads go through fetch, to the nodes listed here and nowhere else; the Network screen
 // shows what poll last learned and never reaches a node itself.
 func NewServer(nodes []Node, fetch *Fetcher, poll *Poller) (http.Handler, error) {
-	tmpl, err := template.New("").Funcs(template.FuncMap{"pe": url.PathEscape}).ParseFS(templateFiles, "templates/*.html")
+	tmpl, err := template.New("").Funcs(template.FuncMap{"pe": url.PathEscape, "qe": url.QueryEscape}).ParseFS(templateFiles, "templates/*.html")
 	if err != nil {
 		return nil, err
 	}
@@ -136,4 +136,7 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /n/{node}/address/{addr...}", s.nodeScreen(screen{"address", s.loadAddress}, false))
 	mux.HandleFunc("GET /n/{node}/contract/{id...}", s.nodeScreen(screen{"contract", s.loadContract}, false))
 	mux.HandleFunc("GET /search", s.search)
+	mux.HandleFunc("GET /metrics", s.metricsScreen)
+	mux.HandleFunc("GET /fragments/metrics", s.metricsFragment)
+	mux.HandleFunc("GET /fragments/charts", s.chartsFragment)
 }
