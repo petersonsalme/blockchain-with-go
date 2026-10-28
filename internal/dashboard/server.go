@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -31,7 +32,7 @@ type server struct {
 // HEAD. Node reads go through fetch, to the nodes listed here and nowhere else; the Network screen
 // shows what poll last learned and never reaches a node itself.
 func NewServer(nodes []Node, fetch *Fetcher, poll *Poller) (http.Handler, error) {
-	tmpl, err := template.ParseFS(templateFiles, "templates/*.html")
+	tmpl, err := template.New("").Funcs(template.FuncMap{"pe": url.PathEscape}).ParseFS(templateFiles, "templates/*.html")
 	if err != nil {
 		return nil, err
 	}
@@ -52,6 +53,7 @@ func NewServer(nodes []Node, fetch *Fetcher, poll *Poller) (http.Handler, error)
 	mux.HandleFunc("GET /{$}", s.page)
 	mux.HandleFunc("GET /fragments/network", s.networkFragment)
 	mux.HandleFunc("GET /n/{node}/{$}", s.nodePage)
+	s.routes(mux)
 	mux.HandleFunc("GET /static/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/") { // no directory listing
 			http.NotFound(w, r)
@@ -77,21 +79,12 @@ func secure(next http.Handler) http.Handler {
 
 func (s *server) page(w http.ResponseWriter, _ *http.Request) {
 	view := s.poll.View()
-	s.render(w, "", &view)
+	s.show(w, "", "network", &view, false)
 }
 
 func (s *server) networkFragment(w http.ResponseWriter, _ *http.Request) {
-	var buf bytes.Buffer
-
-	err := s.tmpl.ExecuteTemplate(&buf, "network", s.poll.View())
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(buf.Bytes())
+	view := s.poll.View()
+	s.show(w, "", "network", &view, true)
 }
 
 // nodePage answers only for a configured node: the name comes from the config, never the URL.
@@ -103,17 +96,18 @@ func (s *server) nodePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.render(w, name, nil)
+	s.show(w, name, "node", name, false)
 }
 
-func (s *server) render(w http.ResponseWriter, current string, network *View) {
+// layout wraps an already rendered body (html/template output) in the page shell.
+func (s *server) layout(w http.ResponseWriter, status int, current, body string) {
 	var buf bytes.Buffer
 
 	err := s.tmpl.ExecuteTemplate(&buf, "index.html", struct {
 		Nodes   []Node
 		Current string
-		Network *View
-	}{s.nodes, current, network})
+		Body    template.HTML
+	}{s.nodes, current, template.HTML(body)}) //nolint:gosec // body is the output of html/template
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 
@@ -121,5 +115,25 @@ func (s *server) render(w http.ResponseWriter, current string, network *View) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
 	_, _ = w.Write(buf.Bytes())
+}
+
+// routes registers the chain screens. Detail routes take the rest of the path ({x...}) so a value
+// with a slash reaches validation and gets 400 instead of falling through to 404.
+func (s *server) routes(mux *http.ServeMux) {
+	mempool := screen{"mempool", s.loadMempool}
+	blocks := screen{"blocks", s.loadBlocks}
+
+	mux.HandleFunc("GET /peers", s.peersScreen(false))
+	mux.HandleFunc("GET /fragments/peers", s.peersScreen(true))
+	mux.HandleFunc("GET /n/{node}/mempool", s.nodeScreen(mempool, false))
+	mux.HandleFunc("GET /fragments/n/{node}/mempool", s.nodeScreen(mempool, true))
+	mux.HandleFunc("GET /n/{node}/blocks", s.nodeScreen(blocks, false))
+	mux.HandleFunc("GET /fragments/n/{node}/blocks", s.nodeScreen(blocks, true))
+	mux.HandleFunc("GET /n/{node}/block/{ref...}", s.nodeScreen(screen{"block", s.loadBlock}, false))
+	mux.HandleFunc("GET /n/{node}/tx/{id...}", s.nodeScreen(screen{"tx", s.loadTx}, false))
+	mux.HandleFunc("GET /n/{node}/address/{addr...}", s.nodeScreen(screen{"address", s.loadAddress}, false))
+	mux.HandleFunc("GET /n/{node}/contract/{id...}", s.nodeScreen(screen{"contract", s.loadContract}, false))
+	mux.HandleFunc("GET /search", s.search)
 }

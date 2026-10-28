@@ -64,3 +64,16 @@ dt { color: var(--muted); }
 dd { margin: 0; }
 .tip { font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
 .peers { margin: 0.5rem 0 0; padding-left: 1.25rem; font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+
+header a { color: inherit; text-decoration: none; }
+header form { display: flex; gap: 0.5rem; margin-left: auto; }
+.subnav { display: flex; gap: 1rem; padding: 0.5rem 1.5rem; border-bottom: 1px solid var(--border); }
+.subnav a { color: var(--accent); }
+a { color: var(--accent); }
+table { border-collapse: collapse; margin: 0.5rem 0 1rem; width: 100%; }
+caption { text-align: left; color: var(--muted); }
+th, td { border: 1px solid var(--border); padding: 0.25rem 0.5rem; text-align: left; vertical-align: top; }
+td.mono, dd.mono, .mono { font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+.muted { color: var(--muted); }
+.tx { border-top: 1px solid var(--border); margin-top: 1rem; }
+.error h2 { color: var(--bad); }

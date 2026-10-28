@@ -39,13 +39,14 @@ const (
 	routeTxProof
 	routeContract
 	routeBalance
+	routeAddressTxs
 )
 
 // Request is one allowlisted read of a node. Build it with the constructors below; the zero
 // value and any parameter that fails its pattern are rejected by Fetcher.Get before any I/O.
 type Request struct {
-	route route
-	a, b  string
+	route   route
+	a, b, c string
 }
 
 // Health reads GET /health.
@@ -85,6 +86,12 @@ func Contract(id string) Request { return Request{route: routeContract, a: id} }
 // Balance reads GET /balance/{addr}; addr is lowercase hex of the wallet address length.
 func Balance(addr string) Request { return Request{route: routeBalance, a: addr} }
 
+// AddressTxs reads GET /address/{addr}/txs?limit=&after=; after is empty for the first page or the
+// 64 lowercase hex id of the last transaction of the previous one.
+func AddressTxs(addr string, limit int, after string) Request {
+	return Request{route: routeAddressTxs, a: addr, b: strconv.Itoa(limit), c: after}
+}
+
 // target validates the request against the allowlist and returns its path and raw query.
 func (r Request) target() (string, string, error) {
 	switch r.route {
@@ -112,10 +119,34 @@ func (r Request) target() (string, string, error) {
 		}
 
 		return "/balance/" + url.PathEscape(r.a), "", nil
+	case routeAddressTxs:
+		return r.addressTxs()
 	case routeNone:
 	}
 
 	return "", "", errors.New("request is not on the allowlist")
+}
+
+func (r Request) addressTxs() (string, string, error) {
+	if !isLowerHex(r.a, addressLen) {
+		return "", "", fmt.Errorf("address %q is not %d lowercase hex", r.a, addressLen)
+	}
+
+	if !isDecimal(r.b) || r.b == "0" {
+		return "", "", fmt.Errorf("limit %q must be a decimal integer above 0", r.b)
+	}
+
+	query := "limit=" + r.b
+
+	if r.c != "" {
+		if !isLowerHex(r.c, hexIDLen) {
+			return "", "", fmt.Errorf("after %q is not 64 lowercase hex", r.c)
+		}
+
+		query += "&after=" + r.c
+	}
+
+	return "/address/" + url.PathEscape(r.a) + "/txs", query, nil
 }
 
 func (r Request) page() (string, string, error) {
@@ -157,6 +188,16 @@ func isLowerHex(s string, n int) bool {
 	return len(s) == n && strings.Trim(s, "0123456789abcdef") == ""
 }
 
+// StatusError is a node answer outside 2xx.
+type StatusError struct {
+	Node, Path string
+	Code       int
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("node %s: GET %s: status %d", e.Node, e.Path, e.Code)
+}
+
 // Fetcher reads allowlisted paths of configured nodes. It sends only GET, follows no redirect,
 // gives up after its timeout and refuses bodies above its size limit.
 type Fetcher struct {
@@ -188,12 +229,12 @@ func (f *Fetcher) Get(ctx context.Context, node Node, req Request) ([]byte, erro
 		target += "?" + query
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil) //nolint:gosec // G704: target is the configured node plus a path from Request.target, which applies the allowlist
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := f.client.Do(httpReq)
+	resp, err := f.client.Do(httpReq) //nolint:gosec // G704: same target as the request above
 	if err != nil {
 		return nil, fmt.Errorf("node %s: %w", node.Name, err)
 	}
@@ -201,7 +242,7 @@ func (f *Fetcher) Get(ctx context.Context, node Node, req Request) ([]byte, erro
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return nil, fmt.Errorf("node %s: GET %s: status %d", node.Name, path, resp.StatusCode)
+		return nil, &StatusError{Node: node.Name, Path: path, Code: resp.StatusCode}
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, f.maxBody+1))

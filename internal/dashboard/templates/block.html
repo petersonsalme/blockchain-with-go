@@ -1,0 +1,16 @@
+{{define "block" -}}
+<section>
+<h2>Block {{.Block.Index}} of {{.Node}}</h2>
+<dl>
+<dt>Hash</dt><dd class="mono">{{.Block.Hash}}</dd>
+<dt>Previous hash</dt><dd>{{if .Block.PrevHash}}<a class="mono" href="/n/{{pe .Node}}/block/{{pe .Block.PrevHash}}">{{.Block.PrevHash}}</a>{{end}}</dd>
+<dt>Time</dt><dd>{{.Block.Timestamp.Format "2006-01-02T15:04:05Z07:00"}}</dd>
+<dt>Nonce</dt><dd>{{.Block.Nonce}}</dd>
+<dt>Difficulty</dt><dd>{{.Block.Difficulty}}</dd>
+<dt>Validator</dt><dd class="mono">{{.Block.Validator}}</dd>
+<dt>Signature</dt><dd class="mono">{{.Block.Signature}}</dd>
+</dl>
+<h3>Transactions</h3>
+{{template "txlist" .Txs}}
+</section>
+{{- end}}

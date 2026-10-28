@@ -1,0 +1,46 @@
+{{define "txlist" -}}
+{{- range .}}
+<article class="tx">
+<h3>{{if .Tx.ID}}<a class="mono" href="/n/{{pe .Node}}/tx/{{pe .Tx.ID}}">{{.Tx.ID}}</a>{{else}}<span class="mono">(no id)</span>{{end}}</h3>
+{{template "txbody" .}}
+</article>
+{{- else}}
+<p class="muted">No transactions.</p>
+{{- end}}
+{{- end}}
+
+{{define "txbody" -}}
+{{- $node := .Node}}
+<p class="muted">{{.Tx.Timestamp.Format "2006-01-02T15:04:05Z07:00"}}</p>
+{{- if .Tx.Contract}}
+<dl>
+<dt>Contract</dt><dd>{{.Tx.Contract.Kind}}</dd>
+{{- if .Tx.Contract.Code}}<dt>Code</dt><dd class="mono">{{.Tx.Contract.Code}}</dd>{{end}}
+{{- if .Tx.Contract.Target}}<dt>Target</dt><dd><a class="mono" href="/n/{{pe $node}}/contract/{{pe .Tx.Contract.Target}}">{{.Tx.Contract.Target}}</a></dd>{{end}}
+<dt>Args</dt><dd class="mono">{{range .Tx.Contract.Args}}{{.}} {{end}}</dd>
+<dt>Gas limit</dt><dd>{{.Tx.Contract.GasLimit}}</dd>
+</dl>
+{{- end}}
+{{- if .Tx.Inputs}}
+<table>
+<caption>Inputs</caption>
+<thead><tr><th>Spends</th><th>Index</th><th>Public key</th><th>Signature</th></tr></thead>
+<tbody>
+{{- range .Tx.Inputs}}
+<tr><td><a class="mono" href="/n/{{pe $node}}/tx/{{pe .PrevTxID}}">{{.PrevTxID}}</a></td><td>{{.OutIndex}}</td><td class="mono">{{.PublicKey}}</td><td class="mono">{{.Signature}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+{{- else}}
+<p class="muted">No inputs (coinbase or genesis).</p>
+{{- end}}
+<table>
+<caption>Outputs</caption>
+<thead><tr><th>Index</th><th>Amount (base units)</th><th>Address</th></tr></thead>
+<tbody>
+{{- range $i, $o := .Tx.Outputs}}
+<tr><td>{{$i}}</td><td>{{$o.Amount}}</td><td><a class="mono" href="/n/{{pe $node}}/address/{{pe $o.Address}}">{{$o.Address}}</a></td></tr>
+{{- end}}
+</tbody>
+</table>
+{{- end}}

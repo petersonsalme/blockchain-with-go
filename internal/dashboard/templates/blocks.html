@@ -1,0 +1,17 @@
+{{define "blocks" -}}
+<section id="blocks"{{if .Poll}} hx-get="/fragments/n/{{pe .Node}}/blocks" hx-trigger="every 2s" hx-swap="outerHTML"{{end}}>
+<h2>Blocks of {{.Node}}</h2>
+{{- $node := .Node}}
+<table>
+<thead><tr><th>Height</th><th>Hash</th><th>Time</th><th>Transactions</th><th>Validator</th></tr></thead>
+<tbody>
+{{- range .Blocks}}
+<tr><td><a href="/n/{{pe $node}}/block/{{.Index}}">{{.Index}}</a></td><td class="mono">{{.Hash}}</td><td>{{.Timestamp.Format "2006-01-02T15:04:05Z07:00"}}</td><td>{{len .Transactions}}</td><td class="mono">{{.Validator}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+{{- if .Next}}
+<p><a href="/n/{{pe .Node}}/blocks?from={{.Next}}">Next page</a></p>
+{{- end}}
+</section>
+{{- end}}

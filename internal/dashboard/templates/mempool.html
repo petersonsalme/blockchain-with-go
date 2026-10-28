@@ -1,0 +1,6 @@
+{{define "mempool" -}}
+<section id="mempool" hx-get="/fragments/n/{{pe .Node}}/mempool" hx-trigger="every 2s" hx-swap="outerHTML">
+<h2>Mempool of {{.Node}}</h2>
+{{template "txlist" .Txs}}
+</section>
+{{- end}}

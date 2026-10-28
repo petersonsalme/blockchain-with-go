@@ -1,0 +1,22 @@
+{{define "contract" -}}
+<section>
+<h2>Contract on {{.Node}}</h2>
+<dl>
+<dt>Id</dt><dd class="mono">{{.ID}}</dd>
+<dt>Code</dt><dd class="mono">{{.Code}}</dd>
+</dl>
+{{- if .Storage}}
+<table>
+<caption>Storage</caption>
+<thead><tr><th>Key</th><th>Value</th></tr></thead>
+<tbody>
+{{- range .Storage}}
+<tr><td class="mono">{{.Key}}</td><td>{{.Value}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+{{- else}}
+<p class="muted">No cell written yet.</p>
+{{- end}}
+</section>
+{{- end}}
