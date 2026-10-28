@@ -16,6 +16,7 @@ blockchain-with-go/
 │   └── bwg/           # The only binary and composition root (cobra): node, wallet new/balance/send, miner
 ├── docker-compose.yml # Three-node network (node1..node3) for local runs and the e2e test
 ├── e2e/               # Build-tag `e2e` test: brings the compose network up and checks propagation, restart sync and convergence
+├── observability/     # Prometheus config and provisioned Grafana (data source, dashboard) for the `observability` profile of compose.playground.yml (ADR-0022)
 ├── client/            # Go client generated from openapi.yaml by oapi-codegen (do not edit by hand)
 ├── internal/
 │   ├── chain/         # chain.Service (Blocks/Mine), block generation, ErrInvalidBlock
@@ -27,7 +28,7 @@ blockchain-with-go/
 │   ├── explorer/      # Embedded static files of the read-only web explorer served at /explorer/ (Files() fs.FS)
 │   ├── mempool/       # mempool.Pool: admitted transactions, fee-rate selection (ADR-0012); depends only on domain
 │   ├── p2p/           # Hello, handshake checks, peer book, persisted peer addresses, the dialer loop (ADR-0013) and block/tx gossip: inv/want, seen-set, relay worker (ADR-0018); depends only on domain
-│   ├── server/        # HTTP adapter: server.Server (DI), handlers, DTOs and error mapping
+│   ├── server/        # HTTP adapter: server.Server (DI), handlers, DTOs, error mapping and the per-Server Prometheus registry (ADR-0022)
 │   ├── storage/       # BlockRepository port
 │   │   ├── bolt/      # bbolt disk adapter
 │   │   └── memory/    # In-memory adapter (sync.RWMutex)

@@ -1,6 +1,6 @@
 # ADR-0010: Prometheus metrics without a client library
 
-Status: Accepted (ENG-16, 2026-10-22)
+Status: Superseded by [ADR-0022](0022-prometheus-client-golang.md) (ENG-221); accepted ENG-16, 2026-10-22.
 
 ## Context
 - ENG-16 asks for `/metrics` in the Prometheus format with at least 3 metrics (blocks, mining time, requests).

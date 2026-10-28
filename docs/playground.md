@@ -11,6 +11,8 @@ Every command below was run on a real playground (Docker Compose, difficulty 1).
 | 18081, 18082, 18083 | `node1` (mines, pays the coinbase), `node2`, `node3` | base |
 | 18084 | `snap1` (snapshots and pruning) | `--profile snapshots` |
 | 18091, 18092 | `poa1`, `poa2` (Proof of Authority) | `--profile poa` |
+| 19090 | `prometheus` | `--profile observability` |
+| 13000 | `grafana` | `--profile observability` |
 
 The base network, the e2e test (`go test -tags e2e ./e2e/...`) and the playground all use 18081-18083, so **only one of them can run at a time**. Stop the others first (`docker compose down -v` for the base network; the e2e test tears down its own `bwg-e2e` project).
 
@@ -165,24 +167,49 @@ Terminal 1 prints one `event: block` with a single-line `data:` JSON for the min
 ## Metrics (`/metrics`)
 
 ```shell
-$ curl -s $N:18081/metrics | head -20
-# HELP http_requests_total HTTP requests served, by method, route pattern and status code.
-# TYPE http_requests_total counter
-http_requests_total{method="GET",route="GET /balance/{addr}",code="200"} 6
-...
-http_requests_total{method="POST",route="POST /mine",code="201"} 7
-http_requests_total{method="POST",route="POST /tx",code="202"} 4
-http_requests_total{method="POST",route="POST /tx",code="409"} 1
+$ curl -s $N:18081/metrics | grep -E '^(# (HELP|TYPE) )?(http_|blockchain_)'
 # HELP blockchain_blocks Number of blocks in the chain.
 # TYPE blockchain_blocks gauge
-blockchain_blocks 9
+blockchain_blocks 11
 # HELP blockchain_mining_duration_seconds Time spent mining blocks that were produced.
 # TYPE blockchain_mining_duration_seconds summary
-blockchain_mining_duration_seconds_sum 0.010549178
-blockchain_mining_duration_seconds_count 7
+blockchain_mining_duration_seconds_sum 0.000848201
+blockchain_mining_duration_seconds_count 1
+# HELP http_requests_total HTTP requests served, by method, route pattern and status code.
+# TYPE http_requests_total counter
+http_requests_total{code="200",method="GET",route="GET /metrics"} 9
+http_requests_total{code="200",method="POST",route="POST /p2p/inv"} 1
+http_requests_total{code="201",method="POST",route="POST /mine"} 1
 ```
 
-The counters are per node. The `409` is the double spend above.
+The counters are per node; a double spend, as above, shows up as `code="409"`. Families are sorted by name and labels by name, and the same endpoint also serves the Go runtime (`go_*`) and process (`process_*`) metrics, left out of the `grep` above ([ADR-0022](adr/0022-prometheus-client-golang.md)).
+
+## Grafana and Prometheus (`--profile observability`)
+
+Start Prometheus and Grafana next to the running playground (published on loopback only, no volumes: data is lost on `down`):
+
+```shell
+$ dc --profile observability up -d
+```
+
+Open `http://127.0.0.1:13000/d/bwg-network` (anonymous Viewer, no login). The dashboard `bwg network` refreshes every 5 s and has four panels:
+
+- **Height per node**: `blockchain_blocks` per `instance`; the three lines should overlap once gossip has converged.
+- **Block rate (blocks per minute)**: `delta(blockchain_blocks[1m])`.
+- **Requests by route and status**: `sum by (route, code) (rate(http_requests_total[1m]))`.
+- **Mining duration (average seconds per mined block)**: `rate(..._sum[5m]) / rate(..._count[5m])`. It is only non-empty on nodes that mined (node1 here); the others received their blocks by gossip and never call `Mine`.
+
+Prometheus scrapes `node1:8080`, `node2:8080` and `node3:8080` every 5 s; the targets page is `http://127.0.0.1:19090/targets`. Command-line checks:
+
+```shell
+$ curl -s 127.0.0.1:19090/api/v1/targets | grep -o '"instance":"[^"]*"\|"health":"[^"]*"'
+$ curl -s -o /dev/null -w '%{http_code}\n' 127.0.0.1:13000/api/dashboards/uid/bwg-network
+200
+$ curl -s '127.0.0.1:13000/api/datasources/proxy/uid/prometheus/api/v1/query?query=blockchain_blocks'   # 3 series
+$ $B miner --node $N:18081 --count 1                  # all three values rise within 30 s
+```
+
+With `compose.tuning.yml`, node1 has `RATE_LIMIT=30` and a scrape every 5 s uses 12 of those requests per minute (scrapes are rate limited like any other request).
 
 ## Restart sync (stop and start node3)
 

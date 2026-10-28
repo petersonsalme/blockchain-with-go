@@ -127,7 +127,7 @@ func NewServer(svc Chain, cfg Config) (*Server, error) {
 		events = NewEvents()
 	}
 
-	return &Server{chain: svc, miningTimeout: timeout, limiter: limiter, logger: logger, now: now, metrics: newMetrics(), events: events.hub, p2p: cfg.P2P, explorer: cfg.Explorer}, nil
+	return &Server{chain: svc, miningTimeout: timeout, limiter: limiter, logger: logger, now: now, metrics: newMetrics(svc), events: events.hub, p2p: cfg.P2P, explorer: cfg.Explorer}, nil
 }
 
 // ParseMiningTimeout reads a MINING_TIMEOUT value: a Go duration or integer seconds.

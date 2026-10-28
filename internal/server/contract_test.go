@@ -512,7 +512,7 @@ var _ = Describe("OpenAPI contract", func() {
 
 				wantType := "application/json"
 				if c.route == "/metrics" && c.status == 200 {
-					wantType = metricsContentType
+					wantType = "text/plain; version=0.0.4; charset=utf-8; escaping=underscores"
 				}
 
 				if c.route == "/events" && c.status == 200 {

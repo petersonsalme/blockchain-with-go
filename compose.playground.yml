@@ -58,6 +58,25 @@ services:
     ports: ["127.0.0.1:18092:8080"]
     volumes: ["poa2-data:/data", "./.playground/poa:/poa:ro"]
 
+  # Prometheus and Grafana (ADR-0022): opt-in, no volumes, published on loopback only.
+  prometheus:
+    profiles: [observability]
+    image: prom/prometheus:v3.15.1
+    volumes: ["./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    ports: ["127.0.0.1:19090:9090"]
+
+  grafana:
+    profiles: [observability]
+    image: grafana/grafana:12.4.14
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["127.0.0.1:13000:3000"]
+    depends_on: [prometheus]
+
 volumes:
   snap1-data:
   poa1-data:

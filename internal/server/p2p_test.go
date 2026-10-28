@@ -312,8 +312,8 @@ func TestP2PRoutesShareRateLimiterAndMetrics(t *testing.T) {
 	do(h, http.MethodPost, "/p2p/hello", helloBody(idB, 1))
 
 	m := scrape(t, h)
-	if m[`http_requests_total{method="GET",route="GET /p2p/peers",code="200"}`] != 1 ||
-		m[`http_requests_total{method="POST",route="POST /p2p/hello",code="200"}`] != 1 {
+	if m[`http_requests_total{code="200",method="GET",route="GET /p2p/peers"}`] != 1 ||
+		m[`http_requests_total{code="200",method="POST",route="POST /p2p/hello"}`] != 1 {
 		t.Fatalf("metrics = %v", m)
 	}
 }
