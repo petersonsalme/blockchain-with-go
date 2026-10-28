@@ -3,12 +3,13 @@
 
 > # ⚠️ IMPORTANT DISCLAIMER
 >
-> **This is an old, personal learning project about blockchain.** It is an educational exercise only.
+> **This is a personal study project about blockchain, built with professional engineering practice.** The chain core (consensus, UTXO, validation, mempool, gossip, sync and reorg) is written by hand to learn it; the tooling around it uses market standards ([ADR-0021](docs/adr/0021-professional-grade-study-reference.md)). It started as an old learning project and it is still an educational exercise.
 >
-> **Today, it is being used as a pilot project to evaluate the adoption of [Paperclip](https://github.com/paperclipai/paperclip) with AI agents.** Every improvement, refactor, test, document and architectural change made to this repository since then is **purely an AI-generated suggestion** and nothing more.
+> **It is also a pilot project to evaluate the adoption of [Paperclip](https://github.com/paperclipai/paperclip) with AI agents.** Every improvement, refactor, test, document and architectural change made to this repository since then is **purely an AI-generated suggestion** and nothing more.
 >
-> - ❌ It is **NOT** production-ready, audited, or secure. **Do not use it to hold, move or represent real value.**
-> - ❌ It is **NOT** an official product, reference implementation, or statement of any company.
+> - ❌ It is **NOT** production-ready, audited, or secure. **Do not use it to hold, move or represent real value.** "Professional-grade" describes how it is built (ADRs, tests, CI gates), not fitness for production.
+> - ❌ It has **NO** TLS and **NO** authentication: the HTTP API and the peer-to-peer protocol are plain HTTP, rate limiting is off by default, and any client that reaches a node can call it (see [SECURITY.md](SECURITY.md)).
+> - ❌ It is **NOT** an official product, a reference implementation of any protocol, or a statement of any company.
 > - ❌ It is **NOT** affiliated with, endorsed by, or related to the work, products, or views of the author's employer, clients, or any other organization.
 > - ❌ The AI-suggested changes do **NOT** represent professional advice, engineering recommendations, or best practices vetted by the author's employer or clients.
 >
@@ -128,7 +129,7 @@ Design decisions live in [`docs/adr/`](docs/adr/0009-merkle-tree.md):
 |---|---|
 | [0001](docs/adr/0001-utxo-model.md) | Transaction model: UTXO replaces account/nonce |
 | [0002](docs/adr/0002-genesis-allocations-env-var.md) | Genesis funding comes from `GENESIS_ALLOCATIONS` |
-| [0003](docs/adr/0003-learning-project-positioning.md) | Personal learning project with an AI-generated-changes disclaimer |
+| [0003](docs/adr/0003-learning-project-positioning.md) | Personal learning project with an AI-generated-changes disclaimer (superseded by 0021) |
 | [0004](docs/adr/0004-disk-storage.md) | Disk storage: bbolt adapter with in-memory derived UTXO set |
 | [0005](docs/adr/0005-poa-block-seal.md) | Proof of Authority seal fields on Block |
 | [0006](docs/adr/0006-stdlib-servemux-routing.md) | HTTP routing with the standard library `ServeMux` instead of gorilla/mux |
@@ -142,6 +143,7 @@ Design decisions live in [`docs/adr/`](docs/adr/0009-merkle-tree.md):
 | [0016](docs/adr/0016-bwg-cli-composition-root.md) | One `bwg` binary is the composition root; `bwg node` replaces `cmd/node` |
 | [0017](docs/adr/0017-hd-wallet-slip10.md) | HD wallet: BIP-39 mnemonics with SLIP-0010 ed25519 derivation (hardened only) |
 | [0020](docs/adr/0020-genesis-time.md) | Deterministic genesis time from `GENESIS_TIME` |
+| [0021](docs/adr/0021-professional-grade-study-reference.md) | Professional-grade study reference: hand-written chain core, market tools around it, never for real value |
 
 ## Configuration & Environment Variables
 
