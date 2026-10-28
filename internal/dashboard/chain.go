@@ -2,13 +2,14 @@ package dashboard
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -502,12 +503,8 @@ func (s *server) loadContract(r *http.Request, node Node) (any, *pageError) {
 	}
 
 	// Keys are decimal strings: shorter is smaller, then text order.
-	sort.Slice(cells, func(i, j int) bool {
-		if len(cells[i].Key) != len(cells[j].Key) {
-			return len(cells[i].Key) < len(cells[j].Key)
-		}
-
-		return cells[i].Key < cells[j].Key
+	slices.SortFunc(cells, func(a, b storageCell) int {
+		return cmp.Or(cmp.Compare(len(a.Key), len(b.Key)), strings.Compare(a.Key, b.Key))
 	})
 
 	return contractView{Node: node.Name, ID: body.ID, Code: body.Code, Storage: cells}, nil
@@ -525,12 +522,15 @@ func (s *server) search(w http.ResponseWriter, r *http.Request) {
 	}
 
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if len(q) > maxQueryLen {
+		q = ""
+	}
+
 	base := "/n/" + url.PathEscape(node.Name)
 
 	var loc string
 
 	switch {
-	case len(q) > maxQueryLen:
 	case isDecimal(q):
 		loc = base + "/block/" + q
 	case isLowerHex(q, hexIDLen):
@@ -561,12 +561,7 @@ func (s *server) search(w http.ResponseWriter, r *http.Request) {
 
 	var buf bytes.Buffer
 
-	view := searchView{Node: node.Name, Query: q, Miss: q != ""}
-	if len(q) > maxQueryLen {
-		view.Query = ""
-	}
-
-	err := s.tmpl.ExecuteTemplate(&buf, "search", view)
+	err := s.tmpl.ExecuteTemplate(&buf, "search", searchView{Node: node.Name, Query: q, Miss: q != ""})
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 
