@@ -168,12 +168,19 @@ func quoted(s string) (string, string, error) {
 	escaped := false
 
 	for i := range len(s) {
-		switch {
-		case escaped:
+		if escaped {
 			escaped = false
-		case s[i] == '\\':
+
+			continue
+		}
+
+		if s[i] == '\\' {
 			escaped = true
-		case s[i] == '"':
+
+			continue
+		}
+
+		if s[i] == '"' {
 			return s[:i], s[i+1:], nil
 		}
 	}
