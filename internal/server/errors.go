@@ -48,6 +48,9 @@ const txNotFoundCode = "tx_not_found"
 // invalidAddressCode is the error code for an invalid address in GET /balance/{addr}.
 const invalidAddressCode = "invalid_address"
 
+// unknownCursorCode is the error code for an after cursor outside the address history in GET /address/{addr}/txs.
+const unknownCursorCode = "unknown_cursor"
+
 // invalidContractIDCode is the error code for a GET /contracts/{id} that is not a 64-char lowercase hex ID.
 const invalidContractIDCode = "invalid_contract_id"
 

@@ -89,6 +89,27 @@ func (e ProofStepSide) Valid() bool {
 	}
 }
 
+// AddressTx defines model for addressTx.
+type AddressTx struct {
+	BlockHash   string      `json:"block_hash"`
+	Height      int         `json:"height"`
+	Timestamp   time.Time   `json:"timestamp"`
+	Transaction Transaction `json:"transaction"`
+}
+
+// AddressTxsResponse defines model for addressTxsResponse.
+type AddressTxsResponse struct {
+	Address string `json:"address"`
+	Limit   int    `json:"limit"`
+
+	// Next Id of the last item; present only when older transactions remain.
+	Next *string `json:"next,omitempty"`
+
+	// PrunedBelow Heights below it are not listed (0 when nothing was pruned).
+	PrunedBelow int         `json:"pruned_below"`
+	Txs         []AddressTx `json:"txs"`
+}
+
 // BalanceResponse defines model for balanceResponse.
 type BalanceResponse struct {
 	Address string `json:"address"`
@@ -324,6 +345,15 @@ type NotFound = ErrorResponse
 // RateLimited defines model for RateLimited.
 type RateLimited = ErrorResponse
 
+// GetAddressTxsParams defines parameters for GetAddressTxs.
+type GetAddressTxsParams struct {
+	// Limit Page size; values above 100 are clamped to 100.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// After Id of the last transaction of the previous page; the page starts strictly after it.
+	After *string `form:"after,omitempty" json:"after,omitempty"`
+}
+
 // GetBlocksParams defines parameters for GetBlocks.
 type GetBlocksParams struct {
 	// From First height of the page.
@@ -460,6 +490,13 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST / (the `WriteBlock` operationId).
 	WriteBlock(ctx context.Context, body WriteBlockJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetAddressTxs Get the confirmed transaction history of an address, newest first
+	//
+	// One page of the transactions that create or spend an output of the address, ordered by block height then position in the block, descending. Pending transactions are not listed. A pruned node lists only heights at or above `pruned_below`.
+	//
+	// Corresponds with GET /address/{addr}/txs (the `GetAddressTxs` operationId).
+	GetAddressTxs(ctx context.Context, addr string, params *GetAddressTxsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetBalance Get the balance and unspent outputs of an address
 	//
@@ -686,6 +723,23 @@ func (c *Client) WriteBlockWithBody(ctx context.Context, contentType string, bod
 // Corresponds with POST / (the `WriteBlock` operationId).
 func (c *Client) WriteBlock(ctx context.Context, body WriteBlockJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewWriteBlockRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetAddressTxs Get the confirmed transaction history of an address, newest first
+//
+// One page of the transactions that create or spend an output of the address, ordered by block height then position in the block, descending. Pending transactions are not listed. A pruned node lists only heights at or above `pruned_below`.
+//
+// Corresponds with GET /address/{addr}/txs (the `GetAddressTxs` operationId).
+func (c *Client) GetAddressTxs(ctx context.Context, addr string, params *GetAddressTxsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetAddressTxsRequest(c.Server, addr, params)
 	if err != nil {
 		return nil, err
 	}
@@ -1192,6 +1246,79 @@ func NewWriteBlockRequestWithBody(server string, contentType string, body io.Rea
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetAddressTxsRequest constructs an http.Request for the GetAddressTxs method
+func NewGetAddressTxsRequest(server string, addr string, params *GetAddressTxsParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "addr", addr, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/address/%s/txs", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.After != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "after", *params.After, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -1965,6 +2092,15 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST / (the `WriteBlock` operationId).
 	WriteBlockWithResponse(ctx context.Context, body WriteBlockJSONRequestBody, reqEditors ...RequestEditorFn) (*WriteBlockResponse, error)
 
+	// GetAddressTxsWithResponse Get the confirmed transaction history of an address, newest first
+	//
+	// One page of the transactions that create or spend an output of the address, ordered by block height then position in the block, descending. Pending transactions are not listed. A pruned node lists only heights at or above `pruned_below`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /address/{addr}/txs (the `GetAddressTxs` operationId).
+	GetAddressTxsWithResponse(ctx context.Context, addr string, params *GetAddressTxsParams, reqEditors ...RequestEditorFn) (*GetAddressTxsResponse, error)
+
 	// GetBalanceWithResponse Get the balance and unspent outputs of an address
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -2337,6 +2473,82 @@ func (r WriteBlockResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r WriteBlockResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// GetAddressTxsResponse429Headers the declared response headers of an HTTP 429 response for GetAddressTxs
+type GetAddressTxsResponse429Headers struct {
+	RetryAfter int
+}
+
+type GetAddressTxsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *AddressTxsResponse
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON422 the response for an HTTP 422 `application/json` response
+	JSON422 *ErrorResponse
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *RateLimited
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalError
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *GetAddressTxsResponse429Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetAddressTxsResponse) GetJSON200() *AddressTxsResponse {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r GetAddressTxsResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON422 returns the response for an HTTP 422 `application/json` response
+func (r GetAddressTxsResponse) GetJSON422() *ErrorResponse {
+	return r.JSON422
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r GetAddressTxsResponse) GetJSON429() *RateLimited {
+	return r.JSON429
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r GetAddressTxsResponse) GetJSON500() *InternalError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetAddressTxsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetAddressTxsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetAddressTxsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetAddressTxsResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -3798,6 +4010,21 @@ func (c *ClientWithResponses) WriteBlockWithResponse(ctx context.Context, body W
 	return ParseWriteBlockResponse(rsp)
 }
 
+// GetAddressTxsWithResponse Get the confirmed transaction history of an address, newest first
+//
+// One page of the transactions that create or spend an output of the address, ordered by block height then position in the block, descending. Pending transactions are not listed. A pruned node lists only heights at or above `pruned_below`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /address/{addr}/txs (the `GetAddressTxs` operationId).
+func (c *ClientWithResponses) GetAddressTxsWithResponse(ctx context.Context, addr string, params *GetAddressTxsParams, reqEditors ...RequestEditorFn) (*GetAddressTxsResponse, error) {
+	rsp, err := c.GetAddressTxs(ctx, addr, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetAddressTxsResponse(rsp)
+}
+
 // GetBalanceWithResponse Get the balance and unspent outputs of an address
 //
 // Returns a wrapper object for the known response body format(s).
@@ -4293,6 +4520,73 @@ func ParseWriteBlockResponse(rsp *http.Response) (*WriteBlockResponse, error) {
 	switch {
 	case rsp.StatusCode == 429:
 		var headers WriteBlockResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseGetAddressTxsResponse parses an HTTP response from a GetAddressTxsWithResponse call
+func ParseGetAddressTxsResponse(rsp *http.Response) (*GetAddressTxsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetAddressTxsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AddressTxsResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest RateLimited
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers GetAddressTxsResponse429Headers
 		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
 			var value int
 			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {

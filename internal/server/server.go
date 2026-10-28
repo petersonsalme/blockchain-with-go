@@ -28,7 +28,9 @@ const MiningTimeoutEnvVar = "MINING_TIMEOUT"
 const (
 	defaultPageLimit = 20
 	maxPageLimit     = 100
-	maxHeaderLimit   = 1000
+	// defaultAddressTxLimit is the page size of GET /address/{addr}/txs without limit.
+	defaultAddressTxLimit = 25
+	maxHeaderLimit        = 1000
 	// hashLen is the length of a hex-encoded SHA-256 block hash.
 	hashLen = 64
 )
@@ -43,6 +45,7 @@ type Chain interface {
 	Transaction(id string) (*domain.Transaction, string, int, error)
 	TxProof(id string) (*chain.InclusionProof, error)
 	Balance(addr string) (uint64, []chain.UTXO)
+	AddressHistory(addr, after string, limit int) (chain.AddressPage, error)
 	Mine(ctx context.Context, txs []domain.Transaction) (*domain.Block, error)
 	Submit(tx domain.Transaction) error
 	Pending() []domain.Transaction
@@ -177,6 +180,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/tx/{id}", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/tx/{id}/proof", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/balance/{addr}", methodNotAllowed("GET, HEAD"))
+	mux.Handle("/address/{addr}/txs", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/contracts/{id}", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/health", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/metrics", methodNotAllowed("GET, HEAD"))
@@ -235,6 +239,7 @@ func (s *Server) routes() []route {
 		{"GET /tx/{id}", s.handleGetTx},
 		{"GET /tx/{id}/proof", s.handleGetTxProof},
 		{"GET /balance/{addr}", s.handleGetBalance},
+		{"GET /address/{addr}/txs", s.handleGetAddressTxs},
 		{"GET /contracts/{id}", s.handleGetContract},
 		{"GET /health", s.handleHealth},
 		{"GET /metrics", s.handleMetrics},
@@ -582,6 +587,73 @@ func (s *Server) handleGetBalance(w http.ResponseWriter, r *http.Request) {
 		Balance: balance,
 		UTXOs:   utxos,
 	})
+}
+
+// handleGetAddressTxs serves one page of the confirmed history of addr, newest first.
+func (s *Server) handleGetAddressTxs(w http.ResponseWriter, r *http.Request) {
+	addr := r.PathValue("addr")
+
+	err := wallet.ValidateAddress(addr)
+	if err != nil {
+		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error(), Code: invalidAddressCode})
+		return
+	}
+
+	limit, err := queryInt(r, "limit", defaultAddressTxLimit)
+	if err == nil && limit == 0 {
+		err = errors.New("limit must be positive")
+	}
+
+	if err != nil {
+		respondWithJSON(w, http.StatusBadRequest, errorResponse{Error: err.Error(), Code: invalidQueryCode})
+		return
+	}
+
+	limit = min(limit, maxPageLimit)
+
+	after := r.URL.Query().Get("after")
+	if r.URL.Query().Has("after") && !isHash(after) {
+		respondWithJSON(w, http.StatusBadRequest, errorResponse{
+			Error: "after must be a 64-character lowercase hex transaction id",
+			Code:  invalidQueryCode,
+		})
+
+		return
+	}
+
+	page, err := s.chain.AddressHistory(addr, after, limit)
+	if errors.Is(err, chain.ErrUnknownCursor) {
+		respondWithJSON(w, http.StatusUnprocessableEntity, errorResponse{Error: err.Error(), Code: unknownCursorCode})
+		return
+	}
+
+	if err != nil {
+		respondWithJSON(w, http.StatusInternalServerError, errorResponse{Error: err.Error()})
+		return
+	}
+
+	resp := addressTxsResponse{
+		Address:     addr,
+		Txs:         make([]addressTx, 0, len(page.Txs)),
+		Limit:       limit,
+		PrunedBelow: page.PrunedBelow,
+	}
+
+	for _, t := range page.Txs {
+		resp.Txs = append(resp.Txs, addressTx{
+			Transaction: t.Tx,
+			BlockHash:   t.BlockHash,
+			Height:      t.Height,
+			Timestamp:   t.Timestamp,
+		})
+	}
+
+	if page.More {
+		next := page.Txs[len(page.Txs)-1].Tx.CalculateHash()
+		resp.Next = &next
+	}
+
+	respondWithJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) mineAndRespond(w http.ResponseWriter, r *http.Request, mine func(context.Context) (*domain.Block, error)) {

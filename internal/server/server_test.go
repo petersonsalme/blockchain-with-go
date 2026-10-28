@@ -148,6 +148,10 @@ func (brokenChain) Balance(string) (uint64, []chain.UTXO) {
 	return 0, []chain.UTXO{}
 }
 
+func (brokenChain) AddressHistory(string, string, int) (chain.AddressPage, error) {
+	return chain.AddressPage{}, errors.New("read failed")
+}
+
 func (brokenChain) Mine(context.Context, []domain.Transaction) (*domain.Block, error) {
 	return nil, errors.New("unused")
 }
@@ -1975,6 +1979,7 @@ var _ = Describe("Server", func() {
 			Entry("POST /block/abc", http.MethodPost, "/block/abc", "GET, HEAD"),
 			Entry("POST /tx/abc", http.MethodPost, "/tx/abc", "GET, HEAD"),
 			Entry("POST /balance/abc", http.MethodPost, "/balance/abc", "GET, HEAD"),
+			Entry("POST /address/abc/txs", http.MethodPost, "/address/abc/txs", "GET, HEAD"),
 			Entry("POST /health", http.MethodPost, "/health", "GET, HEAD"),
 			Entry("GET /legacy/bpm", http.MethodGet, "/legacy/bpm", "POST"),
 			Entry("PUT /legacy/bpm", http.MethodPut, "/legacy/bpm", "POST"),

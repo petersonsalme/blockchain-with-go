@@ -235,6 +235,18 @@ func contractCases() []contractCase {
 		{method: "GET", route: "/balance/{addr}", status: 400, serve: plain("/balance/bad")},
 		{method: "GET", route: "/balance/{addr}", status: 429, serve: limited("/balance/bad"), warmup: 1},
 
+		{method: "GET", route: "/address/{addr}/txs", status: 200, serve: func() (http.Handler, string, string) {
+			h, funds := realServer(Config{})
+			return h, "/address/" + funds.owner.Address() + "/txs?limit=1", ""
+		}},
+		{method: "GET", route: "/address/{addr}/txs", status: 400, serve: plain("/address/bad/txs")},
+		{method: "GET", route: "/address/{addr}/txs", status: 422, serve: func() (http.Handler, string, string) {
+			h, funds := realServer(Config{})
+			return h, "/address/" + funds.owner.Address() + "/txs?after=" + zeroHash, ""
+		}},
+		{method: "GET", route: "/address/{addr}/txs", status: 429, serve: limited("/address/bad/txs"), warmup: 1},
+		{method: "GET", route: "/address/{addr}/txs", status: 500, serve: brokenAt("/address/" + newWallet().Address() + "/txs")},
+
 		{method: "GET", route: "/contracts/{id}", status: 200, serve: func() (http.Handler, string, string) {
 			h, funds := realServer(Config{})
 			id := deployCounter(h, funds)
