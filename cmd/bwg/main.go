@@ -49,7 +49,7 @@ func newRootCmd() *cobra.Command {
 // newRootCmdWith is newRootCmd with the logger the node command uses.
 func newRootCmdWith(logger *slog.Logger) *cobra.Command {
 	root := &cobra.Command{Use: "bwg", Short: "Blockchain node, wallet and miner", SilenceUsage: true}
-	root.AddCommand(newWalletCmd(), newMinerCmd(), newNodeCmd(logger))
+	root.AddCommand(newWalletCmd(), newMinerCmd(), newNodeCmd(logger), newDashboardCmd(logger))
 
 	return root
 }

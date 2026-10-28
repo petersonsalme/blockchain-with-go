@@ -11,8 +11,11 @@ Every command below was run on a real playground (Docker Compose, difficulty 1).
 | 18081, 18082, 18083 | `node1` (mines, pays the coinbase), `node2`, `node3` | base |
 | 18084 | `snap1` (snapshots and pruning) | `--profile snapshots` |
 | 18091, 18092 | `poa1`, `poa2` (Proof of Authority) | `--profile poa` |
+| 18080 | `dashboard` (read-only network view; `NODES` names the nodes it reads) | `--profile dashboard` |
 | 19090 | `prometheus` | `--profile observability` |
 | 13000 | `grafana` | `--profile observability` |
+
+Start the dashboard next to the network with `dc --profile dashboard up -d` (`dc` is defined below) and open `http://127.0.0.1:18080/`; the full guide comes with the dashboard screens.
 
 The base network, the e2e test (`go test -tags e2e ./e2e/...`) and the playground all use 18081-18083, so **only one of them can run at a time**. Stop the others first (`docker compose down -v` for the base network; the e2e test tears down its own `bwg-e2e` project).
 
