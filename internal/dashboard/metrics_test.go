@@ -381,7 +381,7 @@ func TestIntervalChartWithoutDataSaysSo(t *testing.T) {
 	}
 
 	cold, _ := metricsServer(t, 0, one)
-	if body := do(cold, http.MethodGet, "/fragments/charts?node=node1").Body.String(); !strings.Contains(body, "Not enough blocks") {
+	if body := do(cold, http.MethodGet, "/fragments/charts?node=node1").Body.String(); !strings.Contains(body, "Not enough blocks") || !strings.Contains(body, "No polls yet.") || strings.Contains(body, "<svg") {
 		t.Errorf("before the first poll:\n%s", body)
 	}
 }
@@ -569,5 +569,72 @@ func TestParseMetricsLabelEscapes(t *testing.T) {
 	_, err = dashboard.ParseMetrics([]byte("http_requests_total{route=\"a\\"))
 	if err == nil {
 		t.Error("label value ending in a backslash accepted")
+	}
+}
+
+func TestParseMetricsErrorNamesTheLine(t *testing.T) {
+	t.Parallel()
+
+	_, err := dashboard.ParseMetrics([]byte("blockchain_blocks 1\n# c\nbroken\n"))
+	if err == nil || !strings.Contains(err.Error(), "line 3:") {
+		t.Errorf("error = %v, want it to name line 3", err)
+	}
+}
+
+func TestIntervalChartOfEqualTimestampsHasZeroHeightBars(t *testing.T) {
+	t.Parallel()
+
+	h, _ := metricsServer(t, 1, newMetricsNode(t, nodeMetricsText, secondsAfter(4, 4, 4)...))
+
+	body := do(h, http.MethodGet, "/fragments/charts?node=node1").Body.String()
+	if got := strings.Count(body, `height="0.00"`); got != 2 || strings.Contains(body, "NaN") {
+		t.Errorf("%d zero-height bars, want 2, and no NaN:\n%s", got, body)
+	}
+}
+
+func TestIntervalChartOfTwoBlocksHasOneBar(t *testing.T) {
+	t.Parallel()
+
+	h, _ := metricsServer(t, 1, newMetricsNode(t, nodeMetricsText, secondsAfter(0, 5)...))
+
+	body := do(h, http.MethodGet, "/fragments/charts?node=node1").Body.String()
+	if got := strings.Count(body, `class="bar"`); got != 1 || strings.Contains(body, "Not enough") {
+		t.Errorf("%d bars for two blocks:\n%s", got, body)
+	}
+}
+
+func TestHistorySkipsNodesNeverSeen(t *testing.T) {
+	t.Parallel()
+
+	up, down := newMetricsNode(t, nodeMetricsText, secondsAfter(0, 1)...), newMetricsNode(t, nodeMetricsText, secondsAfter(0, 1)...)
+	h, poll := metricsServer(t, 0, up, down)
+
+	down.Close()
+	poll.Tick(context.Background())
+
+	if hist := poll.History(); len(hist) != 1 || hist[0].Name != "node1" {
+		t.Errorf("history = %+v, want node1 only", hist)
+	}
+
+	body := do(h, http.MethodGet, "/fragments/charts?node=node1").Body.String()
+	if got := strings.Count(body, "<polyline"); got != 1 {
+		t.Errorf("%d polylines, want 1", got)
+	}
+}
+
+func TestMetricsWithoutNodesIsNotFound(t *testing.T) {
+	t.Parallel()
+
+	fetch := dashboard.NewFetcher(time.Second, 1<<10)
+
+	h, err := dashboard.NewServer(nil, fetch, dashboard.NewPoller(nil, fetch, time.Hour, time.Now))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, p := range []string{"/metrics", "/fragments/charts"} {
+		if rec := do(h, http.MethodGet, p); rec.Code != http.StatusNotFound {
+			t.Errorf("GET %s = %d, want 404", p, rec.Code)
+		}
 	}
 }

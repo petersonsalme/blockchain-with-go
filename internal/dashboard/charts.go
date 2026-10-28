@@ -15,9 +15,9 @@ const (
 	chartHeight  = 120
 	plotTop      = 14
 	plotHeight   = 100
-	plotBottom   = plotTop + plotHeight
-	flatY        = plotTop + plotHeight/2
-	headerCount  = 50 // headers behind the interval chart
+	plotBottom   = 114 // plotTop + plotHeight: the baseline
+	flatY        = 64  // plotTop + plotHeight/2: where a flat series is drawn
+	headerCount  = 50  // headers behind the interval chart
 	barFill      = 0.8
 	maxSeriesCls = 6
 )
@@ -85,15 +85,13 @@ func heightChart(history []Series) lineChart {
 
 	for _, s := range history {
 		for _, h := range s.Heights {
-			if !seen || h < lo {
-				lo = h
+			if !seen {
+				lo, hi, seen = h, h, true
+
+				continue
 			}
 
-			if !seen || h > hi {
-				hi = h
-			}
-
-			seen = true
+			lo, hi = min(lo, h), max(hi, h)
 		}
 	}
 

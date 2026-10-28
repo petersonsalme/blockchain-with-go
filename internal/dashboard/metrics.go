@@ -68,9 +68,13 @@ func ParseMetrics(body []byte) (NodeMetrics, error) {
 }
 
 func addRequests(m *NodeMetrics, code string, value float64) {
-	switch {
-	case code == "429":
+	if code == "429" {
 		m.Req429 += value
+
+		return
+	}
+
+	switch {
 	case strings.HasPrefix(code, "2"):
 		m.Req2xx += value
 	case strings.HasPrefix(code, "4"):
@@ -158,28 +162,19 @@ func parseLabels(s string) (map[string]string, string, error) {
 	}
 }
 
-// quoted reads a label value up to its closing quote, undoing \\, \" and \n.
+// quoted returns the raw text of a label value up to its closing quote, skipping escaped
+// characters, and what follows the quote. Only delimiting matters: no figure depends on a value.
 func quoted(s string) (string, string, error) {
-	var b strings.Builder
+	escaped := false
 
-	for i := 0; i < len(s); i++ {
-		switch c := s[i]; c {
-		case '"':
-			return b.String(), s[i+1:], nil
-		case '\\':
-			i++
-
-			if i == len(s) {
-				return "", "", errors.New("label value ends in a backslash")
-			}
-
-			if s[i] == 'n' {
-				b.WriteByte('\n')
-			} else {
-				b.WriteByte(s[i])
-			}
-		default:
-			b.WriteByte(c)
+	for i := range len(s) {
+		switch {
+		case escaped:
+			escaped = false
+		case s[i] == '\\':
+			escaped = true
+		case s[i] == '"':
+			return s[:i], s[i+1:], nil
 		}
 	}
 
