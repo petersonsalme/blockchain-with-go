@@ -537,15 +537,10 @@ func (s *server) search(w http.ResponseWriter, r *http.Request) {
 		loc = base + "/block/" + q
 
 		_, err := s.fetch.Get(r.Context(), node, Tx(q))
-
-		var st *StatusError
-
-		switch {
-		case err == nil:
+		if err == nil {
 			loc = base + "/tx/" + q
-		case errors.As(err, &st) && st.Code == http.StatusNotFound:
-		default:
-			s.fail(w, node.Name, nodeFailure(node, err))
+		} else if perr := nodeFailure(node, err); perr.Status != http.StatusNotFound {
+			s.fail(w, node.Name, perr)
 
 			return
 		}
