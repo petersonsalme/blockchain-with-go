@@ -327,7 +327,7 @@ $ docker compose down -v                        # stops the network and deletes 
 
 The e2e test uses the `bwg-e2e` project and tears it down when it finishes; CI runs it in the `e2e` job.
 
-To try the network by hand, starting from an empty chain funded by mining, see [docs/playground.md](docs/playground.md).
+To try the network by hand, starting from an empty chain funded by mining, see [docs/playground.md](docs/playground.md). The same page has the guide to the network dashboard (`--profile dashboard`, port 18080): [Network dashboard](docs/playground.md#network-dashboard---profile-dashboard).
 
 ### Releases
 
