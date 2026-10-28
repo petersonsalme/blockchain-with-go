@@ -766,7 +766,22 @@ func (s *Service) addressTxs(addr string) ([]domain.Transaction, error) {
 		return nil, err
 	}
 
-	txs := make([]domain.Transaction, 0, len(ids))
+	located, err := s.locateAll(ids)
+	if err != nil {
+		return nil, err
+	}
+
+	txs := make([]domain.Transaction, 0, len(located))
+	for _, l := range located {
+		txs = append(txs, l.Tx)
+	}
+
+	return txs, nil
+}
+
+// locateAll loads each transaction id with its block, reading every block once.
+func (s *Service) locateAll(ids []string) ([]AddressTx, error) {
+	out := make([]AddressTx, 0, len(ids))
 	blocks := map[int]*domain.Block{}
 
 	for _, id := range ids {
@@ -790,10 +805,10 @@ func (s *Service) addressTxs(addr string) ([]domain.Transaction, error) {
 			return nil, storage.ErrNotFound
 		}
 
-		txs = append(txs, b.Transactions[i])
+		out = append(out, AddressTx{Tx: b.Transactions[i], BlockHash: b.Hash, Height: h, Timestamp: b.Timestamp})
 	}
 
-	return txs, nil
+	return out, nil
 }
 
 // consistent runs read until the chain tip is the same before and after it, so

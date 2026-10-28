@@ -478,6 +478,24 @@ Returns the balance and unspent outputs (UTXOs) for `addr` from a single snapsho
 
 Outputs are sorted by `(TxID, Index)`. If `wallet.ValidateAddress` fails, returns `400` with `"code": "invalid_address"`. An address with no unspent outputs returns `balance: 0` and `utxos: []` (never `null`).
 
+### GET /address/{addr}/txs
+
+Returns the confirmed transaction history of `addr`, newest first (block height descending, then position in the block descending), one page at a time:
+
+```
+curl 'localhost:8080/address/<addr>/txs?limit=2'
+{"address": "...", "txs": [{"transaction": {...}, "block_hash": "...", "height": 7, "timestamp": "2026-01-01T00:00:00Z"}, ...], "limit": 2, "next": "<tx id>", "pruned_below": 0}
+curl 'localhost:8080/address/<addr>/txs?limit=2&after=<next>'
+```
+
+- `limit` is a positive integer (default 25; above 100 it is clamped to 100, and the response echoes the value used). A bad `limit` returns `400` `invalid_query`.
+- `after` is the id of the last transaction of the previous page (64 lowercase hex characters, else `400` `invalid_query`); the page starts strictly after it. `next` is that id, present only while older transactions remain, so follow it until it is absent. The cursor needs no server state: blocks mined between two requests add transactions only at the top, so they show up on a new first page and never shift or repeat the pages being read.
+- A transaction that both spends from and pays to the address is listed once. Pending (mempool) transactions are not listed; use `GET /mempool`.
+- An invalid address returns `400` `invalid_address`; an unknown but valid address returns `200` with `"txs": []` (never `null`) and no `next`.
+- An `after` that is well formed but not in the address history returns `422` `unknown_cursor`, never an empty page: it belongs to another address, to a block that a reorg removed, or to a block pruned since the previous page. Restart from the first page. A reorg at or below the height of the cursor can invalidate it; if the same transaction is included again at another height, paging continues from its new position.
+- A pruned node (`pruned_below` above 0) lists only transactions at heights `>= pruned_below`; older transactions are not listed. `pruned_below` is `0` when nothing was pruned.
+- Every item and `pruned_below` of one response come from one chain tip, and the read never waits for a `POST /` that is mining.
+
 ### GET /health
 
 `200` `{"status": "ok", "height": 12, "tip": "<hash>"}` with the current tip; `503` `{"error": "...", "code": "unhealthy"}` when the repository cannot be read.
@@ -763,8 +781,8 @@ Returns the confirmed state of a deployed contract:
 | Status Code | Description | Example Response Body |
 |---|---|---|
 | `200 OK` | Blockchain retrieved successfully via `GET /` | JSON array of blocks |
-| `200 OK` | `GET /blocks`, `GET /block/{ref}`, `GET /tx/{id}`, `GET /balance/{addr}`, `GET /contracts/{id}`, `GET /health` | page, block, transaction, balance or health object (see above) |
-| `400 Bad Request` | Malformed query on `/blocks`, malformed `ref` on `/block/{ref}`, malformed `id` on `/tx/{id}` or `/tx/{id}/proof`, invalid address on `/balance/{addr}`, or malformed `id` on `/contracts/{id}` | `{"error": "...", "code": "invalid_query" \| "invalid_block_ref" \| "invalid_tx_id" \| "invalid_address" \| "invalid_contract_id"}` |
+| `200 OK` | `GET /blocks`, `GET /block/{ref}`, `GET /tx/{id}`, `GET /balance/{addr}`, `GET /address/{addr}/txs`, `GET /contracts/{id}`, `GET /health` | page, block, transaction, balance, address history or health object (see above) |
+| `400 Bad Request` | Malformed query on `/blocks`, malformed `ref` on `/block/{ref}`, malformed `id` on `/tx/{id}` or `/tx/{id}/proof`, invalid address on `/balance/{addr}` or `/address/{addr}/txs`, malformed query on `/address/{addr}/txs`, or malformed `id` on `/contracts/{id}` | `{"error": "...", "code": "invalid_query" \| "invalid_block_ref" \| "invalid_tx_id" \| "invalid_address" \| "invalid_contract_id"}` |
 | `404 Not Found` | `GET /block/{ref}` or `GET /tx/{id}` or `GET /tx/{id}/proof` outside the chain, or `GET /contracts/{id}` for a contract that is not deployed | `{"error": "...", "code": "block_not_found" \| "tx_not_found" \| "contract_not_found"}` |
 | `503 Service Unavailable` | `GET /health` cannot read the chain tip | `{"error": "...", "code": "unhealthy"}` |
 | `201 Created` | Block mined and appended to the blockchain via `POST /` or `POST /mine` | JSON object of the new block |
@@ -773,6 +791,7 @@ Returns the confirmed state of a deployed contract:
 | `400 Bad Request` | Transaction rejected before mining | `{"error": "...", "code": "missing_signature" \| "invalid_signature" \| "invalid_public_key" \| "input_owner_mismatch" \| "invalid_output" \| "missing_inputs" \| "coinbase_too_large" \| "missing_timestamp"}` |
 | `409 Conflict` | Input already spent or unknown, or the same output spent twice; on `POST /tx`, also a transaction already in the pool, one that conflicts with a pool transaction, or a full pool it cannot displace | `{"error": "...", "code": "input_missing_or_spent" \| "double_spend" \| "duplicate_tx" \| "mempool_conflict" \| "mempool_full"}` |
 | `400 Bad Request` | `POST /tx` with a malformed contract operation or undeployable code | `{"error": "...", "code": "invalid_contract_op" \| "invalid_code"}` |
+| `422 Unprocessable Entity` | `GET /address/{addr}/txs` with an `after` cursor outside the address history | `{"error": "...", "code": "unknown_cursor"}` |
 | `422 Unprocessable Entity` | Outputs exceed inputs | `{"error": "...", "code": "insufficient_inputs"}` |
 | `422 Unprocessable Entity` | `POST /tx` with a contract operation that fails against the confirmed state | `{"error": "...", "code": "unknown_contract" \| "contract_exists" \| "out_of_gas" \| "reverted" \| "stack_overflow" \| "stack_underflow" \| "bad_jump" \| "arg_index" \| "invalid_gas"}` |
 | `410 Gone` | `POST /legacy/bpm` (removed) | `{"error": "...", "code": "endpoint_gone"}` |

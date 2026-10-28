@@ -55,6 +55,24 @@ type txResponse struct {
 	Height      int                 `json:"height"`
 }
 
+// addressTxsResponse is the body of GET /address/{addr}/txs. Next is the id of the
+// last item and is set only when older transactions remain.
+type addressTxsResponse struct {
+	Address     string      `json:"address"`
+	Txs         []addressTx `json:"txs"`
+	Limit       int         `json:"limit"`
+	Next        *string     `json:"next,omitempty"`
+	PrunedBelow int         `json:"pruned_below"`
+}
+
+// addressTx is one item of an address history: a transaction and its block.
+type addressTx struct {
+	Transaction domain.Transaction `json:"transaction"`
+	BlockHash   string             `json:"block_hash"`
+	Height      int                `json:"height"`
+	Timestamp   time.Time          `json:"timestamp"`
+}
+
 // balanceResponse is the body of GET /balance/{addr}.
 type balanceResponse struct {
 	Address string       `json:"address"`
