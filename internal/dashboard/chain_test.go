@@ -137,6 +137,7 @@ func TestContractStorageIsSortedByNumericKey(t *testing.T) {
 	t.Parallel()
 
 	body := do(chainServer(t, fullChainNode(t)), http.MethodGet, "/n/node1/contract/"+txA).Body.String()
+
 	i2, i10, i11 := strings.Index(body, ">2<"), strings.Index(body, ">10<"), strings.Index(body, ">11<")
 	if i2 >= i10 || i10 >= i11 {
 		t.Error("keys should come in numeric order: 2, 10, 11")
