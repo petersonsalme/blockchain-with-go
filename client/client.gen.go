@@ -529,7 +529,7 @@ type ClientInterface interface {
 
 	// GetMetrics Expose Prometheus metrics
 	//
-	// Prometheus text exposition format 0.0.4 (ADR-0010): `http_requests_total{method,route,code}`, `blockchain_blocks` (omitted when the tip cannot be read) and `blockchain_mining_duration_seconds`.
+	// Prometheus text exposition format 0.0.4 served by client_golang from a registry per server (ADR-0022): `http_requests_total{method,route,code}`, `blockchain_blocks` (omitted when the tip cannot be read), `blockchain_mining_duration_seconds`, and the Go runtime (`go_*`) and process (`process_*`) metrics.
 	//
 	// Corresponds with GET /metrics (the `GetMetrics` operationId).
 	GetMetrics(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -862,7 +862,7 @@ func (c *Client) GetMempool(ctx context.Context, reqEditors ...RequestEditorFn) 
 
 // GetMetrics Expose Prometheus metrics
 //
-// Prometheus text exposition format 0.0.4 (ADR-0010): `http_requests_total{method,route,code}`, `blockchain_blocks` (omitted when the tip cannot be read) and `blockchain_mining_duration_seconds`.
+// Prometheus text exposition format 0.0.4 served by client_golang from a registry per server (ADR-0022): `http_requests_total{method,route,code}`, `blockchain_blocks` (omitted when the tip cannot be read), `blockchain_mining_duration_seconds`, and the Go runtime (`go_*`) and process (`process_*`) metrics.
 //
 // Corresponds with GET /metrics (the `GetMetrics` operationId).
 func (c *Client) GetMetrics(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -2049,7 +2049,7 @@ type ClientWithResponsesInterface interface {
 
 	// GetMetricsWithResponse Expose Prometheus metrics
 	//
-	// Prometheus text exposition format 0.0.4 (ADR-0010): `http_requests_total{method,route,code}`, `blockchain_blocks` (omitted when the tip cannot be read) and `blockchain_mining_duration_seconds`.
+	// Prometheus text exposition format 0.0.4 served by client_golang from a registry per server (ADR-0022): `http_requests_total{method,route,code}`, `blockchain_blocks` (omitted when the tip cannot be read), `blockchain_mining_duration_seconds`, and the Go runtime (`go_*`) and process (`process_*`) metrics.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -3941,7 +3941,7 @@ func (c *ClientWithResponses) GetMempoolWithResponse(ctx context.Context, reqEdi
 
 // GetMetricsWithResponse Expose Prometheus metrics
 //
-// Prometheus text exposition format 0.0.4 (ADR-0010): `http_requests_total{method,route,code}`, `blockchain_blocks` (omitted when the tip cannot be read) and `blockchain_mining_duration_seconds`.
+// Prometheus text exposition format 0.0.4 served by client_golang from a registry per server (ADR-0022): `http_requests_total{method,route,code}`, `blockchain_blocks` (omitted when the tip cannot be read), `blockchain_mining_duration_seconds`, and the Go runtime (`go_*`) and process (`process_*`) metrics.
 //
 // Returns a wrapper object for the known response body format(s).
 //

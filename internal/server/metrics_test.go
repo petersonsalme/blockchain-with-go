@@ -8,27 +8,22 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
-	"strconv"
+	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/onsi/gomega"
+	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/common/expfmt"
+	"github.com/prometheus/common/model"
 
 	"github.com/petersonsalme/blockchain-with-go/internal/chain"
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus/pow"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/memory"
-)
-
-const metricName = `[a-zA-Z_:][a-zA-Z0-9_:]*`
-
-var (
-	helpLine   = regexp.MustCompile(`^# HELP (` + metricName + `) .+$`)
-	typeLine   = regexp.MustCompile(`^# TYPE (` + metricName + `) (counter|gauge|summary)$`)
-	sampleLine = regexp.MustCompile(`^(` + metricName + `)(\{([a-zA-Z_][a-zA-Z0-9_]*="([^"\\\n]|\\\\|\\"|\\n)*"(,[a-zA-Z_][a-zA-Z0-9_]*="([^"\\\n]|\\\\|\\"|\\n)*")*)?\})? (-?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?|NaN|[+-]Inf)$`)
 )
 
 func newMetricsServer(t *testing.T, c Chain, cfg Config) *Server {
@@ -65,8 +60,8 @@ func do(h http.Handler, method, target, body string) *httptest.ResponseRecorder 
 	return rec
 }
 
-// scrape returns the sample lines of GET /metrics keyed by "name{labels}".
-func scrape(t *testing.T, h http.Handler) map[string]float64 {
+// families parses the body of GET /metrics with the expfmt text parser.
+func families(t *testing.T, h http.Handler) (*httptest.ResponseRecorder, map[string]*dto.MetricFamily) {
 	t.Helper()
 
 	rec := do(h, http.MethodGet, "/metrics", "")
@@ -74,24 +69,52 @@ func scrape(t *testing.T, h http.Handler) map[string]float64 {
 		t.Fatalf("GET /metrics = %d, want 200", rec.Code)
 	}
 
+	parser := expfmt.NewTextParser(model.UTF8Validation)
+
+	fams, err := parser.TextToMetricFamilies(rec.Body)
+	if err != nil {
+		t.Fatalf("body does not parse: %v", err)
+	}
+
+	return rec, fams
+}
+
+// seriesKey renders a sample as name{label="value",...} with the labels sorted by name.
+func seriesKey(name string, labels []*dto.LabelPair) string {
+	if len(labels) == 0 {
+		return name
+	}
+
+	pairs := make([]string, 0, len(labels))
+	for _, l := range labels {
+		pairs = append(pairs, l.GetName()+`="`+l.GetValue()+`"`)
+	}
+
+	slices.Sort(pairs)
+
+	return name + "{" + strings.Join(pairs, ",") + "}"
+}
+
+// scrape returns the samples of GET /metrics keyed by "name{labels}" (labels sorted); a summary yields _sum and _count.
+func scrape(t *testing.T, h http.Handler) map[string]float64 {
+	t.Helper()
+
+	_, fams := families(t, h)
 	out := map[string]float64{}
 
-	for line := range strings.SplitSeq(strings.TrimSuffix(rec.Body.String(), "\n"), "\n") {
-		if strings.HasPrefix(line, "#") {
-			continue
+	for name, f := range fams {
+		for _, m := range f.GetMetric() {
+			switch f.GetType() {
+			case dto.MetricType_COUNTER:
+				out[seriesKey(name, m.GetLabel())] = m.GetCounter().GetValue()
+			case dto.MetricType_GAUGE:
+				out[seriesKey(name, m.GetLabel())] = m.GetGauge().GetValue()
+			case dto.MetricType_SUMMARY:
+				out[seriesKey(name+"_sum", m.GetLabel())] = m.GetSummary().GetSampleSum()
+				out[seriesKey(name+"_count", m.GetLabel())] = float64(m.GetSummary().GetSampleCount())
+			case dto.MetricType_UNTYPED, dto.MetricType_HISTOGRAM, dto.MetricType_GAUGE_HISTOGRAM:
+			}
 		}
-
-		m := sampleLine.FindStringSubmatch(line)
-		if m == nil {
-			t.Fatalf("bad sample line %q", line)
-		}
-
-		v, err := strconv.ParseFloat(line[strings.LastIndexByte(line, ' ')+1:], 64)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		out[line[:strings.LastIndexByte(line, ' ')]] = v
 	}
 
 	return out
@@ -102,51 +125,40 @@ func TestMetricsFormat(t *testing.T) {
 	h := newMetricsServer(t, svc, Config{}).Handler()
 	do(h, http.MethodGet, "/health", "")
 
-	rec := do(h, http.MethodGet, "/metrics", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
+	rec, fams := families(t, h)
 
-	if got, want := rec.Header().Get("Content-Type"), "text/plain; version=0.0.4; charset=utf-8"; got != want {
+	if got, want := rec.Header().Get("Content-Type"), "text/plain; version=0.0.4; charset=utf-8; escaping=underscores"; got != want {
 		t.Fatalf("Content-Type = %q, want %q", got, want)
 	}
 
-	body := rec.Body.String()
-	if !strings.HasSuffix(body, "\n") {
-		t.Fatal("body must end with a newline")
+	want := map[string]dto.MetricType{
+		"http_requests_total":                dto.MetricType_COUNTER,
+		"blockchain_blocks":                  dto.MetricType_GAUGE,
+		"blockchain_mining_duration_seconds": dto.MetricType_SUMMARY,
+		"go_goroutines":                      dto.MetricType_GAUGE,
+	}
+	if runtime.GOOS == "linux" {
+		want["process_start_time_seconds"] = dto.MetricType_GAUGE
 	}
 
-	helped, typed, sampled := map[string]bool{}, map[string]string{}, map[string]bool{}
-
-	for line := range strings.SplitSeq(strings.TrimSuffix(body, "\n"), "\n") {
-		switch {
-		case helpLine.MatchString(line):
-			helped[helpLine.FindStringSubmatch(line)[1]] = true
-		case typeLine.MatchString(line):
-			m := typeLine.FindStringSubmatch(line)
-			typed[m[1]] = m[2]
-		case sampleLine.MatchString(line):
-			name := sampleLine.FindStringSubmatch(line)[1]
-			name = strings.TrimSuffix(strings.TrimSuffix(name, "_sum"), "_count")
-			sampled[name] = true
-		default:
-			t.Fatalf("line %q does not match the text format grammar", line)
-		}
-	}
-
-	want := map[string]string{
-		"http_requests_total":                "counter",
-		"blockchain_blocks":                  "gauge",
-		"blockchain_mining_duration_seconds": "summary",
-	}
 	for name, typ := range want {
-		if !helped[name] || typed[name] != typ || !sampled[name] {
-			t.Errorf("family %s: help=%v type=%q sampled=%v, want HELP, TYPE %s and a sample", name, helped[name], typed[name], sampled[name], typ)
+		f := fams[name]
+		if f == nil || f.GetType() != typ || len(f.GetMetric()) == 0 || f.GetHelp() == "" {
+			t.Errorf("family %s = %v, want type %s with help and a sample", name, f, typ)
 		}
 	}
 
-	if len(typed) != len(want) || len(helped) != len(want) {
-		t.Errorf("families = %v / %v, want exactly %d", helped, typed, len(want))
+	var labels []string
+	for _, l := range fams["http_requests_total"].GetMetric()[0].GetLabel() {
+		labels = append(labels, l.GetName())
+	}
+
+	if !slices.Equal(labels, []string{"code", "method", "route"}) {
+		t.Errorf("http_requests_total labels = %v, want code, method, route", labels)
+	}
+
+	if q := fams["blockchain_mining_duration_seconds"].GetMetric()[0].GetSummary().GetQuantile(); len(q) != 0 {
+		t.Errorf("mining summary has quantiles %v, want none", q)
 	}
 }
 
@@ -179,9 +191,9 @@ func TestMetricsRequestsTotal(t *testing.T) {
 
 	got := scrape(t, h)
 	for series, want := range map[string]float64{
-		`http_requests_total{method="GET",route="GET /block/{ref}",code="404"}`: 3,
-		`http_requests_total{method="GET",route="GET /block/{ref}",code="200"}`: 1,
-		`http_requests_total{method="PUT",route="/blocks",code="405"}`:          1,
+		`http_requests_total{code="404",method="GET",route="GET /block/{ref}"}`: 3,
+		`http_requests_total{code="200",method="GET",route="GET /block/{ref}"}`: 1,
+		`http_requests_total{code="405",method="PUT",route="/blocks"}`:          1,
 	} {
 		if got[series] != want {
 			t.Errorf("%s = %v, want %v", series, got[series], want)
@@ -189,7 +201,7 @@ func TestMetricsRequestsTotal(t *testing.T) {
 	}
 
 	// The scrape counts itself only after it has been answered.
-	if v := scrape(t, h)[`http_requests_total{method="GET",route="GET /metrics",code="200"}`]; v != 1 {
+	if v := scrape(t, h)[`http_requests_total{code="200",method="GET",route="GET /metrics"}`]; v != 1 {
 		t.Errorf("GET /metrics series = %v after one earlier scrape, want 1", v)
 	}
 }
@@ -217,11 +229,11 @@ func TestMetricsBoundedCardinality(t *testing.T) {
 		t.Fatalf("unmatched series = %v, want one for GET/404 and one for OTHER/404", unmatched)
 	}
 
-	if v := scrape(t, h)[`http_requests_total{method="GET",route="unmatched",code="404"}`]; v != 50 {
+	if v := scrape(t, h)[`http_requests_total{code="404",method="GET",route="unmatched"}`]; v != 50 {
 		t.Errorf("unmatched GET 404 = %v, want 50", v)
 	}
 
-	if v := scrape(t, h)[`http_requests_total{method="OTHER",route="unmatched",code="404"}`]; v != 2 {
+	if v := scrape(t, h)[`http_requests_total{code="404",method="OTHER",route="unmatched"}`]; v != 2 {
 		t.Errorf("OTHER method 404 = %v, want 2", v)
 	}
 }
@@ -391,7 +403,11 @@ func TestMetricsServersDoNotShareState(t *testing.T) {
 
 	do(a, http.MethodGet, "/nope", "")
 
-	if v := scrape(t, b)[`http_requests_total{method="GET",route="unmatched",code="404"}`]; v != 0 {
+	if v := scrape(t, a)[`http_requests_total{code="404",method="GET",route="unmatched"}`]; v != 1 {
+		t.Errorf("first server counted %v, want 1", v)
+	}
+
+	if v := scrape(t, b)[`http_requests_total{code="404",method="GET",route="unmatched"}`]; v != 0 {
 		t.Errorf("second server saw %v requests of the first", v)
 	}
 }
@@ -421,54 +437,5 @@ func TestMetricsConcurrentScrape(t *testing.T) {
 
 	if total != 160 {
 		t.Errorf("total = %v, want 160", total)
-	}
-}
-
-func TestEscapeLabelValue(t *testing.T) {
-	if got, want := escapeLabelValue("a\\b\"c\nd"), `a\\b\"c\nd`; got != want {
-		t.Errorf("escapeLabelValue = %q, want %q", got, want)
-	}
-
-	m := newMetrics()
-	m.observeRequest("GET", "we\"ird\\\nroute", 200)
-
-	var buf bytes.Buffer
-	m.write(&buf, 1, true)
-
-	line := `http_requests_total{method="GET",route="we\"ird\\\nroute",code="200"} 1`
-	if !strings.Contains(buf.String(), line+"\n") {
-		t.Errorf("missing %q in:\n%s", line, buf.String())
-	}
-
-	if !sampleLine.MatchString(line) {
-		t.Errorf("escaped line does not match the grammar")
-	}
-}
-
-func TestMetricsOrderIsDeterministic(t *testing.T) {
-	m := newMetrics()
-	m.observeRequest("POST", "b", 200)
-	m.observeRequest("GET", "b", 404)
-	m.observeRequest("GET", "a", 404)
-	m.observeRequest("GET", "a", 200)
-
-	var first, second bytes.Buffer
-	m.write(&first, 1, true)
-	m.write(&second, 1, true)
-
-	if first.String() != second.String() {
-		t.Error("two renderings differ")
-	}
-
-	if i, j := strings.Index(first.String(), `route="a",code="200"`), strings.Index(first.String(), `route="a",code="404"`); i < 0 || i >= j {
-		t.Errorf("series of one route and method not sorted by code:\n%s", first.String())
-	}
-
-	a := strings.Index(first.String(), `route="a"`)
-	b := strings.Index(first.String(), `method="GET",route="b"`)
-
-	c := strings.Index(first.String(), `method="POST"`)
-	if a >= b || b >= c {
-		t.Errorf("series not sorted by route, method, code:\n%s", first.String())
 	}
 }

@@ -136,7 +136,7 @@ Design decisions live in [`docs/adr/`](docs/adr/0009-merkle-tree.md):
 | [0007](docs/adr/0007-openapi-contract.md) | OpenAPI spec as the HTTP contract, with a generated Go client |
 | [0008](docs/adr/0008-difficulty-retargeting.md) | Difficulty retargeting; the `Consensus` port receives the block history |
 | [0009](docs/adr/0009-merkle-tree.md) | Transaction Merkle tree in the block header (RFC 6962 odd-node rule) |
-| [0010](docs/adr/0010-prometheus-metrics.md) | Prometheus metrics written by hand, no client library |
+| [0010](docs/adr/0010-prometheus-metrics.md) | Prometheus metrics written by hand, no client library (superseded by 0022) |
 | [0012](docs/adr/0012-difficulty-bits.md) | Proof-of-work difficulty counts leading zero bits; defaults realigned with `MINING_TIMEOUT` |
 | [0014](docs/adr/0014-snapshots-and-pruning.md) | UTXO snapshots every N blocks, pruning of old bodies to headers, and boot from a snapshot file |
 | [0015](docs/adr/0015-coinbase-and-halving.md) | Coinbase reward capped at `Subsidy(height) + fees`, with halving every 210,000 blocks |
@@ -144,6 +144,7 @@ Design decisions live in [`docs/adr/`](docs/adr/0009-merkle-tree.md):
 | [0017](docs/adr/0017-hd-wallet-slip10.md) | HD wallet: BIP-39 mnemonics with SLIP-0010 ed25519 derivation (hardened only) |
 | [0020](docs/adr/0020-genesis-time.md) | Deterministic genesis time from `GENESIS_TIME` |
 | [0021](docs/adr/0021-professional-grade-study-reference.md) | Professional-grade study reference: hand-written chain core, market tools around it, never for real value |
+| [0022](docs/adr/0022-prometheus-client-golang.md) | Prometheus metrics with client_golang (registry per server) and an observability compose profile; supersedes 0010 |
 
 ## Configuration & Environment Variables
 
@@ -561,13 +562,14 @@ curl -X POST localhost:8080/p2p/tx -d '{"node_id":"<32 hex>","tx":{...}}'
 
 ### GET /metrics
 
-Prometheus text exposition (format 0.0.4, `Content-Type: text/plain; version=0.0.4; charset=utf-8`), written by hand without a client library ([ADR-0010](docs/adr/0010-prometheus-metrics.md)). Other methods answer `405` with `Allow: GET, HEAD`; the rate limiter applies as on every other route.
+Prometheus text exposition (format 0.0.4, `Content-Type: text/plain; version=0.0.4; charset=utf-8; escaping=underscores`), served by `prometheus/client_golang` from a registry per `Server` ([ADR-0022](docs/adr/0022-prometheus-client-golang.md), which supersedes [ADR-0010](docs/adr/0010-prometheus-metrics.md)). Labels and families come out sorted by name. Other methods answer `405` with `Allow: GET, HEAD`; the rate limiter applies as on every other route.
 
 | Metric | Type | Meaning |
 |---|---|---|
 | `http_requests_total{method,route,code}` | counter | Requests answered. `route` is the `ServeMux` pattern (same value as the log), `unmatched` otherwise; methods outside the standard set are folded into `OTHER`, so the series count stays bounded. |
 | `blockchain_blocks` | gauge | `Tip().Index + 1`, read on each scrape. Omitted if the tip cannot be read. |
 | `blockchain_mining_duration_seconds` | summary | `_sum` and `_count` of the `Mine` calls that returned a block (no quantiles). |
+| `go_*`, `process_*` | mixed | Go runtime and process collectors of client_golang (`process_*` only where `/proc` exists, i.e. Linux). |
 
 ```
 curl -s localhost:8080/metrics
