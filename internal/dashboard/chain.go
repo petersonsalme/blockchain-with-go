@@ -515,9 +515,35 @@ func (s *server) loadContract(r *http.Request, node Node) (any, *pageError) {
 	return contractView{Node: node.Name, ID: body.ID, Code: body.Code, Storage: cells}, nil
 }
 
-// search sends a decimal height to the block view, 64 hex to the transaction view when the node
-// finds it and to the block view otherwise, and an address to the address view. The Location is
-// built here from the node name in the configuration and the text the allowlist just accepted.
+// searchProbe is one candidate of /search: the read that confirms it and the path it links to.
+type searchProbe struct {
+	req  Request
+	path string
+	// badRequestMiss: the node answers 400 for an address with a bad checksum, which is a miss too.
+	badRequestMiss bool
+}
+
+// searchProbes lists the candidates for q, already lowercase and trimmed, in the order /search
+// tries them. A query that matches no shape has none.
+func searchProbes(q string) []searchProbe {
+	switch {
+	case isDecimal(q):
+		return []searchProbe{{req: Block(q), path: "/block/" + q}}
+	case isLowerHex(q, hexIDLen):
+		return []searchProbe{{req: Tx(q), path: "/tx/" + q}, {req: Block(q), path: "/block/" + q}}
+	case isLowerHex(q, addressLen):
+		return []searchProbe{{req: Balance(q), path: "/address/" + q, badRequestMiss: true}}
+	}
+
+	return nil
+}
+
+// search redirects to the first candidate of the query's shape that the node answers 200 for: a
+// decimal height to its block, 64 hex to the transaction and then the block, 50 hex to the address.
+// A 404 from the node, or a 400 for an address, is a miss and the next candidate is tried. When none
+// answers, or the query matches no shape, the search page says Not found (404); an empty query, or
+// one over maxQueryLen, gets the plain page. Any other node failure is a page. The Location is built
+// here from the node name in the configuration and the text the allowlist just accepted.
 func (s *server) search(w http.ResponseWriter, r *http.Request) {
 	node, ok := s.lookup(r.URL.Query().Get("node"))
 	if !ok {
@@ -526,37 +552,32 @@ func (s *server) search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
 	if len(q) > maxQueryLen {
 		q = ""
 	}
 
 	base := "/n/" + url.PathEscape(node.Name)
 
-	var loc string
-
-	switch {
-	case isDecimal(q):
-		loc = base + "/block/" + q
-	case isLowerHex(q, hexIDLen):
-		loc = base + "/block/" + q
-
-		_, err := s.fetch.Get(r.Context(), node, Tx(q))
+	for _, p := range searchProbes(q) {
+		_, err := s.fetch.Get(r.Context(), node, p.req)
 		if err == nil {
-			loc = base + "/tx/" + q
-		} else if perr := nodeFailure(node, err); perr.Status != http.StatusNotFound {
+			http.Redirect(w, r, base+p.path, http.StatusSeeOther)
+
+			return
+		}
+
+		perr := nodeFailure(node, err)
+		if perr.Status != http.StatusNotFound && (!p.badRequestMiss || perr.Status != http.StatusBadRequest) {
 			s.fail(w, node.Name, perr)
 
 			return
 		}
-	case isLowerHex(q, addressLen):
-		loc = base + "/address/" + q
 	}
 
-	if loc != "" {
-		http.Redirect(w, r, loc, http.StatusSeeOther) //nolint:gosec // G710: loc is a dashboard path from a configured node name and text the allowlist accepted
-
-		return
+	status := http.StatusOK
+	if q != "" {
+		status = http.StatusNotFound
 	}
 
 	var buf bytes.Buffer
@@ -568,5 +589,5 @@ func (s *server) search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.layout(w, http.StatusOK, node.Name, buf.String())
+	s.layout(w, status, node.Name, buf.String())
 }

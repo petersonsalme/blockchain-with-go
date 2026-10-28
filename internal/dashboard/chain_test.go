@@ -3,6 +3,7 @@ package dashboard_test
 import (
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,7 +19,10 @@ const (
 	owner   = "00112233445566778899aabbccddeeff0011223344556677"
 )
 
-var ownerAddr = owner + "ab" // 50 lowercase hex
+var (
+	ownerAddr       = owner + "ab" // 50 lowercase hex
+	badChecksumAddr = owner + "cd" // 50 lowercase hex the node answers 400 for
+)
 
 // reply is a canned node answer.
 type reply struct {
@@ -91,6 +95,7 @@ func fullChainNode(t *testing.T) *countingNode {
 	routes["/tx/"+txA] = ok(`{"transaction":` + txJSON(txA, ownerAddr) + `,"block_hash":"` + blkHash + `","height":1}`)
 	routes["/tx/"+txA+"/proof"] = ok(`{"tx_id":"` + txA + `","block_index":1,"block_hash":"` + blkHash + `","merkle_root":"rootrootroot","leaf_index":2,"leaf_hash":"leafleaf","proof":[{"hash":"sib0","side":"left"},{"hash":"sib1","side":"right"}]}`)
 	routes["/balance/"+ownerAddr] = ok(`{"address":"` + ownerAddr + `","balance":4200,"utxos":[{"txid":"` + txA + `","index":0,"amount":4200}]}`)
+	routes["/balance/"+badChecksumAddr] = reply{http.StatusBadRequest, `{"error":"checksum"}`}
 	routes["/address/"+ownerAddr+"/txs?limit=25"] = ok(`{"address":"` + ownerAddr + `","txs":[{"transaction":` + txJSON(txA, ownerAddr) + `,"block_hash":"` + blkHash + `","height":1,"timestamp":"2026-01-02T03:04:05Z"}],"limit":25,"next":"` + txA + `","pruned_below":0}`)
 	routes["/address/"+ownerAddr+"/txs?limit=25&after="+txA] = ok(`{"address":"` + ownerAddr + `","txs":[],"limit":25,"pruned_below":7}`)
 	routes["/contracts/"+txA] = ok(`{"id":"` + txA + `","code":"0102","storage":{"10":7,"2":5,"11":8}}`)
@@ -280,15 +285,19 @@ func TestSearch(t *testing.T) {
 		q    string
 		want string // Location, empty for the search page
 	}{
-		{"7", "/n/node1/block/7"},
-		{"  7 ", "/n/node1/block/7"},
+		{"1", "/n/node1/block/1"},
+		{"  1 ", "/n/node1/block/1"},
 		{txA, "/n/node1/tx/" + txA},
-		{txB, "/n/node1/block/" + txB},
+		{strings.ToUpper(txA), "/n/node1/tx/" + txA},
+		{blkHash, "/n/node1/block/" + blkHash},
 		{ownerAddr, "/n/node1/address/" + ownerAddr},
+		{strings.ToUpper(ownerAddr), "/n/node1/address/" + ownerAddr},
+		{"7", ""},
+		{"  7 ", ""},
+		{txB, ""},
+		{badChecksumAddr, ""},
 		{"hello", ""},
 		{"", ""},
-		{strings.ToUpper(txA), ""},
-		{strings.ToUpper(ownerAddr), ""},
 		{"../etc", ""},
 		{"http://evil.example/", ""},
 		{strings.Repeat("9", 200), ""},
@@ -301,12 +310,18 @@ func TestSearch(t *testing.T) {
 		rec := do(h, http.MethodGet, "/search?node=node1&q="+url.QueryEscape(tc.q))
 
 		if tc.want == "" {
-			if rec.Code != http.StatusOK || rec.Header().Get("Location") != "" {
-				t.Errorf("q=%q: %d Location %q, want the search page", tc.q, rec.Code, rec.Header().Get("Location"))
+			// An empty query, or one too long to look at, gets the plain page; a miss is a 404.
+			wantStatus, wantMiss := http.StatusNotFound, true
+			if q := strings.TrimSpace(tc.q); q == "" || len(q) > 128 {
+				wantStatus, wantMiss = http.StatusOK, false
 			}
 
-			if tc.q != "" && len(tc.q) <= 128 && !strings.Contains(rec.Body.String(), "Not found") {
-				t.Errorf("q=%q: page lacks Not found", tc.q)
+			if rec.Code != wantStatus || rec.Header().Get("Location") != "" {
+				t.Errorf("q=%q: %d Location %q, want %d without a Location", tc.q, rec.Code, rec.Header().Get("Location"), wantStatus)
+			}
+
+			if strings.Contains(rec.Body.String(), "Not found") != wantMiss {
+				t.Errorf("q=%q: Not found shown = %t, want %t", tc.q, !wantMiss, wantMiss)
 			}
 
 			continue
@@ -340,18 +355,50 @@ func TestSearchUsesOnlyAllowlistedReads(t *testing.T) {
 	n := fullChainNode(t)
 	h := chainServer(t, n)
 
-	for _, q := range []string{"7", ownerAddr, "nope", "../x", strings.ToUpper(txA)} {
+	for _, q := range []string{"nope", "../x"} {
 		do(h, http.MethodGet, "/search?node=node1&q="+url.QueryEscape(q))
 	}
 
 	if n.hits.Load() != 0 {
-		t.Errorf("search without a transaction id read the node: %v", n.seen)
+		t.Errorf("search without a known shape read the node: %v", n.seen)
 	}
 
-	do(h, http.MethodGet, "/search?node=node1&q="+txA)
+	for _, q := range []string{"7", ownerAddr, strings.ToUpper(txA)} {
+		do(h, http.MethodGet, "/search?node=node1&q="+url.QueryEscape(q))
+	}
 
-	if len(n.seen) != 1 || n.seen[0] != "GET /tx/"+txA {
-		t.Errorf("node saw %v, want one GET /tx/%s", n.seen, txA)
+	// One read per query: the height and the address stop at their first answer, the id at the transaction.
+	want := []string{"GET /block/7", "GET /balance/" + ownerAddr, "GET /tx/" + txA}
+	if !slices.Equal(n.seen, want) {
+		t.Errorf("node saw %v, want %v", n.seen, want)
+	}
+}
+
+func TestSearchPrefersTransactionOverBlockHash(t *testing.T) {
+	t.Parallel()
+
+	n := routedNode(t, map[string]reply{
+		"/tx/" + txA:    ok(`{}`),
+		"/block/" + txA: ok(`{}`),
+	})
+
+	rec := do(chainServer(t, n), http.MethodGet, "/search?node=node1&q="+txA)
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/n/node1/tx/"+txA {
+		t.Errorf("= %d Location %q, want 303 to the transaction", rec.Code, rec.Header().Get("Location"))
+	}
+}
+
+func TestSearchNodeErrorIsAPageNotARedirect(t *testing.T) {
+	t.Parallel()
+
+	n := routedNode(t, map[string]reply{
+		"/tx/" + txA:    {http.StatusInternalServerError, `{}`},
+		"/block/" + txA: ok(`{}`),
+	})
+
+	rec := do(chainServer(t, n), http.MethodGet, "/search?node=node1&q="+txA)
+	if rec.Code != http.StatusBadGateway || rec.Header().Get("Location") != "" || !strings.Contains(rec.Body.String(), "node node1 answered with status 500") {
+		t.Errorf("= %d Location %q: %s", rec.Code, rec.Header().Get("Location"), rec.Body)
 	}
 }
 
