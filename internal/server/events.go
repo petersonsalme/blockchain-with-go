@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 )
 
 const (
@@ -88,6 +90,31 @@ func (h *hub) publish(name string, v any) {
 			close(ch)
 		}
 	}
+}
+
+// Events is the event stream of a node, shared by the server and by the code that appends
+// blocks outside it (sync, reorg). The zero value is not usable; build it with NewEvents.
+type Events struct{ hub *hub }
+
+// NewEvents returns an empty stream; pass it as Config.Events to have GET /events serve it.
+func NewEvents() *Events { return &Events{hub: newHub()} }
+
+// PublishBlock sends b as a "block" event; it is a no-op on a nil Events.
+func (e *Events) PublishBlock(b *domain.Block) {
+	if e == nil {
+		return
+	}
+
+	e.hub.publish(eventBlock, b)
+}
+
+// PublishTx sends tx as a "tx" event; it is a no-op on a nil Events.
+func (e *Events) PublishTx(tx domain.Transaction) {
+	if e == nil {
+		return
+	}
+
+	e.hub.publish(eventTx, tx)
 }
 
 // handleEvents streams "block" and "tx" events as text/event-stream until the client

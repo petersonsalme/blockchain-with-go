@@ -626,3 +626,33 @@ func postURL(url, contentType string, body io.Reader) (*http.Response, error) {
 
 	return http.DefaultClient.Do(req)
 }
+
+func TestEventsNilPublishDoesNotPanic(t *testing.T) {
+	var e *Events
+
+	e.PublishBlock(&domain.Block{})
+	e.PublishTx(domain.Transaction{})
+}
+
+func TestEventsPublishReachesTheServerStream(t *testing.T) {
+	ev := NewEvents()
+
+	srv, err := NewServer(brokenChain{}, Config{Events: ev})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ch := srv.events.subscribe()
+
+	ev.PublishBlock(&domain.Block{Index: 2, Hash: "h"})
+	ev.PublishTx(domain.Transaction{ID: "t"})
+
+	got := drainEvents(ch)
+	if len(got) != 2 || got[0].name != eventBlock || got[1].name != eventTx {
+		t.Fatalf("events = %+v", got)
+	}
+
+	if !strings.Contains(string(got[0].data), `"Hash":"h"`) || !strings.Contains(string(got[1].data), `"ID":"t"`) {
+		t.Fatalf("payloads = %s / %s", got[0].data, got[1].data)
+	}
+}

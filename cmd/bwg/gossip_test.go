@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -110,12 +111,14 @@ func startGossipNode(t *testing.T, ctx context.Context, genesis *domain.Block, a
 	t.Cleanup(g.p2p.srv.Close)
 	t.Setenv(p2pListenAddrEnvVar, g.url())
 
-	node, err := newP2PNode(svc, "", discardLogger())
+	events := server.NewEvents()
+
+	node, err := newP2PNode(svc, "", discardLogger(), events)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	s, err := server.NewServer(svc, server.Config{P2P: node})
+	s, err := server.NewServer(svc, server.Config{P2P: node, Events: events})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -453,5 +456,115 @@ func TestChainLedger(t *testing.T) {
 
 	if l.HasTx(bad.ID) {
 		t.Fatal("HasTx reports a rejected transaction")
+	}
+}
+
+// eventSink collects the events of an open GET /events stream.
+type eventSink struct {
+	mu     sync.Mutex
+	events []sinkEvent
+}
+
+type sinkEvent struct{ name, data string }
+
+// openEvents opens GET /events at url; the node has registered the subscriber when it returns.
+func openEvents(t *testing.T, url string) *eventSink {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = resp.Body.Close() }) // test response body
+
+	sink := &eventSink{}
+
+	go func() {
+		sc := bufio.NewScanner(resp.Body)
+
+		var cur sinkEvent
+
+		for sc.Scan() {
+			line := sc.Text()
+
+			switch {
+			case strings.HasPrefix(line, "event: "):
+				cur.name = strings.TrimPrefix(line, "event: ")
+			case strings.HasPrefix(line, "data: "):
+				cur.data = strings.TrimPrefix(line, "data: ")
+			case line == "":
+				sink.mu.Lock()
+				sink.events = append(sink.events, cur)
+				sink.mu.Unlock()
+
+				cur = sinkEvent{}
+			}
+		}
+	}()
+
+	return sink
+}
+
+// blockHashes returns the Hash of every block event received so far, in arrival order.
+func (s *eventSink) blockHashes(t *testing.T) []string {
+	t.Helper()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var hashes []string
+
+	for _, ev := range s.events {
+		if ev.name != "block" {
+			continue
+		}
+
+		var b domain.Block
+
+		err := json.Unmarshal([]byte(ev.data), &b)
+		if err != nil {
+			t.Fatalf("block event data %q: %v", ev.data, err)
+		}
+
+		hashes = append(hashes, b.Hash)
+	}
+
+	return hashes
+}
+
+// settle gives a stray event time to arrive before a test asserts there is none.
+func settle() { time.Sleep(300 * time.Millisecond) }
+
+func TestGossipedBlockEmitsOneEventOnThePeer(t *testing.T) {
+	n := startGossipNet(t)
+	sink := openEvents(t, n.b.url())
+
+	mined := mine(t, n.a)
+
+	waitFor(t, "the block event at B", func() bool { return len(sink.blockHashes(t)) > 0 })
+	settle()
+
+	if got := sink.blockHashes(t); !slices.Equal(got, []string{mined.Hash}) {
+		t.Fatalf("block events at B = %v, want [%s]", got, mined.Hash)
+	}
+
+	status, out := send(t, http.MethodPost, n.b.url()+"/p2p/block", map[string]any{"node_id": getPeers(t, n.b.url()).Peers[0].NodeID, "block": mined})
+	if status != http.StatusOK || !strings.Contains(string(out), "known") {
+		t.Fatalf("POST /p2p/block again = %d %s, want 200 known", status, out)
+	}
+
+	settle()
+
+	if got := sink.blockHashes(t); len(got) != 1 {
+		t.Fatalf("block events at B after a duplicate = %v, want one", got)
 	}
 }

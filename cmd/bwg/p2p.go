@@ -15,6 +15,7 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/chain"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/internal/p2p"
+	"github.com/petersonsalme/blockchain-with-go/internal/server"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 )
 
@@ -49,19 +50,34 @@ func (l chainLedger) AcceptBlock(ctx context.Context, b *domain.Block) error {
 
 // syncLedger adapts *chain.Service to p2p.SyncLedger (ADR-0019). The embedded
 // ledger provides Tip, BlocksRange and HasBlock.
-type syncLedger struct{ chainLedger }
+type syncLedger struct {
+	chainLedger
+
+	events *server.Events // nil publishes nothing
+}
 
 // AcceptBlock appends b, translating the failures sync tells apart.
 func (l syncLedger) AcceptBlock(ctx context.Context, b *domain.Block) error {
-	return mapSyncError(l.Service.AcceptBlock(ctx, b))
+	err := l.Service.AcceptBlock(ctx, b)
+	if err != nil {
+		return mapSyncError(err)
+	}
+
+	l.events.PublishBlock(b)
+
+	return nil
 }
 
 // ReplaceChain switches to candidate and resubmits the transactions of the dropped
-// blocks to the pool, ignoring refusals.
+// blocks to the pool, ignoring refusals. It publishes the connected blocks, oldest first.
 func (l syncLedger) ReplaceChain(ctx context.Context, candidate []*domain.Block) error {
 	reorg, err := l.Service.ReplaceChain(ctx, candidate)
 	if err != nil {
 		return mapSyncError(err)
+	}
+
+	for _, b := range reorg.Connected {
+		l.events.PublishBlock(b)
 	}
 
 	for _, tx := range reorg.Orphaned {
@@ -90,7 +106,7 @@ func mapSyncError(err error) error {
 // newP2PNode builds the peer-to-peer node of this process from the environment,
 // with gossip over svc. Its book starts with the addresses in DATA_DIR/peers.json plus SEED_PEERS; a
 // corrupt file, a bad seed or a bad listen address fails the start.
-func newP2PNode(svc *chain.Service, dataDir string, logger *slog.Logger) (*p2p.Node, error) {
+func newP2PNode(svc *chain.Service, dataDir string, logger *slog.Logger, events *server.Events) (*p2p.Node, error) {
 	seeds, err := parseSeedPeers(os.Getenv(seedPeersEnvVar))
 	if err != nil {
 		return nil, err
@@ -105,7 +121,7 @@ func newP2PNode(svc *chain.Service, dataDir string, logger *slog.Logger) (*p2p.N
 		p2p.WithInterval(parsePeerInterval(os.Getenv(peerIntervalEnvVar))),
 		p2p.WithLogger(logger),
 		p2p.WithLedger(chainLedger{svc}),
-		p2p.WithSyncLedger(syncLedger{chainLedger{svc}}),
+		p2p.WithSyncLedger(syncLedger{chainLedger: chainLedger{svc}, events: events}),
 	}
 
 	if strings.TrimSpace(dataDir) != "" {

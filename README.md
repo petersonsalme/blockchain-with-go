@@ -484,7 +484,7 @@ None of these reads waits for a `POST /` that is mining.
 
 ### GET /events
 
-Server-sent events (`Content-Type: text/event-stream`), no polling. The node sends `event: block` after each block it mines (`POST /` or `POST /mine`) and `event: tx` after each transaction admitted by `POST /tx`; `data:` is the same compact one-line JSON as the `201`/`202` body of that request. The block is already readable at `GET /block/{hash}` when its event arrives.
+Server-sent events (`Content-Type: text/event-stream`), no polling. The node sends `event: block` after each block it appends and `event: tx` after each transaction it admits, whatever the source: its own mining (`POST /` or `POST /mine`), `POST /tx`, a peer's block or transaction through gossip (`POST /p2p/block` or `/p2p/tx` answered `accepted`; a `known` answer or a rejection sends nothing), sync extension (one event per block) and reorg (one event per block of the new branch, oldest first, after the switch). `data:` is the same compact one-line JSON as the `201`/`202` body of a local request. There is no `reorg` event: after a reorg a `block` event can carry an `Index` that is not above the last one seen, so compare `Index` and `PrevHash`. Transactions put back in the pool after a reorg send no `tx` event. The block is already readable at `GET /block/{hash}` when its event arrives.
 
 ```
 curl -N localhost:8080/events
@@ -492,7 +492,7 @@ event: block
 data: {"index":1,"hash":"...",...}
 ```
 
-A client that stays more than 16 events behind is disconnected (reconnect to resume; missed events are not replayed). The stream ends when the node shuts down. Other methods answer `405` with `Allow: GET, HEAD`; the rate limiter applies as on every other route. Events of blocks that arrive by other means than the local mining endpoints are out of scope.
+A client that stays more than 16 events behind is disconnected (reconnect to resume; missed events are not replayed). The stream ends when the node shuts down. Other methods answer `405` with `Allow: GET, HEAD`; the rate limiter applies as on every other route.
 
 ### Web explorer (/explorer/)
 

@@ -331,3 +331,71 @@ func TestMineAndSubmitWithoutPeersStillWork(t *testing.T) {
 		t.Fatalf("mine = %d %s", rec.Code, rec.Body)
 	}
 }
+
+// drainEvents returns the events already queued on ch.
+func drainEvents(ch chan event) []event {
+	var got []event
+
+	for {
+		select {
+		case ev := <-ch:
+			got = append(got, ev)
+		default:
+			return got
+		}
+	}
+}
+
+func TestGossipPublishesEventsOnlyWhenAccepted(t *testing.T) {
+	blk := domain.Block{Index: 4, Hash: hashX, PrevHash: hashY}
+	tx := sampleTx()
+	blkJSON, _ := json.Marshal(&blk)
+	txJSON, _ := json.Marshal(tx)
+
+	invalid := fmt.Errorf("%w: boom", p2p.ErrInvalidObject)
+
+	cases := []struct {
+		name, path, body, evName string
+		data                     []byte
+		peers                    *fakePeers
+		status                   int
+		want                     int
+	}{
+		{"block accepted", "/p2p/block", blockGossipBody(idB, blk), eventBlock, blkJSON, &fakePeers{accepted: true}, http.StatusOK, 1},
+		{"block known", "/p2p/block", blockGossipBody(idB, blk), eventBlock, blkJSON, &fakePeers{}, http.StatusOK, 0},
+		{"block bad body", "/p2p/block", "{", eventBlock, blkJSON, &fakePeers{accepted: true}, http.StatusBadRequest, 0},
+		{"block unknown peer", "/p2p/block", blockGossipBody(idB, blk), eventBlock, blkJSON, &fakePeers{accepted: true, gossipErr: p2p.ErrUnknownPeer}, http.StatusForbidden, 0},
+		{"block not on tip", "/p2p/block", blockGossipBody(idB, blk), eventBlock, blkJSON, &fakePeers{accepted: true, gossipErr: p2p.ErrNotOnTip}, http.StatusConflict, 0},
+		{"block invalid", "/p2p/block", blockGossipBody(idB, blk), eventBlock, blkJSON, &fakePeers{accepted: true, gossipErr: invalid}, http.StatusUnprocessableEntity, 0},
+		{"tx accepted", "/p2p/tx", txGossipBody(idB, tx), eventTx, txJSON, &fakePeers{accepted: true}, http.StatusOK, 1},
+		{"tx known", "/p2p/tx", txGossipBody(idB, tx), eventTx, txJSON, &fakePeers{}, http.StatusOK, 0},
+		{"tx bad body", "/p2p/tx", "{", eventTx, txJSON, &fakePeers{accepted: true}, http.StatusBadRequest, 0},
+		{"tx unknown peer", "/p2p/tx", txGossipBody(idB, tx), eventTx, txJSON, &fakePeers{accepted: true, gossipErr: p2p.ErrUnknownPeer}, http.StatusForbidden, 0},
+		{"tx invalid", "/p2p/tx", txGossipBody(idB, tx), eventTx, txJSON, &fakePeers{accepted: true, gossipErr: invalid}, http.StatusUnprocessableEntity, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ev := NewEvents()
+			ch := ev.hub.subscribe()
+
+			srv, err := NewServer(brokenChain{}, Config{P2P: c.peers, Events: ev})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			rec := do(srv.Handler(), http.MethodPost, c.path, c.body)
+			if rec.Code != c.status {
+				t.Fatalf("status = %d %s, want %d", rec.Code, rec.Body, c.status)
+			}
+
+			got := drainEvents(ch)
+			if len(got) != c.want {
+				t.Fatalf("events = %d, want %d", len(got), c.want)
+			}
+
+			if c.want == 1 && (got[0].name != c.evName || string(got[0].data) != string(c.data)) {
+				t.Fatalf("event = %s %s, want %s %s", got[0].name, got[0].data, c.evName, c.data)
+			}
+		})
+	}
+}

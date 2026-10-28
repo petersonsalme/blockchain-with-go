@@ -410,13 +410,16 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		return err
 	}
 
-	peers, err := newP2PNode(svc, os.Getenv(dataDirEnvVar), logger)
+	events := server.NewEvents()
+
+	peers, err := newP2PNode(svc, os.Getenv(dataDirEnvVar), logger, events)
 	if err != nil {
 		return err
 	}
 
 	srv, err := server.NewServer(svc, server.Config{
 		P2P:           peers,
+		Events:        events,
 		MiningTimeout: server.ParseMiningTimeout(os.Getenv(server.MiningTimeoutEnvVar)),
 		RateLimit:     server.ParseRateLimit(os.Getenv(server.RateLimitEnvVar)),
 		Logger:        logger,

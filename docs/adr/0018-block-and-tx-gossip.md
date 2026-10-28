@@ -34,5 +34,17 @@ Option 1, with these rules.
 - A peer without a `ListenAddr` (behind NAT) cannot receive pushes; it learns new blocks only through ENG-32 sync.
 - `node_id` can be spoofed by anyone who knows a connected peer's id; the rate limiter and the validation before relay are the protection. Noted in SECURITY.md.
 - The seen set forgets after 10000 hashes; a very old object could then be fetched and validated again, never accepted twice (the ledger rejects it).
-- Blocks received through gossip do not emit `GET /events` (SSE) events in this change.
+- Superseded by the ENG-219 amendment below.
 
+## Amendment (ENG-219): events for received blocks and transactions
+
+Status: Accepted (board, pending merge, ENG-219)
+
+Context: only the mining node emitted `GET /events`; on the three-node playground node1 mined block 8, all nodes reached height 8, and node2 and node3 sent no event.
+
+Decision: a node publishes `event: block` for every block it appends, whatever the source: `POST /p2p/block` answered `accepted` (published by the handler), sync extension (one per `AcceptBlock`) and reorg (one per `Reorg.Connected` block, oldest first, after `ReplaceChain`), the last two in the `cmd/bwg` sync ledger through an injected `server.Events`. `POST /p2p/tx` answered `accepted` publishes `event: tx`. `known` answers and rejected objects publish nothing. Payloads are the same as for local events. Rejected: gossip-only (a synced or reorganised node stays silent) and an append observer in `chain.Service` (core write path, double publish with `Mine`).
+
+Consequences:
+- A client sees a `block` event whose `Index` is not above the last one it saw only after a reorg; there is no `reorg` event, and clients that need one must compare `Index` and `PrevHash`.
+- An initial sync of many blocks emits one event per block; a subscriber more than 16 events behind is disconnected as before (reconnect, no replay).
+- Orphaned transactions resubmitted after a reorg emit no `tx` event.
