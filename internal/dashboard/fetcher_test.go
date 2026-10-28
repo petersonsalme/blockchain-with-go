@@ -129,6 +129,7 @@ func TestFetcherRejectsRequestsOutsideAllowlist(t *testing.T) {
 		"escaped slash addr":   dashboard.Balance(addr[:46] + "%2f.."),
 		"empty address":        dashboard.Balance(""),
 		"decimal ref overflow": dashboard.Block("99999999999999999999"),
+		"19 digit ref":         dashboard.Block(strings.Repeat("9", 19)),
 	}
 
 	for name, req := range tests {
@@ -235,5 +236,29 @@ func TestDefaultFetcherLimits(t *testing.T) {
 
 	if dashboard.DefaultTimeout != 1500*time.Millisecond || dashboard.DefaultMaxBody != 4<<20 {
 		t.Errorf("defaults = %v, %d", dashboard.DefaultTimeout, dashboard.DefaultMaxBody)
+	}
+}
+
+func TestFetcherAcceptsEighteenDigitHeight(t *testing.T) {
+	t.Parallel()
+
+	n := okNode(t)
+
+	_, err := dashboard.NewFetcher(time.Second, 1<<10).Get(context.Background(), n.node(t), dashboard.Block(strings.Repeat("9", 18)))
+	if err != nil {
+		t.Fatalf("18 digit height: %v", err)
+	}
+}
+
+func TestFetcherStatusRange(t *testing.T) {
+	t.Parallel()
+
+	for status, ok := range map[int]bool{200: true, 299: true, 300: false} {
+		n := newCountingNode(t, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status) })
+
+		_, err := dashboard.NewFetcher(time.Second, 1<<10).Get(context.Background(), n.node(t), dashboard.Health())
+		if (err == nil) != ok {
+			t.Errorf("status %d: err = %v, want ok = %v", status, err, ok)
+		}
 	}
 }

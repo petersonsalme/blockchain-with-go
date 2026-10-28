@@ -66,14 +66,19 @@ func parseNode(entry string) (Node, error) {
 		return Node{}, fmt.Errorf("invalid URL: %w", err)
 	}
 
-	switch {
-	case base.Scheme != "http" && base.Scheme != "https":
+	if base.Scheme != "http" && base.Scheme != "https" {
 		return Node{}, errors.New("the URL scheme must be http or https")
-	case base.Host == "":
+	}
+
+	if base.Host == "" {
 		return Node{}, errors.New("the URL has no host")
-	case base.User != nil:
+	}
+
+	if base.User != nil {
 		return Node{}, errors.New("the URL must have no userinfo")
-	case base.Path != "" && base.Path != "/":
+	}
+
+	if base.Path != "" && base.Path != "/" {
 		return Node{}, errors.New("the URL must have no path")
 	}
 

@@ -15,7 +15,7 @@ import (
 // Fetcher limits: below the 2 s poll interval, and room for one /blocks page of 100 blocks.
 const (
 	DefaultTimeout = 1500 * time.Millisecond
-	DefaultMaxBody = 4 << 20
+	DefaultMaxBody = 4_194_304 // 4 MiB
 )
 
 const (
