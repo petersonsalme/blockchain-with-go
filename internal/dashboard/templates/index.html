@@ -17,6 +17,10 @@
 {{- end}}
 </nav>
 </header>
-<main id="main"></main>
+<main id="main">
+{{- if .Network}}
+{{template "network" .Network}}
+{{- end}}
+</main>
 </body>
 </html>

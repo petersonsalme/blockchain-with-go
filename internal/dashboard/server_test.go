@@ -2,6 +2,7 @@ package dashboard_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -25,7 +26,29 @@ func newTestServer(t *testing.T, nodes ...*countingNode) http.Handler {
 		list = append(list, node)
 	}
 
-	h, err := dashboard.NewServer(list, dashboard.NewFetcher(time.Second, 1<<10))
+	fetch := dashboard.NewFetcher(time.Second, 1<<10)
+
+	h, err := dashboard.NewServer(list, fetch, dashboard.NewPoller(list, fetch, time.Hour, time.Now))
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	return h
+}
+
+// newTestServerWithPoller serves the nodes of p, whose names are node1, node2, ...
+func newTestServerWithPoller(t *testing.T, p *dashboard.Poller, nodes ...*chainNode) http.Handler {
+	t.Helper()
+
+	var list []dashboard.Node
+
+	for i, n := range nodes {
+		node := n.node(t)
+		node.Name = fmt.Sprintf("node%d", i+1)
+		list = append(list, node)
+	}
+
+	h, err := dashboard.NewServer(list, dashboard.NewFetcher(time.Second, 1<<10), p)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -79,7 +102,9 @@ func TestPageEscapesNodeNames(t *testing.T) {
 	node := n.node(t)
 	node.Name = `<b>"x"`
 
-	h, err := dashboard.NewServer([]dashboard.Node{node}, dashboard.NewFetcher(time.Second, 1<<10))
+	fetch := dashboard.NewFetcher(time.Second, 1<<10)
+
+	h, err := dashboard.NewServer([]dashboard.Node{node}, fetch, dashboard.NewPoller([]dashboard.Node{node}, fetch, time.Hour, time.Now))
 	if err != nil {
 		t.Fatal(err)
 	}
