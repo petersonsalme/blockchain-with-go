@@ -1,0 +1,33 @@
+{{define "tx" -}}
+<section>
+<h2>Transaction of {{.Node}}</h2>
+<dl>
+<dt>Id</dt><dd class="mono">{{.Item.Tx.ID}}</dd>
+<dt>Block</dt><dd><a href="/n/{{pe .Node}}/block/{{.Height}}">{{.Height}}</a> <span class="mono">{{.BlockHash}}</span></dd>
+</dl>
+{{template "txbody" .Item}}
+<h3>Merkle proof</h3>
+{{- with .Proof}}
+<dl>
+<dt>Merkle root</dt><dd class="mono">{{.MerkleRoot}}</dd>
+<dt>Leaf index</dt><dd>{{.LeafIndex}}</dd>
+<dt>Leaf hash</dt><dd class="mono">{{.LeafHash}}</dd>
+</dl>
+{{- if .Steps}}
+<table>
+<caption>Sibling path, leaf to root</caption>
+<thead><tr><th>Step</th><th>Side</th><th>Hash</th></tr></thead>
+<tbody>
+{{- range $i, $s := .Steps}}
+<tr><td>{{$i}}</td><td>{{$s.Side}}</td><td class="mono">{{$s.Hash}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+{{- else}}
+<p class="muted">The sibling path is empty: the leaf is the root.</p>
+{{- end}}
+{{- else}}
+<p class="muted">The node has no proof for this transaction.</p>
+{{- end}}
+</section>
+{{- end}}

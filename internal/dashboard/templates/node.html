@@ -1,0 +1,28 @@
+{{define "node" -}}
+<section>
+<h2>{{.}}</h2>
+<ul>
+<li><a href="/n/{{pe .}}/mempool">Mempool</a></li>
+<li><a href="/n/{{pe .}}/blocks">Blocks</a></li>
+<li><a href="/peers">Peers</a></li>
+</ul>
+</section>
+{{- end}}
+
+{{define "error" -}}
+<section class="error">
+<h2>{{.Status}} {{.Title}}</h2>
+<p role="alert">{{.Message}}</p>
+<p><a href="/">Back to the network</a></p>
+</section>
+{{- end}}
+
+{{define "search" -}}
+<section>
+<h2>Search</h2>
+{{- if .Miss}}
+<p role="alert">Not found: {{.Query}}</p>
+{{- end}}
+<p class="muted">Enter a block height, a block hash, a transaction id (64 hex) or an address (50 hex), all lowercase.</p>
+</section>
+{{- end}}

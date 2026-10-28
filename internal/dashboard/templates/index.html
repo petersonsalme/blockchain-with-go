@@ -10,17 +10,32 @@
 </head>
 <body>
 <header>
-<h1>bwg network</h1>
+<h1><a href="/">bwg network</a></h1>
 <nav aria-label="Nodes">
+<a href="/peers">Peers</a>
+<a href="/metrics">Metrics</a>
 {{- range .Nodes}}
-<a href="/n/{{.Name}}/"{{if eq .Name $.Current}} aria-current="page"{{end}}>{{.Name}}</a>
+<a href="/n/{{pe .Name}}/"{{if eq .Name $.Current}} aria-current="page"{{end}}>{{.Name}}</a>
 {{- end}}
 </nav>
-</header>
-<main id="main">
-{{- if .Network}}
-{{template "network" .Network}}
+<form method="get" action="/search" role="search">
+<select name="node" aria-label="Node">
+{{- range .Nodes}}
+<option value="{{.Name}}"{{if eq .Name $.Current}} selected{{end}}>{{.Name}}</option>
 {{- end}}
+</select>
+<input type="search" name="q" maxlength="128" required aria-label="Search" placeholder="height, hash, tx id or address">
+<button type="submit">Search</button>
+</form>
+</header>
+{{- if .Current}}
+<nav aria-label="Node screens" class="subnav">
+<a href="/n/{{pe .Current}}/mempool">Mempool</a>
+<a href="/n/{{pe .Current}}/blocks">Blocks</a>
+</nav>
+{{- end}}
+<main id="main">
+{{.Body}}
 </main>
 </body>
 </html>

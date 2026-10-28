@@ -7,6 +7,12 @@
   --ok: #1a7f37;
   --warn: #9a6700;
   --bad: #cf222e;
+  --series-0: #0b5cad;
+  --series-1: #bf3989;
+  --series-2: #1a7f37;
+  --series-3: #9a6700;
+  --series-4: #6e40c9;
+  --series-5: #0a7e8c;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -19,6 +25,12 @@
     --ok: #3fb950;
     --warn: #d29922;
     --bad: #f85149;
+    --series-0: #58a6ff;
+    --series-1: #ff7eb6;
+    --series-2: #3fb950;
+    --series-3: #d29922;
+    --series-4: #bc8cff;
+    --series-5: #39c5cf;
   }
 }
 
@@ -64,3 +76,39 @@ dt { color: var(--muted); }
 dd { margin: 0; }
 .tip { font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
 .peers { margin: 0.5rem 0 0; padding-left: 1.25rem; font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+
+header a { color: inherit; text-decoration: none; }
+header form { display: flex; gap: 0.5rem; margin-left: auto; }
+.subnav { display: flex; gap: 1rem; padding: 0.5rem 1.5rem; border-bottom: 1px solid var(--border); }
+.subnav a { color: var(--accent); }
+a { color: var(--accent); }
+table { border-collapse: collapse; margin: 0.5rem 0 1rem; width: 100%; }
+caption { text-align: left; color: var(--muted); }
+th, td { border: 1px solid var(--border); padding: 0.25rem 0.5rem; text-align: left; vertical-align: top; }
+td.mono, dd.mono, .mono { font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+.muted { color: var(--muted); }
+.tx { border-top: 1px solid var(--border); margin-top: 1rem; }
+.error h2 { color: var(--bad); }
+
+.inline { display: flex; gap: 0.5rem; align-items: center; margin: 1rem 0; }
+figure { margin: 0 0 1.5rem; max-width: 40rem; }
+figcaption { color: var(--muted); }
+.chart { width: 100%; height: auto; border: 1px solid var(--border); overflow: visible; }
+.chart .axis { fill: var(--muted); font-size: 9px; }
+.chart .baseline { stroke: var(--border); stroke-width: 1; }
+.bar { fill: var(--series-0); }
+.line { fill: none; stroke-width: 2; }
+.series-0 { stroke: var(--series-0); }
+.series-1 { stroke: var(--series-1); }
+.series-2 { stroke: var(--series-2); }
+.series-3 { stroke: var(--series-3); }
+.series-4 { stroke: var(--series-4); }
+.series-5 { stroke: var(--series-5); }
+.legend { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; list-style: none; margin: 0.25rem 0 0; padding: 0; }
+.swatch { display: inline-block; width: 1.5rem; height: 0.25rem; vertical-align: middle; }
+.swatch.series-0 { background: var(--series-0); }
+.swatch.series-1 { background: var(--series-1); }
+.swatch.series-2 { background: var(--series-2); }
+.swatch.series-3 { background: var(--series-3); }
+.swatch.series-4 { background: var(--series-4); }
+.swatch.series-5 { background: var(--series-5); }

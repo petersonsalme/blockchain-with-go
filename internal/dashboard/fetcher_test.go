@@ -2,6 +2,7 @@ package dashboard_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -80,6 +81,8 @@ func TestFetcherAllowlistedRequests(t *testing.T) {
 		{dashboard.TxProof(hex64), "/tx/" + hex64 + "/proof"},
 		{dashboard.Contract(hex64), "/contracts/" + hex64},
 		{dashboard.Balance(addr), "/balance/" + addr},
+		{dashboard.AddressTxs(addr, 25, ""), "/address/" + addr + "/txs?limit=25"},
+		{dashboard.AddressTxs(addr, 25, hex64), "/address/" + addr + "/txs?limit=25&after=" + hex64},
 	}
 
 	for _, tc := range tests {
@@ -128,6 +131,11 @@ func TestFetcherRejectsRequestsOutsideAllowlist(t *testing.T) {
 		"upper address":        dashboard.Balance(strings.ToUpper(addr)),
 		"escaped slash addr":   dashboard.Balance(addr[:46] + "%2f.."),
 		"empty address":        dashboard.Balance(""),
+		"history bad address":  dashboard.AddressTxs(addr[:49], 25, ""),
+		"history zero limit":   dashboard.AddressTxs(addr, 0, ""),
+		"history bad after":    dashboard.AddressTxs(addr, 25, hex64[:63]),
+		"history upper after":  dashboard.AddressTxs(addr, 25, strings.ToUpper(hex64)),
+		"history query after":  dashboard.AddressTxs(addr, 25, hex64[:50]+"&limit=1&x=2"),
 		"decimal ref overflow": dashboard.Block("99999999999999999999"),
 		"19 digit ref":         dashboard.Block(strings.Repeat("9", 19)),
 	}
@@ -260,5 +268,23 @@ func TestFetcherStatusRange(t *testing.T) {
 		if (err == nil) != ok {
 			t.Errorf("status %d: err = %v, want ok = %v", status, err, ok)
 		}
+	}
+}
+
+func TestFetcherReportsNodeStatus(t *testing.T) {
+	t.Parallel()
+
+	n := newCountingNode(t, func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "no", http.StatusUnprocessableEntity) })
+	f := dashboard.NewFetcher(time.Second, 1<<10)
+
+	_, err := f.Get(context.Background(), n.node(t), dashboard.Mempool())
+
+	var st *dashboard.StatusError
+	if !errors.As(err, &st) || st.Code != http.StatusUnprocessableEntity || st.Node != "n" || st.Path != "/mempool" {
+		t.Fatalf("err = %#v, want StatusError 422 for n /mempool", err)
+	}
+
+	if want := "node n: GET /mempool: status 422"; err.Error() != want {
+		t.Errorf("message = %q, want %q", err.Error(), want)
 	}
 }

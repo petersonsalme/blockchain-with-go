@@ -1,0 +1,45 @@
+{{define "address" -}}
+<section>
+<h2>Address on {{.Node}}</h2>
+{{- $node := .Node}}
+<dl>
+<dt>Address</dt><dd class="mono">{{.Addr}}</dd>
+<dt>Balance (base units)</dt><dd>{{.Balance}}</dd>
+</dl>
+{{- if .UTXOs}}
+<table>
+<caption>Unspent outputs</caption>
+<thead><tr><th>Transaction</th><th>Index</th><th>Amount (base units)</th></tr></thead>
+<tbody>
+{{- range .UTXOs}}
+<tr><td><a class="mono" href="/n/{{pe $node}}/tx/{{pe .TxID}}">{{.TxID}}</a></td><td>{{.Index}}</td><td>{{.Amount}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+{{- else}}
+<p class="muted">No unspent outputs.</p>
+{{- end}}
+<h3>History</h3>
+{{- if .Restarted}}
+<p role="status">The page cursor is no longer valid; showing the first page.</p>
+{{- end}}
+{{- if .PrunedBelow}}
+<p class="muted">Heights below {{.PrunedBelow}} are pruned and not listed.</p>
+{{- end}}
+{{- if .Txs}}
+<table>
+<thead><tr><th>Transaction</th><th>Block</th><th>Time</th></tr></thead>
+<tbody>
+{{- range .Txs}}
+<tr><td><a class="mono" href="/n/{{pe $node}}/tx/{{pe .Transaction.ID}}">{{.Transaction.ID}}</a></td><td><a href="/n/{{pe $node}}/block/{{.Height}}">{{.Height}}</a> <span class="mono">{{.BlockHash}}</span></td><td>{{.Timestamp.Format "2006-01-02T15:04:05Z07:00"}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+{{- else}}
+<p class="muted">No transactions.</p>
+{{- end}}
+{{- if .Next}}
+<p><a href="/n/{{pe .Node}}/address/{{pe .Addr}}?after={{.Next}}">Older transactions</a></p>
+{{- end}}
+</section>
+{{- end}}

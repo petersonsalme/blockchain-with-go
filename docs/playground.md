@@ -15,7 +15,7 @@ Every command below was run on a real playground (Docker Compose, difficulty 1).
 | 19090 | `prometheus` | `--profile observability` |
 | 13000 | `grafana` | `--profile observability` |
 
-Start the dashboard next to the network with `dc --profile dashboard up -d` (`dc` is defined below) and open `http://127.0.0.1:18080/`; the full guide comes with the dashboard screens.
+Start the dashboard next to the network with `dc --profile dashboard up -d` (`dc` is defined below) and open `http://127.0.0.1:18080/`; see "Network dashboard" below.
 
 The base network, the e2e test (`go test -tags e2e ./e2e/...`) and the playground all use 18081-18083, so **only one of them can run at a time**. Stop the others first (`docker compose down -v` for the base network; the e2e test tears down its own `bwg-e2e` project).
 
@@ -213,6 +213,95 @@ $ $B miner --node $N:18081 --count 1                  # all three values rise wi
 ```
 
 With `compose.tuning.yml`, node1 has `RATE_LIMIT=30` and a scrape every 5 s uses 12 of those requests per minute (scrapes are rate limited like any other request).
+
+## Network dashboard (`--profile dashboard`)
+
+A read-only service next to the three nodes (ADR-0023). It reads `node1..node3` by service name with a fixed list of `GET` requests, renders pages with `html/template` and refreshes panels with htmx; it holds no key, no volume and cannot mine or send. Each node still serves its own explorer at `/explorer/`; the dashboard is the view across nodes.
+
+Start it with the network up (`scripts/playground.sh` first), then open `http://127.0.0.1:18080/`:
+
+```shell
+$ dc --profile dashboard up -d --build dashboard
+$ curl -s -o /dev/null -w "%{http_code}\n" $N:18080/
+200
+```
+
+Screens (the top bar links them; the search box takes a height, a block or transaction hash, or an address, and a node):
+
+| Screen | Path | What it shows |
+|---|---|---|
+| Network | `/` | one card per node (height, tip, peers, time since the last block), and the banner. The poller reads the nodes every 2 s; opening the page never reads a node |
+| Peers | `/peers` | connected and known peers of every node |
+| Metrics | `/metrics` | key figures per node and two charts, below |
+| Node | `/n/<node>/` | links to Mempool, Blocks and Peers of one node |
+| Mempool, Blocks | `/n/<node>/mempool`, `/n/<node>/blocks` | pending transactions by fee rate; the chain, 20 blocks per page |
+| Block, transaction, address, contract | `/n/<node>/block/<height or hash>`, `/tx/<id>`, `/address/<addr>`, `/contract/<id>` | detail views, with the Merkle proof of a transaction and the unspent outputs of an address |
+
+The pages work in light and dark (`prefers-color-scheme`), use no inline script or style and run under the same content policy as the node explorer.
+
+### The banner
+
+| Banner | Meaning |
+|---|---|
+| `Network in agreement` | every reachable node reports the same height and tip |
+| `Network syncing` | reachable nodes report different heights (the card of a node that trails says `behind by N`), or the same height with different tips for fewer than three polls |
+| `Fork: nodes report different tips at height H` | the same height with different tips on three consecutive polls (a single poll is only a block in flight) |
+| `No node reachable` | no node answered `/health` |
+| `... · N of M unreachable` | added to any of the first three when some nodes did not answer; an unreachable node keeps its last known height on the card |
+
+### Metrics screen
+
+The table reads each node's `/metrics`: `blockchain_blocks`, the mean mining time (`blockchain_mining_duration_seconds` sum divided by count, `n/a` while the node mined nothing, as on node2 and node3, which only receive blocks) and `http_requests_total` added up by status class (`4xx` leaves out `429`, which has its own column). A node that does not answer, or whose text does not parse, shows `n/a` on its row; the other rows are not affected. The page refreshes the table every 2 s. Compare it with the node itself (the request counters keep growing with the peer traffic and with the dashboard's own reads, so compare them at one instant; blocks and mining time only move when a block is mined):
+
+```shell
+$ curl -s $N:18081/metrics | grep -E '^(blockchain_blocks|blockchain_mining_duration_seconds_(sum|count)) '
+blockchain_blocks 6
+blockchain_mining_duration_seconds_sum 0.005231223
+blockchain_mining_duration_seconds_count 5
+$ curl -s $N:18080/fragments/metrics | grep '<td>node1</td>'
+<tr><td>node1</td><td>6</td><td>0.001046 s</td><td>1124</td><td>0</td><td>0</td><td>0</td></tr>
+```
+
+(0.005231223 / 5 = 0.001046 s.) Below the table, every 10 s:
+
+- **Block interval**: one bar per pair of consecutive blocks among the last 50 headers of the node chosen in the selector (one `GET /headers` per refresh); the scale is the largest bar, printed top left. In the playground the first bar is the time from the fixed genesis (`GENESIS_TIME` in `docker-compose.yml`) to block 1, which dwarfs the others until more blocks are mined.
+- **Height per node**: one line per node over the poller's last 60 polls (about two minutes), on one shared scale. The history lives in the dashboard process and starts empty on restart; reading it costs no request to the nodes.
+
+For time series, retention and alerts use the `observability` profile (Prometheus and Grafana, below), not the dashboard.
+
+### Walkthrough: stop node3
+
+```shell
+$ curl -s $N:18080/fragments/network | grep -E 'class="banner|class="status'
+<p class="banner banner-agreement" role="status">Network in agreement</p>
+<p class="status">up to date</p>
+<p class="status">up to date</p>
+<p class="status">up to date</p>
+$ dc stop node3
+ Container bwg-playground-node3-1 Stopped
+$ curl -s $N:18080/fragments/network | grep -E 'class="banner|class="status'
+<p class="banner banner-agreement" role="status">Network in agreement · 1 of 3 unreachable</p>
+<p class="status">up to date</p>
+<p class="status">up to date</p>
+<p class="status">unreachable, last known height 5</p>
+$ $B miner --node $N:18081 --count 2
+block 6 04128141cfaaad2a5ea3e76fdb9ba1fc38aaadd825466203988a18b1f16026ce txs=1
+block 7 57796859b58050944c156256cfb0434bc556230e2919c6b93555365f9503a6ae txs=1
+$ curl -s $N:18080/fragments/network | grep -E 'class="banner|class="status'
+<p class="banner banner-agreement" role="status">Network in agreement · 1 of 3 unreachable</p>
+<p class="status">up to date</p>
+<p class="status">up to date</p>
+<p class="status">unreachable, last known height 5 (behind by 2)</p>
+$ dc start node3
+ Container bwg-playground-node3-1 Started
+$ curl -s $N:18080/fragments/network | grep -E 'class="banner|class="status'
+<p class="banner banner-agreement" role="status">Network in agreement</p>
+<p class="status">up to date</p>
+<p class="status">up to date</p>
+<p class="status">up to date</p>
+```
+
+The agreement is among the nodes that answer; the banner says how many do not. The stopped node keeps its last known height on its card and shows how far behind it is once the others move on. After `dc start node3` it syncs the two blocks on its own (a few seconds) and the last poll above shows three nodes up to date.
 
 ## Restart sync (stop and start node3)
 
