@@ -23,12 +23,14 @@ type server struct {
 	nodes []Node
 	known map[string]bool
 	fetch *Fetcher
+	poll  *Poller
 	tmpl  *template.Template
 }
 
 // NewServer returns the dashboard handler: a page shell and static files, serving only GET and
-// HEAD. Node reads go through fetch, to the nodes listed here and nowhere else.
-func NewServer(nodes []Node, fetch *Fetcher) (http.Handler, error) {
+// HEAD. Node reads go through fetch, to the nodes listed here and nowhere else; the Network screen
+// shows what poll last learned and never reaches a node itself.
+func NewServer(nodes []Node, fetch *Fetcher, poll *Poller) (http.Handler, error) {
 	tmpl, err := template.ParseFS(templateFiles, "templates/*.html")
 	if err != nil {
 		return nil, err
@@ -39,7 +41,7 @@ func NewServer(nodes []Node, fetch *Fetcher) (http.Handler, error) {
 		return nil, err
 	}
 
-	s := &server{nodes: nodes, known: map[string]bool{}, fetch: fetch, tmpl: tmpl}
+	s := &server{nodes: nodes, known: map[string]bool{}, fetch: fetch, poll: poll, tmpl: tmpl}
 	for _, n := range nodes {
 		s.known[n.Name] = true
 	}
@@ -48,6 +50,7 @@ func NewServer(nodes []Node, fetch *Fetcher) (http.Handler, error) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.page)
+	mux.HandleFunc("GET /fragments/network", s.networkFragment)
 	mux.HandleFunc("GET /n/{node}/{$}", s.nodePage)
 	mux.HandleFunc("GET /static/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/") { // no directory listing
@@ -73,7 +76,22 @@ func secure(next http.Handler) http.Handler {
 }
 
 func (s *server) page(w http.ResponseWriter, _ *http.Request) {
-	s.render(w, "")
+	view := s.poll.View()
+	s.render(w, "", &view)
+}
+
+func (s *server) networkFragment(w http.ResponseWriter, _ *http.Request) {
+	var buf bytes.Buffer
+
+	err := s.tmpl.ExecuteTemplate(&buf, "network", s.poll.View())
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(buf.Bytes())
 }
 
 // nodePage answers only for a configured node: the name comes from the config, never the URL.
@@ -85,16 +103,17 @@ func (s *server) nodePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.render(w, name)
+	s.render(w, name, nil)
 }
 
-func (s *server) render(w http.ResponseWriter, current string) {
+func (s *server) render(w http.ResponseWriter, current string, network *View) {
 	var buf bytes.Buffer
 
 	err := s.tmpl.ExecuteTemplate(&buf, "index.html", struct {
 		Nodes   []Node
 		Current string
-	}{s.nodes, current})
+		Network *View
+	}{s.nodes, current, network})
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 

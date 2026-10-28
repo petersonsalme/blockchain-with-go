@@ -1,0 +1,34 @@
+{{define "network" -}}
+<section id="network" hx-get="/fragments/network" hx-trigger="every 2s" hx-swap="outerHTML">
+<p class="banner banner-{{.Assessment.State}}" role="status">{{.Banner}}</p>
+<div class="cards">
+{{- range .Cards}}
+<article class="card{{if not .Reachable}} card-down{{end}}">
+<h2>{{.Name}}</h2>
+{{- if .Reachable}}
+<p class="status">{{if .Behind}}behind by {{.Behind}}{{else}}up to date{{end}}</p>
+{{- else}}
+<p class="status">unreachable{{if .Seen}}, last known height {{.Height}}{{if .Behind}} (behind by {{.Behind}}){{end}}{{end}}</p>
+{{- end}}
+{{- if .Seen}}
+<dl>
+<dt>Height</dt><dd>{{.Height}}</dd>
+<dt>Tip</dt><dd class="tip">{{.Tip}}</dd>
+{{- if .Reachable}}
+<dt>Peers</dt><dd>{{.Peers}}</dd>
+<dt>Last block</dt><dd>{{.Since}}</dd>
+{{- end}}
+</dl>
+{{- if .PeerAddrs}}
+<ul class="peers">
+{{- range .PeerAddrs}}
+<li>{{.}}</li>
+{{- end}}
+</ul>
+{{- end}}
+{{- end}}
+</article>
+{{- end}}
+</div>
+</section>
+{{- end}}

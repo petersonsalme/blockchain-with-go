@@ -49,10 +49,27 @@ func serveDashboard(ctx context.Context, logger *slog.Logger, ln net.Listener, n
 		return err
 	}
 
-	handler, err := dashboard.NewServer(nodes, dashboard.NewFetcher(dashboard.DefaultTimeout, dashboard.DefaultMaxBody))
+	fetch := dashboard.NewFetcher(dashboard.DefaultTimeout, dashboard.DefaultMaxBody)
+	poller := dashboard.NewPoller(nodes, fetch, dashboard.DefaultInterval, time.Now)
+
+	handler, err := dashboard.NewServer(nodes, fetch, poller)
 	if err != nil {
 		return err
 	}
+
+	pollCtx, stopPoller := context.WithCancel(ctx)
+	pollDone := make(chan struct{})
+
+	go func() {
+		defer close(pollDone)
+
+		poller.Run(pollCtx)
+	}()
+
+	defer func() {
+		stopPoller()
+		<-pollDone
+	}()
 
 	httpSrv := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	errCh := make(chan error, 1)
