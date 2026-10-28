@@ -2,14 +2,13 @@ package dashboard
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
-	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -503,8 +502,12 @@ func (s *server) loadContract(r *http.Request, node Node) (any, *pageError) {
 	}
 
 	// Keys are decimal strings: shorter is smaller, then text order.
-	slices.SortFunc(cells, func(a, b storageCell) int {
-		return cmp.Or(cmp.Compare(len(a.Key), len(b.Key)), strings.Compare(a.Key, b.Key))
+	sort.Slice(cells, func(i, j int) bool {
+		if len(cells[i].Key) != len(cells[j].Key) {
+			return len(cells[i].Key) < len(cells[j].Key)
+		}
+
+		return cells[i].Key < cells[j].Key
 	})
 
 	return contractView{Node: node.Name, ID: body.ID, Code: body.Code, Storage: cells}, nil
@@ -522,25 +525,27 @@ func (s *server) search(w http.ResponseWriter, r *http.Request) {
 	}
 
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	if len(q) > maxQueryLen {
-		q = ""
-	}
-
 	base := "/n/" + url.PathEscape(node.Name)
 
 	var loc string
 
 	switch {
+	case len(q) > maxQueryLen:
 	case isDecimal(q):
 		loc = base + "/block/" + q
 	case isLowerHex(q, hexIDLen):
 		loc = base + "/block/" + q
 
 		_, err := s.fetch.Get(r.Context(), node, Tx(q))
-		if err == nil {
+
+		var st *StatusError
+
+		switch {
+		case err == nil:
 			loc = base + "/tx/" + q
-		} else if perr := nodeFailure(node, err); perr.Status != http.StatusNotFound {
-			s.fail(w, node.Name, perr)
+		case errors.As(err, &st) && st.Code == http.StatusNotFound:
+		default:
+			s.fail(w, node.Name, nodeFailure(node, err))
 
 			return
 		}
@@ -556,7 +561,12 @@ func (s *server) search(w http.ResponseWriter, r *http.Request) {
 
 	var buf bytes.Buffer
 
-	err := s.tmpl.ExecuteTemplate(&buf, "search", searchView{Node: node.Name, Query: q, Miss: q != ""})
+	view := searchView{Node: node.Name, Query: q, Miss: q != ""}
+	if len(q) > maxQueryLen {
+		view.Query = ""
+	}
+
+	err := s.tmpl.ExecuteTemplate(&buf, "search", view)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 
