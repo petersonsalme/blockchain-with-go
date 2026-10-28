@@ -3,12 +3,13 @@
 
 > # ⚠️ IMPORTANT DISCLAIMER
 >
-> **This is an old, personal learning project about blockchain.** It is an educational exercise only.
+> **This is a personal study project about blockchain, built with professional engineering practice.** The chain core (consensus, UTXO, validation, mempool, gossip, sync and reorg) is written by hand to learn it; the tooling around it uses market standards ([ADR-0021](docs/adr/0021-professional-grade-study-reference.md)). It started as an old learning project and it is still an educational exercise.
 >
-> **Today, it is being used as a pilot project to evaluate the adoption of [Paperclip](https://github.com/paperclipai/paperclip) with AI agents.** Every improvement, refactor, test, document and architectural change made to this repository since then is **purely an AI-generated suggestion** and nothing more.
+> **It is also a pilot project to evaluate the adoption of [Paperclip](https://github.com/paperclipai/paperclip) with AI agents.** Every improvement, refactor, test, document and architectural change made to this repository since then is **purely an AI-generated suggestion** and nothing more.
 >
-> - ❌ It is **NOT** production-ready, audited, or secure. **Do not use it to hold, move or represent real value.**
-> - ❌ It is **NOT** an official product, reference implementation, or statement of any company.
+> - ❌ It is **NOT** production-ready, audited, or secure. **Do not use it to hold, move or represent real value.** "Professional-grade" describes how it is built (ADRs, tests, CI gates), not fitness for production.
+> - ❌ It has **NO** TLS and **NO** authentication: the HTTP API and the peer-to-peer protocol are plain HTTP, rate limiting is off by default, and any client that reaches a node can call it (see [SECURITY.md](SECURITY.md)).
+> - ❌ It is **NOT** an official product, a reference implementation of any protocol, or a statement of any company.
 > - ❌ It is **NOT** affiliated with, endorsed by, or related to the work, products, or views of the author's employer, clients, or any other organization.
 > - ❌ The AI-suggested changes do **NOT** represent professional advice, engineering recommendations, or best practices vetted by the author's employer or clients.
 >

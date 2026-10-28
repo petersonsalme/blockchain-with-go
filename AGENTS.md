@@ -86,6 +86,6 @@ Everything else (HTTP handlers and DTOs, logging, docs, README, CLI, build files
    - Mutation threshold: zero `LIVED` or `NOT COVERED` mutants on the lines changed by the diff. An equivalent mutant is only accepted if it is listed in the QA report with a one-line justification and the reviewer agrees. A surviving mutant remains blocking.
 2. **Best Practices:**
    - Keep Go code idiomatic (explicit error handling, concise naming).
-   - Do not add heavy dependencies without justifiable need.
+   - Write by hand what the project exists to teach (consensus, UTXO, validation, mempool, gossip semantics, sync and reorg, persisted schema). Add a market tool around that core (observability, dashboards, TLS, indexing, UI, tooling) only when it meets the criteria of [ADR-0021](docs/adr/0021-professional-grade-study-reference.md); the ADR that adopts it lists the modules it adds to `go.mod`.
    - Commit messages following Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`).
    - Replies to the user in Brazilian Portuguese; code and commits in English.
