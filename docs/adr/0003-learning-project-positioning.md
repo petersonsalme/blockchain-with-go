@@ -1,6 +1,6 @@
 # ADR-0003: Position the repository as a personal learning project with an AI-generated-changes disclaimer
 
-Status: Accepted (2026-10-19)
+Status: Superseded by [ADR-0021](0021-professional-grade-study-reference.md) (ENG-218); accepted 2026-10-19.
 
 ## Context
 - The repository is an old personal learning project about blockchain in Go.

@@ -128,7 +128,7 @@ Design decisions live in [`docs/adr/`](docs/adr/0009-merkle-tree.md):
 |---|---|
 | [0001](docs/adr/0001-utxo-model.md) | Transaction model: UTXO replaces account/nonce |
 | [0002](docs/adr/0002-genesis-allocations-env-var.md) | Genesis funding comes from `GENESIS_ALLOCATIONS` |
-| [0003](docs/adr/0003-learning-project-positioning.md) | Personal learning project with an AI-generated-changes disclaimer |
+| [0003](docs/adr/0003-learning-project-positioning.md) | Personal learning project with an AI-generated-changes disclaimer (superseded by 0021) |
 | [0004](docs/adr/0004-disk-storage.md) | Disk storage: bbolt adapter with in-memory derived UTXO set |
 | [0005](docs/adr/0005-poa-block-seal.md) | Proof of Authority seal fields on Block |
 | [0006](docs/adr/0006-stdlib-servemux-routing.md) | HTTP routing with the standard library `ServeMux` instead of gorilla/mux |
@@ -142,6 +142,7 @@ Design decisions live in [`docs/adr/`](docs/adr/0009-merkle-tree.md):
 | [0016](docs/adr/0016-bwg-cli-composition-root.md) | One `bwg` binary is the composition root; `bwg node` replaces `cmd/node` |
 | [0017](docs/adr/0017-hd-wallet-slip10.md) | HD wallet: BIP-39 mnemonics with SLIP-0010 ed25519 derivation (hardened only) |
 | [0020](docs/adr/0020-genesis-time.md) | Deterministic genesis time from `GENESIS_TIME` |
+| [0021](docs/adr/0021-professional-grade-study-reference.md) | Professional-grade study reference: hand-written chain core, market tools around it, never for real value |
 
 ## Configuration & Environment Variables
 
