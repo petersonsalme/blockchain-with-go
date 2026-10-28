@@ -120,7 +120,7 @@ var _ = Describe("GET /address/{addr}/txs", func() {
 
 		pages := 0
 
-		for {
+		for range 10 {
 			rec, body := get(path)
 			Expect(rec.Code).To(Equal(http.StatusOK))
 			Expect(body.Limit).To(Equal(2))

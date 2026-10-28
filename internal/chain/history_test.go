@@ -125,7 +125,7 @@ var _ = Describe("Service.AddressHistory", func() {
 							after string
 						)
 
-						for {
+						for range 2 * len(want) {
 							page, err := svc.AddressHistory(f.owner.Address(), after, limit)
 							Expect(err).NotTo(HaveOccurred())
 							Expect(len(page.Txs)).To(BeNumerically("<=", limit))
