@@ -1,28 +1,35 @@
 {{define "node" -}}
-<section>
-<h2>{{.}}</h2>
-<ul>
-<li><a href="/n/{{pe .}}/mempool">Mempool</a></li>
-<li><a href="/n/{{pe .}}/blocks">Blocks</a></li>
-<li><a href="/peers">Peers</a></li>
-</ul>
-</section>
+<div class="page-head">
+<div class="page-title"><h1>{{.Name}}</h1>{{with .Card}}<span class="badge badge--{{.Level}}">{{.Status}}</span>{{end}}</div>
+</div>
+{{- with .Card}}{{if .Seen}}
+<div class="stats">
+<div class="stat"><span class="stat-label">Height</span><span class="stat-value">{{.Height}}</span></div>
+<div class="stat"><span class="stat-label">Tip</span><span class="stat-value"><a class="hash" href="/n/{{pe .Name}}/block/{{pe .Tip}}" title="{{.Tip}}"><span class="hash-start">{{hstart .Tip}}</span><span class="hash-end">{{hend .Tip}}</span></a></span></div>
+<div class="stat"><span class="stat-label">Peers</span><span class="stat-value">{{.Peers}}</span></div>
+<div class="stat"><span class="stat-label">Last block</span><span class="stat-value">{{.Since}}</span></div>
+</div>
+{{- end}}{{end}}
+<div class="tiles">
+<a class="tile" href="/n/{{pe .Name}}/blocks"><span class="tile-title">Blocks</span><span class="tile-desc">The chain from tip to genesis, 20 per page</span></a>
+<a class="tile" href="/n/{{pe .Name}}/mempool"><span class="tile-title">Mempool</span><span class="tile-desc">Pending transactions by fee rate</span></a>
+<a class="tile" href="/peers"><span class="tile-title">Peers</span><span class="tile-desc">Connected and known peers</span></a>
+</div>
 {{- end}}
 
 {{define "error" -}}
-<section class="error">
-<h2>{{.Status}} {{.Title}}</h2>
-<p role="alert">{{.Message}}</p>
-<p><a href="/">Back to the network</a></p>
+<section class="error{{if eq .Status 404}} error--notfound{{end}}" aria-labelledby="err-title">
+<p class="error-code"><span aria-hidden="true">{{if eq .Status 404}}?{{else}}✕{{end}}</span>{{.Status}} · {{.Title}}</p>
+<h1 class="error-title" id="err-title">{{.Title}}</h1>
+<p class="error-text" role="alert">{{.Message}}</p>
+<div class="error-actions"><a class="btn btn--primary" href="/">Back to the network</a></div>
 </section>
 {{- end}}
 
 {{define "search" -}}
-<section>
-<h2>Search</h2>
+<div class="page-head"><h1>Search</h1></div>
 {{- if .Miss}}
-<p role="alert">Not found: {{.Query}}</p>
+<p class="error-text" role="alert">Not found: {{.Query}}</p>
 {{- end}}
-<p class="muted">Enter a block height, a block hash, a transaction id (64 hex) or an address (50 hex), all lowercase.</p>
-</section>
+<p class="note">Enter a block height, a block hash, a transaction id (64 hex) or an address (50 hex), all lowercase.</p>
 {{- end}}

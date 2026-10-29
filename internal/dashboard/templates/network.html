@@ -1,34 +1,98 @@
-{{define "network" -}}
-<section id="network" hx-get="/fragments/network" hx-trigger="every 2s" hx-swap="outerHTML">
-<p class="banner banner-{{.Assessment.State}}" role="status">{{.Banner}}</p>
-<div class="cards">
-{{- range .Cards}}
-<article class="card{{if not .Reachable}} card-down{{end}}">
-<h2>{{.Name}}</h2>
-{{- if .Reachable}}
-<p class="status">{{if .Behind}}behind by {{.Behind}}{{else}}up to date{{end}}</p>
-{{- else}}
-<p class="status">unreachable{{if .Seen}}, last known height {{.Height}}{{if .Behind}} (behind by {{.Behind}}){{end}}{{end}}</p>
-{{- end}}
-{{- if .Seen}}
+{{define "networkpage" -}}
+<div class="page-head">
+<div class="page-title"><h1>Network</h1>
+<span class="info">{{template "infobtn" "network-help"}}<span class="info-tip" id="network-help" role="tooltip">
+<p><strong>How to read this page.</strong> It refreshes every 2 seconds and only reads the nodes; it never changes them.</p>
 <dl>
-<dt>Height</dt><dd>{{.Height}}</dd>
-<dt>Tip</dt><dd class="tip">{{.Tip}}</dd>
-{{- if .Reachable}}
-<dt>Peers</dt><dd>{{.Peers}}</dd>
-<dt>Last block</dt><dd>{{.Since}}</dd>
-{{- end}}
+<dt>Green</dt><dd>every reachable node is on the same tip: the network agrees.</dd>
+<dt>Amber</dt><dd>syncing: nodes are at different heights, or at the same height with different tips for fewer than three polls (two nodes may just have mined at once).</dd>
+<dt>Red</dt><dd>fork: nodes stay on different tips at the same height for three or more polls; or no node answers.</dd>
 </dl>
-{{- if .PeerAddrs}}
-<ul class="peers">
-{{- range .PeerAddrs}}
-<li>{{.}}</li>
+<dl>
+<dt>Height</dt><dd>the highest block among the reachable nodes.</dd>
+<dt>Agree</dt><dd>nodes on the most common tip, out of all configured nodes.</dd>
+<dt>Reachable</dt><dd>nodes that answered the last poll.</dd>
+</dl>
+<dl>
+<dt>≠</dt><dd>this tip differs from the majority. It appears only when a fork is confirmed.</dd>
+<dt>Behind by N</dt><dd>the node trails the highest one by N blocks and is catching up.</dd>
+<dt>Unreachable</dt><dd>the node did not answer; its last known height is kept.</dd>
+</dl>
+<p>A hash is cut in the middle to fit: hover it for the full value, or open it to see the block.</p>
+</span>
+</span>
+</div>
+</div>
+{{template "network" .}}
+{{- end}}
+
+{{define "sidebar" -}}
+<ul class="nav-list" id="sidebar-nodes" aria-labelledby="nav-nodes" hx-get="/fragments/sidebar" hx-trigger="every 2s" hx-swap="outerHTML">
+{{- range .}}
+<li><a class="nav-link nav-node nav-node--{{.Level}}{{if not .Reachable}} nav-node--down{{end}}" href="/n/{{pe .Name}}/"><span class="dot dot--{{.Level}}" aria-hidden="true"></span><span class="nav-node-name">{{.Name}}</span>{{if .Seen}}<span class="nav-node-height">#{{.Height}}</span>{{end}}<span class="nav-node-status">{{.Status}}</span></a></li>
 {{- end}}
 </ul>
 {{- end}}
-{{- end}}
-</article>
-{{- end}}
+
+{{define "network" -}}
+<section id="network" class="stack stack--lg" hx-get="/fragments/network" hx-trigger="every 2s" hx-swap="outerHTML">
+{{- $level := "ok"}}{{if eq .Assessment.State.String "syncing"}}{{$level = "warn"}}{{else if eq .Assessment.State.String "fork"}}{{$level = "bad"}}{{else if eq .Assessment.State.String "none"}}{{$level = "bad"}}{{end}}
+<div class="banner banner--{{$level}} banner-{{.Assessment.State.String}}" role="status">
+<span class="banner-icon" aria-hidden="true">{{if eq $level "ok"}}✓{{else if eq .Assessment.State.String "fork"}}⑂{{else if eq .Assessment.State.String "syncing"}}▲{{else}}✕{{end}}</span>
+<div class="banner-body"><h2 class="banner-title">{{.Banner}}</h2></div>
+<div class="banner-kpis">
+<div class="kpi"><span class="kpi-label">Height</span><span class="kpi-value">{{.Assessment.Height}}</span></div>
+<div class="kpi"><span class="kpi-label">Agree</span><span class="kpi-value">{{.Agree}}/{{.Assessment.Total}}</span></div>
+<div class="kpi"><span class="kpi-label">Reachable</span><span class="kpi-value">{{.Reachable}}/{{.Assessment.Total}}</span></div>
 </div>
+</div>
+<section class="section" aria-labelledby="cmp-title">
+<div class="section-head"><h2 class="section-title" id="cmp-title">Node comparison</h2><span class="section-meta">≠ marks a tip that differs from the majority</span></div>
+<div class="matrix-wrap" role="region" aria-labelledby="cmp-title" tabindex="0">
+<table class="matrix">
+<thead><tr><td class="matrix-corner"></td>
+{{- range .Cards}}
+<th scope="col"><span class="matrix-node"><span class="dot dot--{{.Level}}" aria-hidden="true"></span><a href="/n/{{pe .Name}}/">{{.Name}}</a></span></th>
+{{- end}}
+</tr></thead>
+<tbody>
+<tr><th scope="row">Status</th>
+{{- range .Cards}}
+<td><span class="badge badge--{{.Level}}"><span class="badge-icon" aria-hidden="true">{{if eq .Level "ok"}}✓{{else if eq .Level "warn"}}▲{{else}}✕{{end}}</span>{{if not .Reachable}}{{if .Seen}}unreachable, last known height {{.Height}}{{if .Behind}} (behind by {{.Behind}}){{end}}{{else}}unreachable{{end}}{{else if .Behind}}behind by {{.Behind}}{{else if .Differs}}different tip{{else}}up to date{{end}}</span></td>
+{{- end}}
+</tr>
+<tr><th scope="row">Height</th>
+{{- range .Cards}}
+<td>{{if .Seen}}<span class="cell-big">{{.Height}}</span>{{else}}<span class="empty-value">—</span>{{end}}</td>
+{{- end}}
+</tr>
+<tr><th scope="row">Tip</th>
+{{- range .Cards}}
+{{- if .Seen}}
+<td{{if .Differs}} class="cell-diff"{{end}}><span class="cell">{{if .Differs}}<span class="cell-mark" aria-hidden="true">≠</span><span class="sr-only">differs: </span>{{end}}<a class="hash tip" href="/n/{{pe .Name}}/block/{{pe .Tip}}" title="{{.Tip}}"><span class="hash-start">{{hstart .Tip}}</span><span class="hash-end">{{hend .Tip}}</span></a></span></td>
+{{- else}}
+<td><span class="empty-value">—</span></td>
+{{- end}}
+{{- end}}
+</tr>
+<tr><th scope="row">Peers</th>
+{{- range .Cards}}
+<td>{{if .Reachable}}{{.Peers}}{{else}}<span class="empty-value">—</span>{{end}}</td>
+{{- end}}
+</tr>
+<tr><th scope="row">Last block</th>
+{{- range .Cards}}
+<td>{{if .Reachable}}{{.Since}}{{else}}<span class="empty-value">—</span>{{end}}</td>
+{{- end}}
+</tr>
+<tr><th scope="row">Peer addresses</th>
+{{- range .Cards}}
+<td>{{range .PeerAddrs}}<code>{{.}}</code> {{else}}<span class="empty-value">—</span>{{end}}</td>
+{{- end}}
+</tr>
+</tbody>
+</table>
+</div>
+</section>
 </section>
 {{- end}}

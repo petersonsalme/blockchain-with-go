@@ -230,7 +230,7 @@ Screens (the top bar links them; the search box takes a height, a block or trans
 
 | Screen | Path | What it shows |
 |---|---|---|
-| Network | `/` | one card per node (height, tip, peers, time since the last block), and the banner. The poller reads the nodes every 2 s; opening the page never reads a node |
+| Network | `/` | the banner with Height, Agree and Reachable, and a comparison matrix with one column per node (status, height, tip, peers, last block, peer addresses; a tip that differs from the majority is marked ≠). The sidebar lists the nodes with their state on every screen. The poller reads the nodes every 2 s; opening the page never reads a node |
 | Peers | `/peers` | connected and known peers of every node |
 | Metrics | `/metrics` | key figures per node and two charts, below |
 | Node | `/n/<node>/` | links to Mempool, Blocks and Peers of one node |
@@ -244,10 +244,10 @@ The pages work in light and dark (`prefers-color-scheme`), use no inline script 
 | Banner | Meaning |
 |---|---|
 | `Network in agreement` | every reachable node reports the same height and tip |
-| `Network syncing` | reachable nodes report different heights (the card of a node that trails says `behind by N`), or the same height with different tips for fewer than three polls |
+| `Network syncing` | reachable nodes report different heights (the column of a node that trails says `behind by N`), or the same height with different tips for fewer than three polls |
 | `Fork: nodes report different tips at height H` | the same height with different tips on three consecutive polls (a single poll is only a block in flight) |
 | `No node reachable` | no node answered `/health` |
-| `... · N of M unreachable` | added to any of the first three when some nodes did not answer; an unreachable node keeps its last known height on the card |
+| `... · N of M unreachable` | added to any of the first three when some nodes did not answer; an unreachable node keeps its last known height in the matrix |
 
 ### Metrics screen
 
@@ -301,7 +301,7 @@ $ curl -s $N:18080/fragments/network | grep -E 'class="banner|class="status'
 <p class="status">up to date</p>
 ```
 
-The agreement is among the nodes that answer; the banner says how many do not. The stopped node keeps its last known height on its card and shows how far behind it is once the others move on. After `dc start node3` it syncs the two blocks on its own (a few seconds) and the last poll above shows three nodes up to date.
+The agreement is among the nodes that answer; the banner says how many do not. The stopped node keeps its last known height in the matrix and shows how far behind it is once the others move on. After `dc start node3` it syncs the two blocks on its own (a few seconds) and the last poll above shows three nodes up to date.
 
 ## Restart sync (stop and start node3)
 

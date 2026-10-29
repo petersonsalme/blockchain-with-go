@@ -1,17 +1,29 @@
+{{define "blockspage" -}}
+<div class="page-head"><div class="page-title"><h1>Blocks of {{.Node}}</h1><span class="info">{{template "infobtn" "blocks-help"}}<span class="info-tip" id="blocks-help" role="tooltip">
+<p><strong>How to read this page.</strong> The chain stored by this node, 20 blocks per page.</p>
+<dl>
+<dt>Height</dt><dd>the position in the chain; 0 is the genesis block.</dd>
+<dt>Hash</dt><dd>identifies the block. It covers the header, including the Merkle root of the transactions.</dd>
+<dt>Transactions</dt><dd>how many the block carries. In a mined block the first one is the coinbase, the miner's reward.</dd>
+<dt>Validator</dt><dd>set only with proof of authority; proof-of-work blocks have none.</dd>
+</dl>
+</span></span></div></div>
+{{template "blocks" .}}
+{{- end}}
+
 {{define "blocks" -}}
-<section id="blocks"{{if .Poll}} hx-get="/fragments/n/{{pe .Node}}/blocks" hx-trigger="every 2s" hx-swap="outerHTML"{{end}}>
-<h2>Blocks of {{.Node}}</h2>
+<section id="blocks" class="stack"{{if .Poll}} hx-get="/fragments/n/{{pe .Node}}/blocks" hx-trigger="every 2s" hx-swap="outerHTML"{{end}}>
 {{- $node := .Node}}
-<table>
-<thead><tr><th>Height</th><th>Hash</th><th>Time</th><th>Transactions</th><th>Validator</th></tr></thead>
+<div class="table-wrap"><table class="table">
+<thead><tr><th scope="col">Height</th><th scope="col">Hash</th><th scope="col" class="hide-sm">Time</th><th scope="col" class="col-num">Transactions</th><th scope="col" class="hide-sm">Validator</th></tr></thead>
 <tbody>
 {{- range .Blocks}}
-<tr><td><a href="/n/{{pe $node}}/block/{{.Index}}">{{.Index}}</a></td><td class="mono">{{.Hash}}</td><td>{{.Timestamp.Format "2006-01-02T15:04:05Z07:00"}}</td><td>{{len .Transactions}}</td><td class="mono">{{.Validator}}</td></tr>
+<tr><td class="col-fit col-main"><a href="/n/{{pe $node}}/block/{{.Index}}">{{.Index}}</a></td><td class="col-hash">{{if .Hash}}<a class="hash" href="/n/{{pe $node}}/block/{{.Index}}" title="{{.Hash}}"><span class="hash-start">{{hstart .Hash}}</span><span class="hash-end">{{hend .Hash}}</span></a>{{else}}<span class="empty-value">no hash</span> <span class="tag">genesis</span>{{end}}</td><td class="nowrap hide-sm">{{.Timestamp.Format "2006-01-02T15:04:05Z07:00"}}</td><td class="col-num">{{len .Transactions}}</td><td class="hide-sm mono">{{if .Validator}}{{.Validator}}{{else}}<span class="empty-value">—</span>{{end}}</td></tr>
 {{- end}}
 </tbody>
-</table>
+</table></div>
 {{- if .Next}}
-<p><a href="/n/{{pe .Node}}/blocks?from={{.Next}}">Next page</a></p>
+<nav class="pager" aria-label="Pagination"><ul class="pager-list"><li><a class="pager-link" href="/n/{{pe .Node}}/blocks?from={{.Next}}">Next page</a></li></ul></nav>
 {{- end}}
 </section>
 {{- end}}

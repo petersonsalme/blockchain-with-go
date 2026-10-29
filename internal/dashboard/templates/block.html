@@ -1,16 +1,25 @@
 {{define "block" -}}
-<section>
-<h2>Block {{.Block.Index}} of {{.Node}}</h2>
+<div class="page-head"><div class="page-title"><h1>Block {{.Block.Index}}</h1><span class="page-sub">{{.Node}}</span><span class="info">{{template "infobtn" "block-help"}}<span class="info-tip" id="block-help" role="tooltip">
+<p><strong>How to read this page.</strong> One block of the chain, as this node stores it.</p>
 <dl>
-<dt>Hash</dt><dd class="mono">{{.Block.Hash}}</dd>
-<dt>Previous hash</dt><dd>{{if .Block.PrevHash}}<a class="mono" href="/n/{{pe .Node}}/block/{{pe .Block.PrevHash}}">{{.Block.PrevHash}}</a>{{end}}</dd>
+<dt>Hash</dt><dd>identifies the block; it covers every header field and the Merkle root.</dd>
+<dt>Previous hash</dt><dd>the link to the parent block. It is what makes a chain: change one block and every later hash changes.</dd>
+<dt>Nonce, Difficulty</dt><dd>proof of work: the miner tried nonces until the hash met the difficulty.</dd>
+<dt>Validator, Signature</dt><dd>used by proof of authority; "none" in proof of work.</dd>
+</dl>
+<p>The first transaction of a mined block is the coinbase: it has no inputs and creates the miner's reward.</p>
+</span></span></div></div>
+<dl class="kv kv--wide">
+<dt>Hash</dt><dd><code class="hash-full">{{.Block.Hash}}</code></dd>
+<dt>Previous hash</dt><dd>{{if .Block.PrevHash}}<a class="hash" href="/n/{{pe .Node}}/block/{{pe .Block.PrevHash}}" title="{{.Block.PrevHash}}"><span class="hash-start">{{hstart .Block.PrevHash}}</span><span class="hash-end">{{hend .Block.PrevHash}}</span></a>{{else}}<span class="empty-value">none</span>{{end}}</dd>
 <dt>Time</dt><dd>{{.Block.Timestamp.Format "2006-01-02T15:04:05Z07:00"}}</dd>
 <dt>Nonce</dt><dd>{{.Block.Nonce}}</dd>
 <dt>Difficulty</dt><dd>{{.Block.Difficulty}}</dd>
-<dt>Validator</dt><dd class="mono">{{.Block.Validator}}</dd>
-<dt>Signature</dt><dd class="mono">{{.Block.Signature}}</dd>
+<dt>Validator</dt><dd>{{if .Block.Validator}}<span class="mono">{{.Block.Validator}}</span>{{else}}<span class="empty-value">none</span>{{end}}</dd>
+<dt>Signature</dt><dd>{{if .Block.Signature}}<span class="mono">{{.Block.Signature}}</span>{{else}}<span class="empty-value">none</span>{{end}}</dd>
 </dl>
-<h3>Transactions</h3>
+<section class="section" aria-labelledby="txs">
+<div class="section-head"><h2 class="section-title" id="txs">Transactions</h2></div>
 {{template "txlist" .Txs}}
 </section>
 {{- end}}

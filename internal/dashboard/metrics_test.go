@@ -241,7 +241,7 @@ func TestMetricsScreenShowsTheNodeFigures(t *testing.T) {
 
 	body := rec.Body.String()
 	for _, want := range []string{
-		"<td>node1</td>", "<td>12</td>", "<td>0.750000 s</td>", "<td>32</td>", "<td>5</td>", "<td>7</td>", "<td>6</td>",
+		`<td class="col-main">node1</td>`, `<td class="col-num">12</td>`, `<td class="col-num">0.750000 s</td>`, `<td class="col-num">32</td>`, `<td class="col-num">5</td>`, `<td class="col-num">7</td>`, `<td class="col-num">6</td>`,
 		`hx-get="/fragments/metrics"`, `hx-trigger="every 2s"`, `href="/metrics"`,
 	} {
 		if !strings.Contains(body, want) {
@@ -256,7 +256,7 @@ func TestMetricsScreenMeanIsNotAvailableWithoutMinedBlocks(t *testing.T) {
 	text := "blockchain_blocks 1\nblockchain_mining_duration_seconds_sum 0\nblockchain_mining_duration_seconds_count 0\n"
 	h, _ := metricsServer(t, 1, newMetricsNode(t, text, secondsAfter(0)...))
 
-	if body := do(h, http.MethodGet, "/fragments/metrics").Body.String(); !strings.Contains(body, "<td>n/a</td>") || !strings.Contains(body, "<td>1</td>") {
+	if body := do(h, http.MethodGet, "/fragments/metrics").Body.String(); !strings.Contains(body, `<td class="col-num">n/a</td>`) || !strings.Contains(body, `<td class="col-num">1</td>`) {
 		t.Errorf("fragment:\n%s", body)
 	}
 }
@@ -278,15 +278,15 @@ func TestMetricsScreenParseErrorAffectsOnlyThatNode(t *testing.T) {
 		}
 
 		body := rec.Body.String()
-		if !strings.Contains(body, "<td>12</td>") {
+		if !strings.Contains(body, `<td class="col-num">12</td>`) {
 			t.Errorf("%s lost the good node:\n%s", path, body)
 		}
 
-		if strings.Contains(body, "<td>99</td>") {
+		if strings.Contains(body, `<td class="col-num">99</td>`) {
 			t.Errorf("%s shows figures of a node whose /metrics did not parse:\n%s", path, body)
 		}
 
-		if got := strings.Count(body, "<td>n/a</td>"); got != 12 {
+		if got := strings.Count(body, `<td class="col-num">n/a</td>`); got != 12 {
 			t.Errorf("%s has %d n/a cells, want 12 (6 for each of 2 nodes)", path, got)
 		}
 	}

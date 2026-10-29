@@ -1,6 +1,18 @@
+{{define "mempoolpage" -}}
+<div class="page-head"><div class="page-title"><h1>Mempool of {{.Node}}</h1><span class="info">{{template "infobtn" "mempool-help"}}<span class="info-tip" id="mempool-help" role="tooltip">
+<p><strong>How to read this page.</strong> The mempool holds transactions this node accepted but no block has included yet.</p>
+<dl>
+<dt>Order</dt><dd>highest fee rate per byte first. This is the order mining takes them, so a higher fee gets in sooner.</dd>
+<dt>Fee</dt><dd>the sum of the inputs minus the sum of the outputs; the miner collects it.</dd>
+<dt>Per node</dt><dd>every node keeps its own pool. Gossip spreads transactions, so the pools should match within moments.</dd>
+<dt>Leaving the pool</dt><dd>when a block includes a transaction it disappears from here and shows up in Blocks.</dd>
+</dl>
+</span></span></div></div>
+{{template "mempool" .}}
+{{- end}}
+
 {{define "mempool" -}}
-<section id="mempool" hx-get="/fragments/n/{{pe .Node}}/mempool" hx-trigger="every 2s" hx-swap="outerHTML">
-<h2>Mempool of {{.Node}}</h2>
+<section id="mempool" class="stack" hx-get="/fragments/n/{{pe .Node}}/mempool" hx-trigger="every 2s" hx-swap="outerHTML">
 {{template "txlist" .Txs}}
 </section>
 {{- end}}

@@ -134,14 +134,19 @@ type headersBody struct {
 type Card struct {
 	Snapshot
 
-	Behind int
-	Since  string
+	Behind  int
+	Since   string
+	Differs bool   // fork: reachable, and its tip is not the majority tip
+	Level   string // ok, warn or bad: the dot, badge and border of the node
+	Status  string // what the badge says
 }
 
 // View is what the Network screen renders: the verdict and a card per node, in NODES order.
 type View struct {
 	Assessment Assessment
 	Cards      []Card
+	Agree      int // reachable nodes on the majority tip
+	Reachable  int // reachable nodes
 }
 
 // Banner is the CSS class suffix and text of the verdict.
@@ -167,7 +172,57 @@ func (p *Poller) View() View {
 		cards[i] = c
 	}
 
-	return View{Assessment: a, Cards: cards}
+	majority, agree := majorityTip(snaps)
+
+	for i := range cards {
+		c := &cards[i]
+		c.Differs = a.State == StateFork && c.Reachable && c.Tip != majority
+		c.Level, c.Status = nodeStatus(*c)
+	}
+
+	return View{Assessment: a, Cards: cards, Agree: agree, Reachable: len(snaps) - a.Unreachable}
+}
+
+// majorityTip is the tip most reachable nodes at the highest height report (the first in NODES
+// order on a tie) and how many report it.
+func majorityTip(snaps []Snapshot) (string, int) {
+	top := 0
+
+	for _, s := range snaps {
+		if s.Reachable {
+			top = max(top, s.Height)
+		}
+	}
+
+	counts := map[string]int{}
+	best, bestN := "", 0
+
+	for _, s := range snaps {
+		if !s.Reachable || s.Height != top {
+			continue
+		}
+
+		counts[s.Tip]++
+		if counts[s.Tip] > bestN {
+			best, bestN = s.Tip, counts[s.Tip]
+		}
+	}
+
+	return best, bestN
+}
+
+// nodeStatus is the level and badge text of a node: unreachable and different tip are bad, behind is warn.
+func nodeStatus(c Card) (level, status string) {
+	switch {
+	case !c.Reachable:
+		return "bad", "Unreachable"
+	case c.Differs:
+		return "bad", "Different tip"
+	case c.Behind > 0:
+		return "warn", fmt.Sprintf("Behind by %d", c.Behind)
+	}
+
+	return "ok", "Up to date"
 }
 
 // poll reads one node: /health and /p2p/peers at once, then the tip header. A node whose /health

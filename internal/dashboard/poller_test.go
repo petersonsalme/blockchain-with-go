@@ -197,6 +197,187 @@ func TestPollerUnreachableKeepsLastHeight(t *testing.T) {
 	}
 }
 
+// ticks polls n times, enough for the fork verdict (three consecutive ticks).
+func ticks(p *dashboard.Poller, n int) {
+	for range n {
+		p.Tick(context.Background())
+	}
+}
+
+func TestViewMarksTheNodeOffTheMajorityTipInAFork(t *testing.T) {
+	t.Parallel()
+
+	a, b, c := newChainNode(t, 6, "aa"), newChainNode(t, 6, "aa"), newChainNode(t, 6, "bb")
+	p := newPoller(t, a, b, c)
+
+	ticks(p, 3)
+
+	v := p.View()
+	if v.Assessment.State != dashboard.StateFork {
+		t.Fatalf("state = %v, want fork", v.Assessment.State)
+	}
+
+	if v.Agree != 2 || v.Reachable != 3 {
+		t.Errorf("agree = %d reachable = %d, want 2 and 3", v.Agree, v.Reachable)
+	}
+
+	for i, want := range []struct {
+		differs       bool
+		level, status string
+	}{{false, "ok", "Up to date"}, {false, "ok", "Up to date"}, {true, "bad", "Different tip"}} {
+		if c := v.Cards[i]; c.Differs != want.differs || c.Level != want.level || c.Status != want.status {
+			t.Errorf("card %d = differs %t, %q, %q; want %t, %q, %q", i, c.Differs, c.Level, c.Status, want.differs, want.level, want.status)
+		}
+	}
+}
+
+func TestViewDoesNotFlagAnyNodeBeforeTheForkVerdict(t *testing.T) {
+	t.Parallel()
+
+	a, b := newChainNode(t, 6, "aa"), newChainNode(t, 6, "bb")
+	p := newPoller(t, a, b)
+
+	ticks(p, 1) // syncing: two nodes may just have mined at once
+
+	for i, c := range p.View().Cards {
+		if c.Differs || c.Level != "ok" {
+			t.Errorf("card %d = differs %t level %q, want an unflagged ok card while syncing", i, c.Differs, c.Level)
+		}
+	}
+}
+
+func TestViewTipTieFavoursTheFirstNode(t *testing.T) {
+	t.Parallel()
+
+	a, b := newChainNode(t, 6, "aa"), newChainNode(t, 6, "bb")
+	p := newPoller(t, a, b)
+
+	ticks(p, 3)
+
+	v := p.View()
+	if v.Agree != 1 || v.Cards[0].Differs || !v.Cards[1].Differs {
+		t.Errorf("agree = %d, node1 differs = %t, node2 differs = %t; want 1, false, true", v.Agree, v.Cards[0].Differs, v.Cards[1].Differs)
+	}
+}
+
+func TestViewStatusOfANodeBehindAndOfAnUnreachableNode(t *testing.T) {
+	t.Parallel()
+
+	a, b, c := newChainNode(t, 7, "bb"), newChainNode(t, 7, "bb"), newChainNode(t, 5, "aa")
+	p := newPoller(t, a, b, c)
+
+	ticks(p, 1)
+
+	v := p.View()
+	if got := v.Cards[2]; got.Level != "warn" || got.Status != "Behind by 2" || got.Differs {
+		t.Errorf("trailing node = %q, %q, differs %t; want warn, Behind by 2, false", got.Level, got.Status, got.Differs)
+	}
+
+	if v.Agree != 2 {
+		t.Errorf("agree = %d, want 2: the node that trails is not on the tip", v.Agree)
+	}
+
+	c.up.Store(false)
+	ticks(p, 1)
+
+	v = p.View()
+	if got := v.Cards[2]; got.Level != "bad" || got.Status != "Unreachable" {
+		t.Errorf("unreachable node = %q, %q; want bad, Unreachable", got.Level, got.Status)
+	}
+
+	if v.Reachable != 2 {
+		t.Errorf("reachable = %d, want 2", v.Reachable)
+	}
+}
+
+func TestViewAgreementCountsEveryReachableNode(t *testing.T) {
+	t.Parallel()
+
+	p := newPoller(t, newChainNode(t, 3, "aa"), newChainNode(t, 3, "aa"), newChainNode(t, 3, "aa"))
+
+	ticks(p, 1)
+
+	if v := p.View(); v.Agree != 3 || v.Reachable != 3 || v.Cards[0].Level != "ok" {
+		t.Errorf("agree = %d reachable = %d level %q, want 3, 3, ok", v.Agree, v.Reachable, v.Cards[0].Level)
+	}
+}
+
+func TestForkShowsInTheMatrixAndTheSidebar(t *testing.T) {
+	t.Parallel()
+
+	a, b, c := newChainNode(t, 6, "aa"), newChainNode(t, 6, "aa"), newChainNode(t, 6, "bb")
+	p := newPoller(t, a, b, c)
+
+	ticks(p, 3)
+
+	h := newTestServerWithPoller(t, p, a, b, c)
+
+	frag := do(h, http.MethodGet, "/fragments/network").Body.String()
+	for _, want := range []string{
+		`banner banner--bad banner-fork`, `<td class="cell-diff">`, `class="cell-mark"`, "different tip", `<span class="kpi-value">2/3</span>`,
+	} {
+		if !strings.Contains(frag, want) {
+			t.Errorf("network fragment lacks %q:\n%s", want, frag)
+		}
+	}
+
+	if got := strings.Count(frag, `class="cell-diff"`); got != 1 {
+		t.Errorf("%d cells marked as different, want 1 (only node3's tip)", got)
+	}
+
+	side := do(h, http.MethodGet, "/fragments/sidebar").Body.String()
+	for _, want := range []string{`id="sidebar-nodes"`, `hx-get="/fragments/sidebar"`, `nav-node--bad`, "Different tip", "Up to date", `<span class="nav-node-height">#6</span>`} {
+		if !strings.Contains(side, want) {
+			t.Errorf("sidebar fragment lacks %q:\n%s", want, side)
+		}
+	}
+
+	if got := strings.Count(side, "nav-node--ok"); got != 2 {
+		t.Errorf("%d nodes marked ok in the sidebar, want 2", got)
+	}
+}
+
+func TestNetworkPageExplainsHowToReadItOutsideTheRefreshedFragment(t *testing.T) {
+	t.Parallel()
+
+	a := newChainNode(t, 2, "aa")
+	p := newPoller(t, a)
+	p.Tick(context.Background())
+
+	h := newTestServerWithPoller(t, p, a)
+
+	page := do(h, http.MethodGet, "/").Body.String()
+	for _, want := range []string{
+		`<button type="button" class="info-btn" aria-label="How to read this page" aria-describedby="network-help">`,
+		`id="network-help" role="tooltip"`, "Behind by N", "Unreachable",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("page lacks %q", want)
+		}
+	}
+
+	// htmx replaces the fragment every 2 s: a tooltip inside it would close under the pointer.
+	if frag := do(h, http.MethodGet, "/fragments/network").Body.String(); strings.Contains(frag, "network-help") {
+		t.Error("the help tooltip is inside the refreshed fragment")
+	}
+}
+
+func TestSidebarMarksAnUnreachableNodeAsDown(t *testing.T) {
+	t.Parallel()
+
+	a, b := newChainNode(t, 4, "aa"), newChainNode(t, 4, "aa")
+	p := newPoller(t, a, b)
+
+	ticks(p, 1)
+	b.up.Store(false)
+	ticks(p, 1)
+
+	side := do(newTestServerWithPoller(t, p, a, b), http.MethodGet, "/fragments/sidebar").Body.String()
+	if !strings.Contains(side, "nav-node--bad nav-node--down") || !strings.Contains(side, "Unreachable") {
+		t.Errorf("sidebar does not mark node2 as down:\n%s", side)
+	}
+}
+
 func TestPollerSlowNodeDoesNotDelayOthers(t *testing.T) {
 	t.Parallel()
 
@@ -295,7 +476,7 @@ func TestNetworkFragment(t *testing.T) {
 	frag := do(h, http.MethodGet, "/fragments/network").Body.String()
 	for _, want := range []string{
 		`hx-get="/fragments/network"`, `hx-trigger="every 2s"`, `hx-swap="outerHTML"`,
-		"Network syncing", "behind by 2", "12 s ago", `class="banner banner-syncing"`,
+		"Network syncing", "behind by 2", "12 s ago", `class="banner banner--warn banner-syncing"`,
 	} {
 		if !strings.Contains(frag, want) {
 			t.Errorf("fragment lacks %q:\n%s", want, frag)
@@ -306,10 +487,13 @@ func TestNetworkFragment(t *testing.T) {
 		t.Error("the page does not embed the network container")
 	}
 
-	if other := do(h, http.MethodGet, "/n/node1/").Body.String(); strings.Contains(other, `hx-trigger="every 2s"`) {
+	if other := strings.ReplaceAll(do(h, http.MethodGet, "/n/node1/").Body.String(), sidebarPoll, ""); strings.Contains(other, `hx-trigger="every 2s"`) {
 		t.Error("a node page polls the network fragment")
 	}
 }
+
+// sidebarPoll is the node list in the sidebar, which every full page refreshes.
+const sidebarPoll = `hx-get="/fragments/sidebar" hx-trigger="every 2s" hx-swap="outerHTML"`
 
 func TestPollerRunTicksUntilCancelled(t *testing.T) {
 	t.Parallel()

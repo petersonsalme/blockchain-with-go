@@ -1,20 +1,21 @@
 {{define "contract" -}}
-<section>
-<h2>Contract on {{.Node}}</h2>
-<dl>
-<dt>Id</dt><dd class="mono">{{.ID}}</dd>
+<div class="page-head"><div class="page-title"><h1>Contract</h1><span class="page-sub">{{.Node}}</span></div></div>
+<dl class="kv kv--wide">
+<dt>Id</dt><dd><code class="hash-full">{{.ID}}</code></dd>
 <dt>Code</dt><dd class="mono">{{.Code}}</dd>
 </dl>
+<section class="section" aria-labelledby="storage">
+<div class="section-head"><h2 class="section-title" id="storage">Storage</h2></div>
 {{- if .Storage}}
-<table>
-<caption>Storage</caption>
-<thead><tr><th>Key</th><th>Value</th></tr></thead>
+<div class="table-wrap"><table class="table table--compact">
+<caption class="sr-only">Storage</caption>
+<thead><tr><th scope="col">Key</th><th scope="col">Value</th></tr></thead>
 <tbody>
 {{- range .Storage}}
 <tr><td class="mono">{{.Key}}</td><td>{{.Value}}</td></tr>
 {{- end}}
 </tbody>
-</table>
+</table></div>
 {{- else}}
 <p class="muted">No cell written yet.</p>
 {{- end}}
