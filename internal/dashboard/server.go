@@ -32,7 +32,7 @@ type server struct {
 // HEAD. Node reads go through fetch, to the nodes listed here and nowhere else; the Network screen
 // shows what poll last learned and never reaches a node itself.
 func NewServer(nodes []Node, fetch *Fetcher, poll *Poller) (http.Handler, error) {
-	tmpl, err := template.New("").Funcs(template.FuncMap{"pe": url.PathEscape, "qe": url.QueryEscape, "hstart": hashStart, "hend": hashEnd}).ParseFS(templateFiles, "templates/*.html")
+	tmpl, err := template.New("").Funcs(template.FuncMap{"pe": url.PathEscape, "qe": url.QueryEscape, "hstart": hashStart, "hend": hashEnd, "coins": coins, "units": baseUnits}).ParseFS(templateFiles, "templates/*.html")
 	if err != nil {
 		return nil, err
 	}

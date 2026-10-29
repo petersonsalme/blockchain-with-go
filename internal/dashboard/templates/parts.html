@@ -46,10 +46,10 @@
 <div class="io"><span class="subhead">Outputs</span>
 <div class="table-wrap"><table class="table table--compact">
 <caption class="sr-only">Outputs</caption>
-<thead><tr><th scope="col" class="col-fit">Index</th><th scope="col">Address</th><th scope="col" class="col-num">Amount (base units)</th></tr></thead>
+<thead><tr><th scope="col" class="col-fit">Index</th><th scope="col">Address</th><th scope="col" class="col-num">Amount (coins)</th></tr></thead>
 <tbody>
 {{- range $i, $o := .Tx.Outputs}}
-<tr><td class="col-fit">{{$i}}</td><td class="col-hash"><a class="hash" href="/n/{{pe $node}}/address/{{pe $o.Address}}" title="{{$o.Address}}"><span class="hash-start">{{hstart $o.Address}}</span><span class="hash-end">{{hend $o.Address}}</span></a></td><td class="col-num">{{$o.Amount}}</td></tr>
+<tr><td class="col-fit">{{$i}}</td><td class="col-hash"><a class="hash" href="/n/{{pe $node}}/address/{{pe $o.Address}}" title="{{$o.Address}}"><span class="hash-start">{{hstart $o.Address}}</span><span class="hash-end">{{hend $o.Address}}</span></a></td><td class="col-num"><span class="num" title="{{units $o.Amount}} base units">{{coins $o.Amount}}</span></td></tr>
 {{- end}}
 </tbody>
 </table></div>

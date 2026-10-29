@@ -3,7 +3,7 @@
 <p><strong>How to read this page.</strong> One transaction and the block that includes it.</p>
 <dl>
 <dt>Inputs</dt><dd>outputs of earlier transactions that this one spends (the UTXO model). A coinbase or genesis transaction has none.</dd>
-<dt>Outputs</dt><dd>new coins assigned to an address. An output stays unspent until a later transaction uses it, whole.</dd>
+<dt>Outputs</dt><dd>new coins assigned to an address, shown in coins (1 coin = 10^8 base units; hover an amount for the exact count). An output stays unspent until a later transaction uses it, whole.</dd>
 <dt>Fee</dt><dd>inputs minus outputs; it goes to the miner.</dd>
 <dt>Merkle proof</dt><dd>shows the transaction is in the block without listing the others: hash the leaf together with each sibling on the path (side = left or right) up to the root, which must equal the block's Merkle root. An empty path means it is the only transaction.</dd>
 </dl>

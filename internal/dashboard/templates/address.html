@@ -2,7 +2,7 @@
 <div class="page-head"><div class="page-title"><h1>Address</h1><span class="page-sub">{{.Node}}</span><span class="info">{{template "infobtn" "address-help"}}<span class="info-tip" id="address-help" role="tooltip">
 <p><strong>How to read this page.</strong> One address on this node.</p>
 <dl>
-<dt>Balance</dt><dd>there are no accounts: it is the sum of the unspent outputs (UTXOs) paid to this address, in base units.</dd>
+<dt>Balance</dt><dd>there are no accounts: it is the sum of the unspent outputs (UTXOs) paid to this address, in coins (1 coin = 10^8 base units, the unit the node stores; hover an amount for the exact count).</dd>
 <dt>Unspent outputs</dt><dd>coins still available. Spending one consumes it whole; any change returns as a new output.</dd>
 <dt>History</dt><dd>transactions that paid to or spent from this address, newest first, with the block that includes each.</dd>
 </dl>
@@ -10,7 +10,7 @@
 {{- $node := .Node}}
 <dl class="kv kv--wide">
 <dt>Address</dt><dd><code class="hash-full">{{.Addr}}</code></dd>
-<dt>Balance (base units)</dt><dd><span class="big-number">{{.Balance}}</span></dd>
+<dt>Balance</dt><dd><span class="big-number" title="{{units .Balance}} base units">{{coins .Balance}}</span> <span class="unit">coins</span></dd>
 </dl>
 <div class="cols-2">
 <section class="section" aria-labelledby="utxo">
@@ -18,10 +18,10 @@
 {{- if .UTXOs}}
 <div class="table-wrap"><table class="table table--compact">
 <caption class="sr-only">Unspent outputs</caption>
-<thead><tr><th scope="col">Transaction</th><th scope="col" class="col-fit">Index</th><th scope="col" class="col-num">Amount (base units)</th></tr></thead>
+<thead><tr><th scope="col">Transaction</th><th scope="col" class="col-fit">Index</th><th scope="col" class="col-num">Amount (coins)</th></tr></thead>
 <tbody>
 {{- range .UTXOs}}
-<tr><td class="col-hash"><a class="hash" href="/n/{{pe $node}}/tx/{{pe .TxID}}" title="{{.TxID}}"><span class="hash-start">{{hstart .TxID}}</span><span class="hash-end">{{hend .TxID}}</span></a></td><td class="col-fit">{{.Index}}</td><td class="col-num">{{.Amount}}</td></tr>
+<tr><td class="col-hash"><a class="hash" href="/n/{{pe $node}}/tx/{{pe .TxID}}" title="{{.TxID}}"><span class="hash-start">{{hstart .TxID}}</span><span class="hash-end">{{hend .TxID}}</span></a></td><td class="col-fit">{{.Index}}</td><td class="col-num"><span class="num" title="{{units .Amount}} base units">{{coins .Amount}}</span></td></tr>
 {{- end}}
 </tbody>
 </table></div>
@@ -40,10 +40,10 @@
 {{- if .Txs}}
 <div class="table-wrap"><table class="table table--compact">
 <caption class="sr-only">History</caption>
-<thead><tr><th scope="col">Transaction</th><th scope="col">Block</th><th scope="col" class="hide-sm">Time</th></tr></thead>
+<thead><tr><th scope="col">Transaction</th><th scope="col" class="col-fit">Block</th><th scope="col">Block hash</th><th scope="col" class="hide-sm">Time</th></tr></thead>
 <tbody>
 {{- range .Txs}}
-<tr><td class="col-hash"><a class="hash" href="/n/{{pe $node}}/tx/{{pe .Transaction.ID}}" title="{{.Transaction.ID}}"><span class="hash-start">{{hstart .Transaction.ID}}</span><span class="hash-end">{{hend .Transaction.ID}}</span></a></td><td class="nowrap"><a href="/n/{{pe $node}}/block/{{.Height}}">{{.Height}}</a> <span class="mono">{{.BlockHash}}</span></td><td class="nowrap hide-sm">{{.Timestamp.Format "2006-01-02T15:04:05Z07:00"}}</td></tr>
+<tr><td class="col-hash"><a class="hash" href="/n/{{pe $node}}/tx/{{pe .Transaction.ID}}" title="{{.Transaction.ID}}"><span class="hash-start">{{hstart .Transaction.ID}}</span><span class="hash-end">{{hend .Transaction.ID}}</span></a></td><td class="col-fit"><a href="/n/{{pe $node}}/block/{{.Height}}">{{.Height}}</a></td><td class="col-hash"><span class="hash" title="{{.BlockHash}}"><span class="hash-start">{{hstart .BlockHash}}</span><span class="hash-end">{{hend .BlockHash}}</span></span></td><td class="nowrap hide-sm">{{.Timestamp.Format "2006-01-02T15:04:05Z07:00"}}</td></tr>
 {{- end}}
 </tbody>
 </table></div>

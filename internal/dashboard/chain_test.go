@@ -106,13 +106,13 @@ func TestChainRoutesShowTheNodeValues(t *testing.T) {
 
 	tests := map[string][]string{
 		"/peers":                        {"nid-1", "http://peer1:8080", ">9<", blkHash, "yes", "2026-01-02T03:04:05Z", "http://known:8080"},
-		"/n/node1/mempool":              {txA, "4200", ownerAddr, "pk1", "sig1", "2026-01-02T03:04:05Z", `href="/n/node1/address/` + ownerAddr + `"`},
+		"/n/node1/mempool":              {txA, ">0.000042<", `title="4,200 base units"`, ownerAddr, "pk1", "sig1", "2026-01-02T03:04:05Z", `href="/n/node1/address/` + ownerAddr + `"`},
 		"/n/node1/blocks":               {`href="/n/node1/block/0"`, `href="/n/node1/block/1"`, blkHash, "val1", `href="/n/node1/blocks?from=2"`},
 		"/n/node1/blocks?from=2":        {`href="/n/node1/block/2"`},
 		"/n/node1/block/1":              {"Block 1", blkHash, txB, ">77<", ">5<", "val1", "sigv", `href="/n/node1/tx/` + txA + `"`, `href="/n/node1/address/` + ownerAddr + `"`},
 		"/n/node1/block/" + blkHash:     {"Block 1"},
-		"/n/node1/tx/" + txA:            {txA, blkHash, `href="/n/node1/block/1"`, "rootrootroot", ">2<", "leafleaf", "sib0", "left", "sib1", "right", "4200"},
-		"/n/node1/address/" + ownerAddr: {ownerAddr, ">4200<", `href="/n/node1/tx/` + txA + `"`, `href="/n/node1/address/` + ownerAddr + `?after=` + txA + `"`},
+		"/n/node1/tx/" + txA:            {txA, blkHash, `href="/n/node1/block/1"`, "rootrootroot", ">2<", "leafleaf", "sib0", "left", "sib1", "right", ">0.000042<", `title="4,200 base units"`},
+		"/n/node1/address/" + ownerAddr: {ownerAddr, ">0.000042<", `title="4,200 base units"`, "Amount (coins)", `href="/n/node1/tx/` + txA + `"`, `href="/n/node1/address/` + ownerAddr + `?after=` + txA + `"`},
 		"/n/node1/address/" + ownerAddr + "?after=" + txA: {"Heights below 7 are pruned"},
 		"/n/node1/contract/" + txA:                        {txA, "0102", ">10<", ">7<"},
 	}
