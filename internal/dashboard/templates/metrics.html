@@ -53,6 +53,34 @@
 {{- end}}
 </figure>
 <figure class="chart-card">
+<figcaption><span class="chart-title">Transactions per block of {{.Node}}: the last 50 blocks</span></figcaption>
+{{- if .TxsMsg}}
+<p class="muted">{{.TxsMsg}}</p>
+{{- else}}
+<svg class="chart" viewBox="0 0 400 120" role="img" aria-label="Transactions per block of {{.Node}}, largest {{.Txs.Max}}">
+<text class="axis" x="2" y="10">{{.Txs.Max}}</text>
+<line class="baseline" x1="0" y1="114" x2="400" y2="114"/>
+{{- range .Txs.Bars}}
+<rect class="bar" x="{{.X}}" y="{{.Y}}" width="{{.W}}" height="{{.H}}"/>
+{{- end}}
+</svg>
+{{- end}}
+</figure>
+<figure class="chart-card">
+<figcaption><span class="chart-title">Difficulty of {{.Node}}: the last 50 blocks</span></figcaption>
+{{- if .DifficultyMsg}}
+<p class="muted">{{.DifficultyMsg}}</p>
+{{- else}}
+<svg class="chart" viewBox="0 0 400 120" role="img" aria-label="Difficulty of {{.Node}}, largest {{.Difficulty.Max}}">
+<text class="axis" x="2" y="10">{{.Difficulty.Max}}</text>
+<line class="baseline" x1="0" y1="114" x2="400" y2="114"/>
+{{- range .Difficulty.Bars}}
+<rect class="bar" x="{{.X}}" y="{{.Y}}" width="{{.W}}" height="{{.H}}"/>
+{{- end}}
+</svg>
+{{- end}}
+</figure>
+<figure class="chart-card">
 <figcaption><span class="chart-title">Height of each node over the last {{.Ticks}} polls</span></figcaption>
 {{- if .HasHeights}}
 <svg class="chart" viewBox="0 0 400 120" role="img" aria-label="Height of each node over recent polls, from {{.Heights.Min}} to {{.Heights.Max}}">

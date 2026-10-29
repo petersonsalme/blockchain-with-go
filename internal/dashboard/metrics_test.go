@@ -131,6 +131,10 @@ type metricsNode struct {
 	height  atomic.Int64
 	metrics atomic.Value // string
 	stamps  []time.Time
+
+	difficulties []uint64 // served by /headers; zero when nil
+	txs          []int    // transactions per block served by /blocks; the route is absent when nil
+	blocksFail   bool     // /blocks answers 500
 }
 
 func newMetricsNode(t *testing.T, metrics string, stamps ...time.Time) *metricsNode {
@@ -154,7 +158,30 @@ func newMetricsNode(t *testing.T, metrics string, stamps ...time.Time) *metricsN
 
 			var parts []string
 			for i := from; i < upto; i++ {
-				parts = append(parts, fmt.Sprintf(`{"Index":%d,"Timestamp":%q}`, i, m.stamps[i].Format(time.RFC3339)))
+				parts = append(parts, fmt.Sprintf(`{"Index":%d,"Timestamp":%q,"Difficulty":%d}`, i, m.stamps[i].Format(time.RFC3339), m.difficulty(i)))
+			}
+
+			_, _ = fmt.Fprintf(w, `{"blocks":[%s],"from":%d,"limit":%d}`, strings.Join(parts, ","), from, limit)
+		case "/blocks":
+			if m.blocksFail {
+				http.Error(w, "boom", http.StatusInternalServerError)
+
+				return
+			}
+
+			if m.txs == nil {
+				http.NotFound(w, r)
+
+				return
+			}
+
+			from, _ := strconv.Atoi(r.URL.Query().Get("from"))
+			limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+			upto := min(from+limit, len(m.txs))
+
+			var parts []string
+			for i := from; i < upto; i++ {
+				parts = append(parts, fmt.Sprintf(`{"Index":%d,"Timestamp":%q,"Transactions":[%s]}`, i, m.stamps[i].Format(time.RFC3339), emptyTxs(m.txs[i])))
 			}
 
 			_, _ = fmt.Fprintf(w, `{"blocks":[%s],"from":%d,"limit":%d}`, strings.Join(parts, ","), from, limit)
@@ -164,6 +191,39 @@ func newMetricsNode(t *testing.T, metrics string, stamps ...time.Time) *metricsN
 	})
 
 	return m
+}
+
+func (m *metricsNode) difficulty(i int) uint64 {
+	if i < len(m.difficulties) {
+		return m.difficulties[i]
+	}
+
+	return 0
+}
+
+// emptyTxs is a JSON list of n transactions, each an empty object.
+func emptyTxs(n int) string {
+	items := make([]string, n)
+	for i := range items {
+		items[i] = "{}"
+	}
+
+	return strings.Join(items, ",")
+}
+
+// figure is the <figure> whose caption contains title.
+func figure(t *testing.T, body, title string) string {
+	t.Helper()
+
+	i := strings.Index(body, title)
+	if i < 0 {
+		t.Fatalf("no figure %q:\n%s", title, body)
+	}
+
+	start := strings.LastIndex(body[:i], "<figure")
+	end := strings.Index(body[i:], "</figure>")
+
+	return body[start : i+end]
 }
 
 func (m *metricsNode) count(prefix string) int {
@@ -325,7 +385,7 @@ func TestIntervalChartScalesTheKnownSeries(t *testing.T) {
 		}
 	}
 
-	if got := strings.Count(body, `class="bar"`); got != 3 {
+	if got := strings.Count(figure(t, body, "Block interval of node1"), `class="bar"`); got != 3 {
 		t.Errorf("%d bars, want 3", got)
 	}
 }
@@ -344,7 +404,7 @@ func TestIntervalChartUsesTheLast50HeadersWithOneRead(t *testing.T) {
 	before := n.count("GET /headers?from=30&limit=50")
 	body := do(h, http.MethodGet, "/fragments/charts?node=node1").Body.String()
 
-	if got := strings.Count(body, `class="bar"`); got != 49 {
+	if got := strings.Count(figure(t, body, "Block interval of node1"), `class="bar"`); got != 49 {
 		t.Errorf("%d bars, want 49 intervals between 50 headers", got)
 	}
 
@@ -372,7 +432,7 @@ func TestIntervalChartWithoutDataSaysSo(t *testing.T) {
 	h, _ := metricsServer(t, 1, one)
 
 	body := do(h, http.MethodGet, "/fragments/charts?node=node1").Body.String()
-	if got := strings.Count(body, `class="bar"`); got != 0 {
+	if got := strings.Count(figure(t, body, "Block interval of node1"), `class="bar"`); got != 0 {
 		t.Errorf("%d bars for a one-block chain", got)
 	}
 
@@ -402,6 +462,71 @@ func TestChartsHeaderFailureIsLocal(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, "n/a") || !strings.Contains(body, `class="line series-0"`) {
 		t.Errorf("height chart should survive a failed header read:\n%s", body)
+	}
+}
+
+func TestTxsAndDifficultyChartsScale(t *testing.T) {
+	t.Parallel()
+
+	n := newMetricsNode(t, nodeMetricsText, secondsAfter(0, 1, 2)...)
+	n.difficulties = []uint64{1, 2, 4}
+	n.txs = []int{0, 2, 4}
+	h, _ := metricsServer(t, 1, n)
+
+	headers := n.count("GET /headers?")
+	blocks := n.count("GET /blocks?from=0&limit=50")
+
+	body := do(h, http.MethodGet, "/fragments/charts?node=node1").Body.String()
+
+	if got := n.count("GET /headers?") - headers; got != 1 {
+		t.Errorf("header reads for the view = %d, want 1", got)
+	}
+
+	if got := n.count("GET /blocks?from=0&limit=50") - blocks; got != 1 {
+		t.Errorf("block reads for the view = %d, want 1", got)
+	}
+
+	txs := figure(t, body, "Transactions per block of node1: the last 50 blocks")
+	diff := figure(t, body, "Difficulty of node1: the last 50 blocks")
+
+	for _, f := range []string{txs, diff} {
+		if got := strings.Count(f, `<rect class="bar"`); got != 3 {
+			t.Errorf("%d bars, want 3:\n%s", got, f)
+		}
+
+		if !strings.Contains(f, `height="100.00"`) || !strings.Contains(f, `>4</text>`) {
+			t.Errorf("largest bar or label missing:\n%s", f)
+		}
+	}
+
+	if !strings.Contains(txs, `height="0.00"`) {
+		t.Errorf("empty block not drawn as an empty bar:\n%s", txs)
+	}
+
+	if !strings.Contains(diff, `height="25.00"`) || !strings.Contains(diff, `height="50.00"`) {
+		t.Errorf("difficulty bars not scaled to the largest:\n%s", diff)
+	}
+}
+
+func TestTxsChartBlocksFailureIsLocal(t *testing.T) {
+	t.Parallel()
+
+	n := newMetricsNode(t, nodeMetricsText, secondsAfter(0, 1, 2)...)
+	n.txs = []int{0, 2, 4}
+	n.blocksFail = true
+	h, _ := metricsServer(t, 1, n)
+
+	body := do(h, http.MethodGet, "/fragments/charts?node=node1").Body.String()
+
+	txs := figure(t, body, "Transactions per block of node1: the last 50 blocks")
+	if !strings.Contains(txs, `<p class="muted">n/a</p>`) || strings.Contains(txs, "<svg") {
+		t.Errorf("transactions figure should say n/a:\n%s", txs)
+	}
+
+	for _, title := range []string{"Block interval of node1", "Difficulty of node1"} {
+		if f := figure(t, body, title); !strings.Contains(f, "<svg") || strings.Contains(f, `class="muted"`) {
+			t.Errorf("%s should still draw:\n%s", title, f)
+		}
 	}
 }
 
@@ -587,7 +712,7 @@ func TestIntervalChartOfEqualTimestampsHasZeroHeightBars(t *testing.T) {
 	h, _ := metricsServer(t, 1, newMetricsNode(t, nodeMetricsText, secondsAfter(4, 4, 4)...))
 
 	body := do(h, http.MethodGet, "/fragments/charts?node=node1").Body.String()
-	if got := strings.Count(body, `height="0.00"`); got != 2 || strings.Contains(body, "NaN") {
+	if got := strings.Count(figure(t, body, "Block interval of node1"), `height="0.00"`); got != 2 || strings.Contains(body, "NaN") {
 		t.Errorf("%d zero-height bars, want 2, and no NaN:\n%s", got, body)
 	}
 }
@@ -598,7 +723,7 @@ func TestIntervalChartOfTwoBlocksHasOneBar(t *testing.T) {
 	h, _ := metricsServer(t, 1, newMetricsNode(t, nodeMetricsText, secondsAfter(0, 5)...))
 
 	body := do(h, http.MethodGet, "/fragments/charts?node=node1").Body.String()
-	if got := strings.Count(body, `class="bar"`); got != 1 || strings.Contains(body, "Not enough") {
+	if got := strings.Count(figure(t, body, "Block interval of node1"), `class="bar"`); got != 1 || strings.Contains(body, "Not enough") {
 		t.Errorf("%d bars for two blocks:\n%s", got, body)
 	}
 }

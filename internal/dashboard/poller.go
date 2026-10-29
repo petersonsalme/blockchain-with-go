@@ -126,7 +126,8 @@ type peersBody struct {
 
 type headersBody struct {
 	Blocks []struct {
-		Timestamp time.Time `json:"timestamp"`
+		Timestamp  time.Time `json:"timestamp"`
+		Difficulty uint64    `json:"difficulty"`
 	} `json:"blocks"`
 }
 
