@@ -12,6 +12,7 @@
 <dt>Id</dt><dd><code class="hash-full">{{.Item.Tx.ID}}</code></dd>
 {{if .Pending}}<dt>Status</dt><dd>Pending: position {{.Position}} of {{.PoolSize}} in the <a href="/n/{{pe .Node}}/mempool">selection order</a></dd>{{else}}<dt>Block</dt><dd><a href="/n/{{pe .Node}}/block/{{.Height}}">{{.Height}}</a> <span class="muted">·</span> <span class="hash mono" title="{{.BlockHash}}">{{.BlockHash}}</span></dd>{{end}}
 <dt>Time</dt><dd>{{.Item.Tx.Timestamp.Format "2006-01-02T15:04:05Z07:00"}}</dd>
+{{if .FeeMsg}}<dt>Fee</dt><dd class="muted">{{.FeeMsg}}</dd>{{else}}<dt>Fee</dt><dd><span class="num" title="{{units .Fee}} base units">{{coins .Fee}}</span> coins</dd>{{end}}
 </dl>
 {{template "txbody" .Item}}
 {{if not .Pending}}<section class="section" aria-labelledby="merkle">

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/bits"
 	"net/http"
 	"net/url"
 	"slices"
@@ -30,6 +31,9 @@ const (
 
 // maxQueryLen bounds what /search will look at.
 const maxQueryLen = 128
+
+// maxFeeReads bounds how many spent transactions the fee of one page reads.
+const maxFeeReads = 16
 
 // The node's JSON, as far as the screens show it. Field names without tags match the node's Go
 // field names the way encoding/json always does.
@@ -172,6 +176,8 @@ type (
 		Pending   bool
 		Position  int
 		PoolSize  int
+		Fee       uint64
+		FeeMsg    string // why Fee is not shown; empty when it is
 	}
 
 	addressView struct {
@@ -503,12 +509,16 @@ func (s *server) loadTx(r *http.Request, node Node) (any, *pageError) {
 
 		for i, tx := range pool.Transactions {
 			if tx.ID == id {
+				fee, msg := s.txFee(r.Context(), node, tx, pool.Transactions)
+
 				return txView{
 					Node:     node.Name,
 					Item:     txItem{Node: node.Name, Tx: tx},
 					Pending:  true,
 					Position: i + 1,
 					PoolSize: len(pool.Transactions),
+					Fee:      fee,
+					FeeMsg:   msg,
 				}, nil
 			}
 		}
@@ -517,6 +527,7 @@ func (s *server) loadTx(r *http.Request, node Node) (any, *pageError) {
 	}
 
 	view := txView{Node: node.Name, Item: txItem{Node: node.Name, Tx: body.Transaction}, BlockHash: body.BlockHash, Height: body.Height}
+	view.Fee, view.FeeMsg = s.txFee(r.Context(), node, body.Transaction, nil)
 
 	var proof nodeProof
 
@@ -525,6 +536,80 @@ func (s *server) loadTx(r *http.Request, node Node) (any, *pageError) {
 	}
 
 	return view, nil
+}
+
+// txFee returns the fee of tx, or a message saying why there is none. The fee is the outputs tx
+// spends minus its own outputs. pool is the decoded mempool (nil for a confirmed tx): a spent
+// transaction the node does not have in a block may be pending there.
+func (s *server) txFee(ctx context.Context, node Node, tx nodeTx, pool []nodeTx) (uint64, string) {
+	const unknown = "Fee unknown: a spent output could not be read."
+
+	if len(tx.Inputs) == 0 {
+		return 0, "No fee (coinbase or genesis)."
+	}
+
+	var ids []string
+
+	for _, in := range tx.Inputs {
+		if !slices.Contains(ids, in.PrevTxID) {
+			ids = append(ids, in.PrevTxID)
+		}
+	}
+
+	if len(ids) > maxFeeReads {
+		return 0, fmt.Sprintf("Fee not computed: it spends more than %d transactions.", maxFeeReads)
+	}
+
+	spent := make(map[string]nodeTx, len(ids))
+
+	for _, id := range ids {
+		var body struct {
+			Transaction nodeTx `json:"transaction"`
+		}
+
+		perr := s.read(ctx, node, Tx(id), &body)
+		if perr != nil {
+			if perr.Upstream != http.StatusNotFound || pool == nil {
+				return 0, unknown
+			}
+
+			i := slices.IndexFunc(pool, func(p nodeTx) bool { return p.ID == id })
+			if i < 0 {
+				return 0, unknown
+			}
+
+			body.Transaction = pool[i]
+		}
+
+		spent[id] = body.Transaction
+	}
+
+	var in, out, carry uint64
+
+	for _, input := range tx.Inputs {
+		prev := spent[input.PrevTxID]
+		if uint64(input.OutIndex) >= uint64(len(prev.Outputs)) {
+			return 0, unknown
+		}
+
+		in, carry = bits.Add64(in, prev.Outputs[input.OutIndex].Amount, 0)
+		if carry != 0 {
+			return 0, unknown
+		}
+	}
+
+	for _, o := range tx.Outputs {
+		out, carry = bits.Add64(out, o.Amount, 0)
+		if carry != 0 {
+			return 0, unknown
+		}
+	}
+
+	if in < out {
+		return 0, unknown
+	}
+
+	return in - out, ""
 }
 
 func (s *server) loadAddress(r *http.Request, node Node) (any, *pageError) {

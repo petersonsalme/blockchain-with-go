@@ -3,6 +3,8 @@ package dashboard_test
 import (
 	"context"
 	"fmt"
+	"maps"
+	"math"
 	"net/http"
 	"net/url"
 	"slices"
@@ -764,5 +766,141 @@ func TestMempoolRowsShowPosition(t *testing.T) {
 	first, second := strings.Index(body, "#1 "), strings.Index(body, "#2 ")
 	if first < 0 || second < first {
 		t.Errorf("rows lack #1 before #2: %s", body)
+	}
+}
+
+// feeTxJSON is a transaction whose inputs and outputs are JSON fragments.
+func feeTxJSON(id, inputs, outputs string) string {
+	return `{"ID":"` + id + `","Inputs":[` + inputs + `],"Outputs":[` + outputs + `],"Timestamp":"2026-01-02T03:04:05Z"}`
+}
+
+// spendJSON is an input that spends output index of prev.
+func spendJSON(prev string, index int) string {
+	return `{"PrevTxID":"` + prev + `","OutIndex":` + itoa(index) + `,"PublicKey":"pk1","Signature":"sig1"}`
+}
+
+// payJSON is an output of amount to ownerAddr.
+func payJSON(amount uint64) string {
+	return `{"Amount":` + strconv.FormatUint(amount, 10) + `,"Address":"` + ownerAddr + `"}`
+}
+
+const unknownFee = "Fee unknown: a spent output could not be read."
+
+func TestTxFee(t *testing.T) {
+	t.Parallel()
+
+	// txB's output 3 holds 5000 base units.
+	prevB := feeTxJSON(txB, "", strings.Join([]string{payJSON(1), payJSON(2), payJSON(3), payJSON(5000)}, ","))
+
+	cases := []struct {
+		name    string
+		id      string // the transaction the page asks for; txA when empty
+		inputs  string
+		outputs string
+		extra   map[string]reply
+		want    string
+	}{
+		{name: "coinbase", inputs: "", outputs: payJSON(4200), want: "No fee (coinbase or genesis)."},
+		{name: "one input", inputs: spendJSON(txB, 3), outputs: payJSON(4200), want: `title="800 base units"`},
+		{name: "outputs above inputs", inputs: spendJSON(txB, 3), outputs: payJSON(5001), want: unknownFee},
+		{name: "index out of range", inputs: spendJSON(txB, 9), outputs: payJSON(1), want: unknownFee},
+		{name: "outputs overflow", inputs: spendJSON(txB, 3), outputs: payJSON(math.MaxUint64) + "," + payJSON(1), want: unknownFee},
+		{
+			name: "spent tx fails", inputs: spendJSON(txB, 3), outputs: payJSON(4200),
+			extra: map[string]reply{"/tx/" + txB: {http.StatusInternalServerError, `{}`}}, want: unknownFee,
+		},
+		{
+			// txA is not in a block any more: its output comes from the pool, and txB is pending.
+			name: "pending spends the pool", id: txB,
+			extra: map[string]reply{
+				"/tx/" + txA: {http.StatusNotFound, `{"error":"nope"}`},
+				"/tx/" + txB: {http.StatusNotFound, `{"error":"nope"}`},
+				"/mempool":   ok(`{"transactions":[` + feeTxJSON(txA, "", payJSON(9000)) + `,` + feeTxJSON(txB, spendJSON(txA, 0), payJSON(8000)) + `]}`),
+			},
+			want: `title="1,000 base units"`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			id := tc.id
+			if id == "" {
+				id = txA
+			}
+
+			routes := map[string]reply{
+				"/tx/" + txA: ok(`{"transaction":` + feeTxJSON(txA, tc.inputs, tc.outputs) + `,"block_hash":"` + blkHash + `","height":1}`),
+				"/tx/" + txB: ok(`{"transaction":` + prevB + `}`),
+			}
+			maps.Copy(routes, tc.extra)
+
+			n := routedNode(t, routes)
+
+			rec := do(chainServer(t, n), http.MethodGet, "/n/node1/tx/"+id)
+			if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), tc.want) {
+				t.Errorf("= %d, want %q in the page: %s", rec.Code, tc.want, rec.Body)
+			}
+		})
+	}
+}
+
+func TestTxFeeCapsSpentReads(t *testing.T) {
+	t.Parallel()
+
+	// spends distinct transactions, each paying 10 base units; the tx pays 5 out, so 16 spends are 155.
+	for _, spends := range []int{16, 17} {
+		routes := map[string]reply{}
+
+		var inputs []string
+
+		var prevs []string
+
+		for i := range spends {
+			prev := fmt.Sprintf("%064x", i+1)
+			prevs = append(prevs, prev)
+			routes["/tx/"+prev] = ok(`{"transaction":` + feeTxJSON(prev, "", payJSON(10)) + `}`)
+			inputs = append(inputs, spendJSON(prev, 0))
+		}
+
+		routes["/tx/"+txA] = ok(`{"transaction":` + feeTxJSON(txA, strings.Join(inputs, ","), payJSON(5)) + `,"block_hash":"` + blkHash + `","height":1}`)
+
+		n := routedNode(t, routes)
+
+		rec := do(chainServer(t, n), http.MethodGet, "/n/node1/tx/"+txA)
+		body := rec.Body.String()
+
+		if spends == 17 {
+			if rec.Code != http.StatusOK || !strings.Contains(body, "Fee not computed: it spends more than 16 transactions.") {
+				t.Errorf("17 spends: = %d: %s", rec.Code, body)
+			}
+
+			for _, prev := range prevs {
+				if slices.Contains(n.seen, "GET /tx/"+prev) {
+					t.Errorf("17 spends read %s: %v", prev, n.seen)
+				}
+			}
+
+			continue
+		}
+
+		if rec.Code != http.StatusOK || !strings.Contains(body, `title="155 base units"`) {
+			t.Errorf("16 spends: = %d: %s", rec.Code, body)
+		}
+
+		for _, prev := range prevs {
+			got := 0
+
+			for _, req := range n.seen {
+				if req == "GET /tx/"+prev {
+					got++
+				}
+			}
+
+			if got != 1 {
+				t.Errorf("16 spends: %s read %d times, want 1", prev, got)
+			}
+		}
 	}
 }
