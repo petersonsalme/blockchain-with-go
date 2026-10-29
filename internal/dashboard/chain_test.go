@@ -586,3 +586,69 @@ func TestEveryChainScreenExplainsItselfOutsideTheRefreshedFragment(t *testing.T)
 		}
 	}
 }
+
+func TestPendingTxShowsItsPosition(t *testing.T) {
+	t.Parallel()
+
+	n := routedNode(t, map[string]reply{
+		"/tx/" + txB: {http.StatusNotFound, `{"error":"nope"}`},
+		"/mempool":   ok(`{"transactions":[` + txJSON(txA, ownerAddr) + `,` + txJSON(txB, ownerAddr) + `]}`),
+	})
+
+	rec := do(chainServer(t, n), http.MethodGet, "/n/node1/tx/"+txB)
+	body := rec.Body.String()
+
+	// The proof section's anchor, not its text: the help tooltip always names the Merkle proof.
+	if rec.Code != http.StatusOK || !strings.Contains(body, "Pending: position 2 of 2") || strings.Contains(body, `id="merkle"`) {
+		t.Errorf("= %d: %s", rec.Code, body)
+	}
+
+	if slices.Contains(n.seen, "GET /tx/"+txB+"/proof") {
+		t.Errorf("pending transaction read its proof: %v", n.seen)
+	}
+}
+
+func TestTxPageNodeErrorIsNotPending(t *testing.T) {
+	t.Parallel()
+
+	n := routedNode(t, map[string]reply{
+		"/tx/" + txA: {http.StatusInternalServerError, `{}`},
+		"/mempool":   ok(`{"transactions":[` + txJSON(txA, ownerAddr) + `]}`),
+	})
+
+	rec := do(chainServer(t, n), http.MethodGet, "/n/node1/tx/"+txA)
+	if rec.Code != http.StatusBadGateway {
+		t.Errorf("= %d, want 502: %s", rec.Code, rec.Body)
+	}
+
+	if slices.Contains(n.seen, "GET /mempool") {
+		t.Errorf("node error read the mempool: %v", n.seen)
+	}
+}
+
+func TestTxNeitherInChainNorInPoolIs404(t *testing.T) {
+	t.Parallel()
+
+	n := routedNode(t, map[string]reply{
+		"/mempool": ok(`{"transactions":[` + txJSON(txA, ownerAddr) + `]}`),
+	})
+
+	if rec := do(chainServer(t, n), http.MethodGet, "/n/node1/tx/"+txB); rec.Code != http.StatusNotFound {
+		t.Errorf("= %d, want 404: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestMempoolRowsShowPosition(t *testing.T) {
+	t.Parallel()
+
+	n := routedNode(t, map[string]reply{
+		"/mempool": ok(`{"transactions":[` + txJSON(txA, ownerAddr) + `,` + txJSON(txB, ownerAddr) + `]}`),
+	})
+
+	body := do(chainServer(t, n), http.MethodGet, "/n/node1/mempool").Body.String()
+
+	first, second := strings.Index(body, "#1 "), strings.Index(body, "#2 ")
+	if first < 0 || second < first {
+		t.Errorf("rows lack #1 before #2: %s", body)
+	}
+}

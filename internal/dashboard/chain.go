@@ -115,10 +115,12 @@ type (
 
 	peersView struct{ Nodes []peersNode }
 
-	// txItem is a transaction with the node name its links need.
+	// txItem is a transaction with the node name its links need. Pos is its 1-based place in the
+	// mempool selection order; 0 means none is shown.
 	txItem struct {
 		Node string
 		Tx   nodeTx
+		Pos  int
 	}
 
 	mempoolView struct {
@@ -140,12 +142,16 @@ type (
 		Txs   []txItem
 	}
 
+	// A pending view is a mempool transaction: Position of PoolSize in the selection order, no block.
 	txView struct {
 		Node      string
 		Item      txItem
 		BlockHash string
 		Height    int
 		Proof     *nodeProof
+		Pending   bool
+		Position  int
+		PoolSize  int
 	}
 
 	addressView struct {
@@ -374,7 +380,12 @@ func (s *server) loadMempool(r *http.Request, node Node) (any, *pageError) {
 		return nil, perr
 	}
 
-	return mempoolView{Node: node.Name, Txs: items(node.Name, body.Transactions)}, nil
+	txs := items(node.Name, body.Transactions)
+	for i := range txs {
+		txs[i].Pos = i + 1
+	}
+
+	return mempoolView{Node: node.Name, Txs: txs}, nil
 }
 
 func (s *server) loadBlocks(r *http.Request, node Node) (any, *pageError) {
@@ -428,10 +439,35 @@ func (s *server) loadTx(r *http.Request, node Node) (any, *pageError) {
 	}
 
 	if perr := s.read(r.Context(), node, Tx(id), &body); perr != nil {
+		if perr.Upstream != http.StatusNotFound {
+			return nil, perr
+		}
+
+		// Not in a block: a transaction the node's pool holds is pending, at its selection position.
+		var pool struct {
+			Transactions []nodeTx `json:"transactions"`
+		}
+
+		if p := s.read(r.Context(), node, Mempool(), &pool); p != nil {
+			return nil, p
+		}
+
+		for i, tx := range pool.Transactions {
+			if tx.ID == id {
+				return txView{
+					Node:     node.Name,
+					Item:     txItem{Node: node.Name, Tx: tx},
+					Pending:  true,
+					Position: i + 1,
+					PoolSize: len(pool.Transactions),
+				}, nil
+			}
+		}
+
 		return nil, perr
 	}
 
-	view := txView{Node: node.Name, Item: txItem{node.Name, body.Transaction}, BlockHash: body.BlockHash, Height: body.Height}
+	view := txView{Node: node.Name, Item: txItem{Node: node.Name, Tx: body.Transaction}, BlockHash: body.BlockHash, Height: body.Height}
 
 	var proof nodeProof
 

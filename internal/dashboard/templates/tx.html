@@ -10,11 +10,11 @@
 </span></span></div></div>
 <dl class="kv kv--wide">
 <dt>Id</dt><dd><code class="hash-full">{{.Item.Tx.ID}}</code></dd>
-<dt>Block</dt><dd><a href="/n/{{pe .Node}}/block/{{.Height}}">{{.Height}}</a> <span class="muted">·</span> <span class="hash mono" title="{{.BlockHash}}">{{.BlockHash}}</span></dd>
+{{if .Pending}}<dt>Status</dt><dd>Pending: position {{.Position}} of {{.PoolSize}} in the <a href="/n/{{pe .Node}}/mempool">selection order</a></dd>{{else}}<dt>Block</dt><dd><a href="/n/{{pe .Node}}/block/{{.Height}}">{{.Height}}</a> <span class="muted">·</span> <span class="hash mono" title="{{.BlockHash}}">{{.BlockHash}}</span></dd>{{end}}
 <dt>Time</dt><dd>{{.Item.Tx.Timestamp.Format "2006-01-02T15:04:05Z07:00"}}</dd>
 </dl>
 {{template "txbody" .Item}}
-<section class="section" aria-labelledby="merkle">
+{{if not .Pending}}<section class="section" aria-labelledby="merkle">
 <div class="section-head"><h2 class="section-title" id="merkle">Merkle proof</h2></div>
 {{- with .Proof}}
 <dl class="kv kv--wide">
@@ -38,5 +38,5 @@
 {{- else}}
 <p class="muted">The node has no proof for this transaction.</p>
 {{- end}}
-</section>
+</section>{{end}}
 {{- end}}
