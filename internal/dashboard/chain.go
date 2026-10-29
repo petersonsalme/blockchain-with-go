@@ -22,6 +22,12 @@ const historyLimit = 25
 // blocksLimit is the page size of the Blocks screen, the node default.
 const blocksLimit = 20
 
+// homeBlocks and homeTxs bound the latest activity on a node page.
+const (
+	homeBlocks = 10
+	homeTxs    = 10
+)
+
 // maxQueryLen bounds what /search will look at.
 const maxQueryLen = 128
 
@@ -134,6 +140,20 @@ type (
 		Blocks []nodeBlock
 		Next   *int
 		Poll   bool
+	}
+
+	// homeTx is one transaction of the node page, with the height of its block.
+	homeTx struct {
+		Node   string
+		Height int
+		Tx     nodeTx
+	}
+
+	// homeView is the latest activity on a node page. Msg replaces both lists when they were not read.
+	homeView struct {
+		Blocks []nodeBlock // newest first
+		Txs    []homeTx    // newest block first, block order inside a block, at most homeTxs
+		Msg    string
 	}
 
 	blockView struct {
@@ -409,6 +429,35 @@ func (s *server) loadBlocks(r *http.Request, node Node) (any, *pageError) {
 	}
 
 	return blocksView{Node: node.Name, From: from, Blocks: body.Blocks, Next: body.Next, Poll: from == 0}, nil
+}
+
+// loadHome reads the homeBlocks blocks ending at height, the height the poller last saw. A failed
+// read is shown in place of the lists; the rest of the node page does not depend on it.
+func (s *server) loadHome(ctx context.Context, node Node, height int) homeView {
+	var body struct {
+		Blocks []nodeBlock `json:"blocks"`
+	}
+
+	if perr := s.read(ctx, node, Blocks(max(height-homeBlocks+1, 0), homeBlocks), &body); perr != nil {
+		return homeView{Msg: "Latest activity not available: " + perr.Message + "."}
+	}
+
+	slices.Reverse(body.Blocks)
+
+	var txs []homeTx
+
+outer:
+	for _, block := range body.Blocks {
+		for _, tx := range block.Transactions {
+			if len(txs) == homeTxs {
+				break outer
+			}
+
+			txs = append(txs, homeTx{Node: node.Name, Height: block.Index, Tx: tx})
+		}
+	}
+
+	return homeView{Blocks: body.Blocks, Txs: txs}
 }
 
 func (s *server) loadBlock(r *http.Request, node Node) (any, *pageError) {

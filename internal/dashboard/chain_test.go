@@ -1,6 +1,8 @@
 package dashboard_test
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"slices"
@@ -135,6 +137,118 @@ func TestChainRoutesShowTheNodeValues(t *testing.T) {
 				t.Errorf("GET %s lacks %q", path, want)
 			}
 		}
+	}
+}
+
+// homeServer serves one node, node1, after one poll. blocksBody, when set, answers /blocks.
+func homeServer(t *testing.T, height int, blocksBody string) (http.Handler, *chainNode) {
+	t.Helper()
+
+	c := newChainNode(t, height, strings.Repeat("a", 64))
+	if blocksBody != "" {
+		c.blocks.Store(blocksBody)
+	}
+
+	p := newPoller(t, c)
+	p.Tick(context.Background())
+
+	node := c.node(t)
+	node.Name = "node1"
+
+	h, err := dashboard.NewServer([]dashboard.Node{node}, dashboard.NewFetcher(time.Second, 1<<20), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return h, c
+}
+
+func TestNodeHomeShowsLatestBlocksAndTransactions(t *testing.T) {
+	t.Parallel()
+
+	var blocks []string
+
+	for i := 3; i <= 12; i++ {
+		blocks = append(blocks, blockJSON(i, fmt.Sprintf("%064x", 1000+i),
+			txJSON(fmt.Sprintf("%064x", 2*i), ownerAddr), txJSON(fmt.Sprintf("%064x", 2*i+1), ownerAddr)))
+	}
+
+	h, c := homeServer(t, 12, `{"blocks":[`+strings.Join(blocks, ",")+`]}`)
+
+	c.mu.Lock()
+	before := len(c.seen)
+	c.mu.Unlock()
+
+	rec := do(h, http.MethodGet, "/n/node1/")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /n/node1/ = %d: %s", rec.Code, rec.Body)
+	}
+
+	page := rec.Body.String()
+
+	if !strings.Contains(page, `class="stat-value">12</span>`) || !strings.Contains(page, `href="/n/node1/block/`+strings.Repeat("a", 64)+`"`) {
+		t.Error("the redesign stats are missing")
+	}
+
+	top := strings.Index(page, `href="/n/node1/block/12"`)
+	bottom := strings.Index(page, `href="/n/node1/block/3"`)
+
+	if top < 0 || bottom < 0 || top > bottom {
+		t.Errorf("blocks are not newest first: block 12 at %d, block 3 at %d", top, bottom)
+	}
+
+	var want []string
+
+	for i := 12; i >= 8; i-- {
+		want = append(want, fmt.Sprintf("%064x", 2*i), fmt.Sprintf("%064x", 2*i+1))
+	}
+
+	if n := strings.Count(page, `href="/n/node1/tx/`); n != 10 {
+		t.Errorf("transaction links = %d, want 10", n)
+	}
+
+	last := -1
+
+	for _, id := range want {
+		at := strings.Index(page, `href="/n/node1/tx/`+id+`"`)
+		if at <= last {
+			t.Errorf("transaction %s is missing or out of order (at %d after %d)", id, at, last)
+		}
+
+		last = at
+	}
+
+	c.mu.Lock()
+	got := slices.Clone(c.seen[before:])
+	c.mu.Unlock()
+
+	if !slices.Equal(got, []string{"GET /blocks?from=3&limit=10"}) {
+		t.Errorf("the page made %v, want one GET /blocks?from=3&limit=10", got)
+	}
+}
+
+func TestNodeHomeBlocksFailureIsLocal(t *testing.T) {
+	t.Parallel()
+
+	h, _ := homeServer(t, 12, "")
+
+	rec := do(h, http.MethodGet, "/n/node1/")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /n/node1/ = %d: %s", rec.Code, rec.Body)
+	}
+
+	page := rec.Body.String()
+
+	if !strings.Contains(page, "Latest activity not available") {
+		t.Error("the failed read is not shown")
+	}
+
+	if strings.Contains(page, ">Latest blocks<") {
+		t.Error("the block list is shown after a failed read")
+	}
+
+	if !strings.Contains(page, `href="/n/node1/blocks"`) {
+		t.Error("the tiles are missing")
 	}
 }
 

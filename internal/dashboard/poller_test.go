@@ -25,6 +25,7 @@ type chainNode struct {
 	up     atomic.Bool
 	noHdrs atomic.Bool  // /headers answers an empty list
 	last   atomic.Value // time.Time
+	blocks atomic.Value // string: the /blocks body; unset → 404
 }
 
 func newChainNode(t *testing.T, height int, tip string) *chainNode {
@@ -71,6 +72,15 @@ func newChainNode(t *testing.T, height int, tip string) *chainNode {
 			}
 
 			_, _ = fmt.Fprintf(w, `{"blocks":[{"Timestamp":%q}],"from":0,"limit":1}`, c.last.Load().(time.Time).Format(time.RFC3339))
+		case "/blocks":
+			body, set := c.blocks.Load().(string)
+			if !set {
+				http.NotFound(w, r)
+
+				return
+			}
+
+			_, _ = fmt.Fprint(w, body)
 		default:
 			http.NotFound(w, r)
 		}

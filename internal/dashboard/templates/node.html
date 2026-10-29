@@ -10,6 +10,41 @@
 <div class="stat"><span class="stat-label">Last block</span><span class="stat-value">{{.Since}}</span></div>
 </div>
 {{- end}}{{end}}
+{{- $name := .Name}}
+{{- with .Latest}}
+{{- if .Msg}}
+<p class="muted">{{.Msg}}</p>
+{{- else}}
+<div class="cols-2">
+<section class="section" aria-labelledby="latest-blocks">
+<div class="section-head"><h2 class="section-title" id="latest-blocks">Latest blocks</h2></div>
+<div class="table-wrap"><table class="table">
+<thead><tr><th scope="col">Height</th><th scope="col">Hash</th><th scope="col" class="col-num">Transactions</th></tr></thead>
+<tbody>
+{{- range .Blocks}}
+<tr><td class="col-fit col-main"><a href="/n/{{pe $name}}/block/{{.Index}}">{{.Index}}</a></td><td class="col-hash">{{if .Hash}}<a class="hash" href="/n/{{pe $name}}/block/{{.Index}}" title="{{.Hash}}"><span class="hash-start">{{hstart .Hash}}</span><span class="hash-end">{{hend .Hash}}</span></a>{{else}}<span class="empty-value">no hash</span>{{end}}</td><td class="col-num">{{len .Transactions}}</td></tr>
+{{- end}}
+</tbody>
+</table></div>
+</section>
+<section class="section" aria-labelledby="latest-txs">
+<div class="section-head"><h2 class="section-title" id="latest-txs">Latest transactions</h2></div>
+{{- if .Txs}}
+<div class="table-wrap"><table class="table">
+<thead><tr><th scope="col">Id</th><th scope="col">Block</th></tr></thead>
+<tbody>
+{{- range .Txs}}
+<tr><td class="col-hash"><a class="hash" href="/n/{{pe .Node}}/tx/{{pe .Tx.ID}}" title="{{.Tx.ID}}"><span class="hash-start">{{hstart .Tx.ID}}</span><span class="hash-end">{{hend .Tx.ID}}</span></a></td><td class="col-fit"><a href="/n/{{pe .Node}}/block/{{.Height}}">{{.Height}}</a></td></tr>
+{{- end}}
+</tbody>
+</table></div>
+{{- else}}
+<p class="muted">No transactions.</p>
+{{- end}}
+</section>
+</div>
+{{- end}}
+{{- end}}
 <div class="tiles">
 <a class="tile" href="/n/{{pe .Name}}/blocks"><span class="tile-title">Blocks</span><span class="tile-desc">The chain from tip to genesis, 20 per page</span></a>
 <a class="tile" href="/n/{{pe .Name}}/mempool"><span class="tile-title">Mempool</span><span class="tile-desc">Pending transactions by fee rate</span></a>
