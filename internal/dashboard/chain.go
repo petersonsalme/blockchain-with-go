@@ -275,6 +275,11 @@ func (s *server) lookup(name string) (Node, bool) {
 func (s *server) show(w http.ResponseWriter, current, body string, data any, fragment bool) {
 	var buf bytes.Buffer
 
+	// A full page may wrap the fragment with a header that htmx must not replace (the help tooltip).
+	if !fragment && s.tmpl.Lookup(body+"page") != nil {
+		body += "page"
+	}
+
 	err := s.tmpl.ExecuteTemplate(&buf, body, data)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)

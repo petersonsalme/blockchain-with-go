@@ -1,35 +1,45 @@
 {{define "metrics" -}}
-<section id="metrics" hx-get="/fragments/metrics" hx-trigger="every 2s" hx-swap="outerHTML">
-<table>
-<caption>Key figures from each node's /metrics</caption>
-<thead><tr><th>Node</th><th>Blocks</th><th>Mean mining time</th><th>HTTP 2xx</th><th>HTTP 4xx</th><th>HTTP 5xx</th><th>HTTP 429</th></tr></thead>
+<section id="metrics" class="section" hx-get="/fragments/metrics" hx-trigger="every 2s" hx-swap="outerHTML">
+<div class="section-head"><h2 class="section-title">Key figures</h2><span class="section-meta">from each node's /metrics</span></div>
+<div class="table-wrap"><table class="table">
+<caption class="sr-only">Key figures from each node's /metrics</caption>
+<thead><tr><th scope="col">Node</th><th scope="col" class="col-num">Blocks</th><th scope="col" class="col-num">Mean mining time</th><th scope="col" class="col-num">HTTP 2xx</th><th scope="col" class="col-num">HTTP 4xx</th><th scope="col" class="col-num">HTTP 5xx</th><th scope="col" class="col-num">HTTP 429</th></tr></thead>
 <tbody>
 {{- range .}}
-<tr><td>{{.Name}}</td><td>{{.Blocks}}</td><td>{{.Mining}}</td><td>{{.Req2xx}}</td><td>{{.Req4xx}}</td><td>{{.Req5xx}}</td><td>{{.Req429}}</td></tr>
+<tr><td class="col-main">{{.Name}}</td><td class="col-num">{{.Blocks}}</td><td class="col-num">{{.Mining}}</td><td class="col-num">{{.Req2xx}}</td><td class="col-num">{{.Req4xx}}</td><td class="col-num">{{.Req5xx}}</td><td class="col-num">{{.Req429}}</td></tr>
 {{- end}}
 </tbody>
-</table>
+</table></div>
 </section>
 {{- end}}
 
 {{define "metricspage" -}}
-<h2>Metrics</h2>
+<div class="page-head"><div class="page-title"><h1>Metrics</h1><span class="info">{{template "infobtn" "metrics-help"}}<span class="info-tip" id="metrics-help" role="tooltip">
+<p><strong>How to read this page.</strong> Figures each node publishes at its own /metrics; the dashboard only reads them.</p>
+<dl>
+<dt>Blocks</dt><dd>how many blocks the node holds.</dd>
+<dt>Mean mining time</dt><dd>time spent per block this node mined. "n/a" means it never mined one; only miners have a value.</dd>
+<dt>HTTP 2xx, 4xx, 5xx, 429</dt><dd>requests answered since the node started: successes, client errors, server errors and rate-limited requests.</dd>
+<dt>Block interval</dt><dd>seconds between consecutive blocks of the chosen node.</dd>
+<dt>Height of each node</dt><dd>overlapping lines mean the nodes agree; a line below the others is a node that trails.</dd>
+</dl>
+</span></span></div></div>
 {{template "metrics" .Rows}}
-<form method="get" action="/metrics" class="inline">
-<label>Block interval of <select name="node">
+<form method="get" action="/metrics" class="inline-form">
+<label>Block interval of <select class="select" name="node">
 {{- range .Nodes}}
 <option value="{{.Name}}"{{if eq .Name $.Node}} selected{{end}}>{{.Name}}</option>
 {{- end}}
 </select></label>
-<button type="submit">Show</button>
+<button class="btn" type="submit">Show</button>
 </form>
 {{template "charts" .Charts}}
 {{- end}}
 
 {{define "charts" -}}
-<section id="charts" hx-get="/fragments/charts?node={{qe .Node}}" hx-trigger="every 10s" hx-swap="outerHTML">
-<figure>
-<figcaption>Block interval of {{.Node}}: seconds between the last 50 blocks</figcaption>
+<section id="charts" class="cols-2" hx-get="/fragments/charts?node={{qe .Node}}" hx-trigger="every 10s" hx-swap="outerHTML">
+<figure class="chart-card">
+<figcaption><span class="chart-title">Block interval of {{.Node}}: seconds between the last 50 blocks</span></figcaption>
 {{- if .IntervalMsg}}
 <p class="muted">{{.IntervalMsg}}</p>
 {{- else}}
@@ -42,8 +52,8 @@
 </svg>
 {{- end}}
 </figure>
-<figure>
-<figcaption>Height of each node over the last {{.Ticks}} polls</figcaption>
+<figure class="chart-card">
+<figcaption><span class="chart-title">Height of each node over the last {{.Ticks}} polls</span></figcaption>
 {{- if .HasHeights}}
 <svg class="chart" viewBox="0 0 400 120" role="img" aria-label="Height of each node over recent polls, from {{.Heights.Min}} to {{.Heights.Max}}">
 <text class="axis" x="2" y="10">{{.Heights.Max}}</text>

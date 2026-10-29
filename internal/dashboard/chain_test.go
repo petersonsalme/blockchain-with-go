@@ -106,13 +106,13 @@ func TestChainRoutesShowTheNodeValues(t *testing.T) {
 
 	tests := map[string][]string{
 		"/peers":                        {"nid-1", "http://peer1:8080", ">9<", blkHash, "yes", "2026-01-02T03:04:05Z", "http://known:8080"},
-		"/n/node1/mempool":              {txA, "4200", ownerAddr, "pk1", "sig1", "2026-01-02T03:04:05Z", `href="/n/node1/address/` + ownerAddr + `"`},
+		"/n/node1/mempool":              {txA, ">0.000042<", `title="4,200 base units"`, ownerAddr, "pk1", "sig1", "2026-01-02T03:04:05Z", `href="/n/node1/address/` + ownerAddr + `"`},
 		"/n/node1/blocks":               {`href="/n/node1/block/0"`, `href="/n/node1/block/1"`, blkHash, "val1", `href="/n/node1/blocks?from=2"`},
 		"/n/node1/blocks?from=2":        {`href="/n/node1/block/2"`},
 		"/n/node1/block/1":              {"Block 1", blkHash, txB, ">77<", ">5<", "val1", "sigv", `href="/n/node1/tx/` + txA + `"`, `href="/n/node1/address/` + ownerAddr + `"`},
 		"/n/node1/block/" + blkHash:     {"Block 1"},
-		"/n/node1/tx/" + txA:            {txA, blkHash, `href="/n/node1/block/1"`, "rootrootroot", ">2<", "leafleaf", "sib0", "left", "sib1", "right", "4200"},
-		"/n/node1/address/" + ownerAddr: {ownerAddr, ">4200<", `href="/n/node1/tx/` + txA + `"`, `href="/n/node1/address/` + ownerAddr + `?after=` + txA + `"`},
+		"/n/node1/tx/" + txA:            {txA, blkHash, `href="/n/node1/block/1"`, "rootrootroot", ">2<", "leafleaf", "sib0", "left", "sib1", "right", ">0.000042<", `title="4,200 base units"`},
+		"/n/node1/address/" + ownerAddr: {ownerAddr, ">0.000042<", `title="4,200 base units"`, "Amount (coins)", `href="/n/node1/tx/` + txA + `"`, `href="/n/node1/address/` + ownerAddr + `?after=` + txA + `"`},
 		"/n/node1/address/" + ownerAddr + "?after=" + txA: {"Heights below 7 are pruned"},
 		"/n/node1/contract/" + txA:                        {txA, "0102", ">10<", ">7<"},
 	}
@@ -383,7 +383,7 @@ func TestPollingOnListScreensOnly(t *testing.T) {
 		"/n/node1/address/" + ownerAddr: false,
 		"/n/node1/contract/" + txA:      false,
 	} {
-		body := do(h, http.MethodGet, path).Body.String()
+		body := strings.ReplaceAll(do(h, http.MethodGet, path).Body.String(), sidebarPoll, "")
 		if got := strings.Contains(body, `hx-trigger="every 2s"`); got != want {
 			t.Errorf("GET %s polls = %t, want %t", path, got, want)
 		}
@@ -507,6 +507,35 @@ func TestNavigationCarriesTheSearchForm(t *testing.T) {
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("page lacks %s", want)
+		}
+	}
+}
+
+func TestEveryChainScreenExplainsItselfOutsideTheRefreshedFragment(t *testing.T) {
+	t.Parallel()
+
+	h := chainServer(t, fullChainNode(t))
+
+	for page, id := range map[string]string{
+		"/peers":                        "peers-help",
+		"/n/node1/mempool":              "mempool-help",
+		"/n/node1/blocks":               "blocks-help",
+		"/n/node1/block/1":              "block-help",
+		"/n/node1/tx/" + txA:            "tx-help",
+		"/n/node1/address/" + ownerAddr: "address-help",
+	} {
+		body := do(h, http.MethodGet, page).Body.String()
+		for _, want := range []string{`aria-describedby="` + id + `"`, `id="` + id + `" role="tooltip"`} {
+			if !strings.Contains(body, want) {
+				t.Errorf("GET %s lacks %q", page, want)
+			}
+		}
+	}
+
+	// htmx swaps these fragments every 2 s: a tooltip inside would close under the pointer.
+	for _, frag := range []string{"/fragments/peers", "/fragments/n/node1/mempool", "/fragments/n/node1/blocks"} {
+		if body := do(h, http.MethodGet, frag).Body.String(); strings.Contains(body, `role="tooltip"`) {
+			t.Errorf("GET %s carries the help tooltip", frag)
 		}
 	}
 }

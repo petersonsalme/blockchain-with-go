@@ -9,33 +9,63 @@
 <script src="/static/htmx.min.js"></script>
 </head>
 <body>
-<header>
-<h1><a href="/">bwg network</a></h1>
-<nav aria-label="Nodes">
-<a href="/peers">Peers</a>
-<a href="/metrics">Metrics</a>
-{{- range .Nodes}}
-<a href="/n/{{pe .Name}}/"{{if eq .Name $.Current}} aria-current="page"{{end}}>{{.Name}}</a>
-{{- end}}
+<a class="skip-link" href="#main">Skip to content</a>
+<div class="shell">
+<aside class="sidebar" aria-label="Site">
+<a class="brand" href="/"><span class="brand-mark" aria-hidden="true"></span><span class="brand-name">bwg</span><span class="brand-sub">network</span></a>
+<nav class="nav" aria-label="Primary">
+<div class="nav-group">
+<span class="nav-label" id="nav-net">Network</span>
+<ul class="nav-list" aria-labelledby="nav-net">
+<li><a class="nav-link" href="/">Overview</a></li>
+<li><a class="nav-link" href="/peers">Peers</a></li>
+<li><a class="nav-link" href="/metrics">Metrics</a></li>
+</ul>
+</div>
+<div class="nav-group">
+<span class="nav-label" id="nav-nodes">Nodes</span>
+{{template "sidebar" .Cards}}
+</div>
 </nav>
-<form method="get" action="/search" role="search">
-<select name="node" aria-label="Node">
+<p class="sidebar-foot live"><span class="live-dot is-active" aria-hidden="true"></span>Live · every 2 s · <time>{{.Updated}}</time> UTC</p>
+</aside>
+<div class="main">
+<header class="topbar">
+<nav aria-label="Breadcrumb"><ol class="crumbs">
+{{- if .Current}}
+<li><a href="/">Network</a></li><li><span aria-current="page">{{.Current}}</span></li>
+{{- else}}
+<li><span aria-current="page">Network</span></li>
+{{- end}}
+</ol></nav>
+<form method="get" action="/search" class="search" role="search">
+<label class="sr-only" for="search-node">Node to search</label>
+<select class="search-node" id="search-node" name="node">
 {{- range .Nodes}}
 <option value="{{.Name}}"{{if eq .Name $.Current}} selected{{end}}>{{.Name}}</option>
 {{- end}}
 </select>
-<input type="search" name="q" maxlength="128" required aria-label="Search" placeholder="height, hash, tx id or address">
-<button type="submit">Search</button>
+<label class="sr-only" for="search-q">Height, block hash, transaction id or address</label>
+<input class="search-input" id="search-q" type="search" name="q" maxlength="128" required placeholder="height, hash, tx id or address" autocomplete="off" spellcheck="false">
+<button class="search-btn" type="submit">Search</button>
 </form>
 </header>
 {{- if .Current}}
-<nav aria-label="Node screens" class="subnav">
-<a href="/n/{{pe .Current}}/mempool">Mempool</a>
-<a href="/n/{{pe .Current}}/blocks">Blocks</a>
+<nav class="subnav" aria-label="Node screens">
+<span class="subnav-node">{{.Current}}</span>
+<ul class="tabs">
+<li><a class="tab" href="/n/{{pe .Current}}/">Overview</a></li>
+<li><a class="tab" href="/n/{{pe .Current}}/blocks">Blocks</a></li>
+<li><a class="tab" href="/n/{{pe .Current}}/mempool">Mempool</a></li>
+<li><a class="tab" href="/peers">Peers</a></li>
+</ul>
 </nav>
 {{- end}}
-<main id="main">
+<main id="main" class="page">
 {{.Body}}
 </main>
+<footer class="site-footer"><span>bwg dashboard · read-only</span><span>{{range $i, $n := .Nodes}}{{if $i}} · {{end}}{{$n.Name}}{{end}}</span></footer>
+</div>
+</div>
 </body>
 </html>

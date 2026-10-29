@@ -1,45 +1,58 @@
 {{define "address" -}}
-<section>
-<h2>Address on {{.Node}}</h2>
-{{- $node := .Node}}
+<div class="page-head"><div class="page-title"><h1>Address</h1><span class="page-sub">{{.Node}}</span><span class="info">{{template "infobtn" "address-help"}}<span class="info-tip" id="address-help" role="tooltip">
+<p><strong>How to read this page.</strong> One address on this node.</p>
 <dl>
-<dt>Address</dt><dd class="mono">{{.Addr}}</dd>
-<dt>Balance (base units)</dt><dd>{{.Balance}}</dd>
+<dt>Balance</dt><dd>there are no accounts: it is the sum of the unspent outputs (UTXOs) paid to this address, in coins (1 coin = 10^8 base units, the unit the node stores; hover an amount for the exact count).</dd>
+<dt>Unspent outputs</dt><dd>coins still available. Spending one consumes it whole; any change returns as a new output.</dd>
+<dt>History</dt><dd>transactions that paid to or spent from this address, newest first, with the block that includes each.</dd>
 </dl>
+</span></span></div></div>
+{{- $node := .Node}}
+<dl class="kv kv--wide">
+<dt>Address</dt><dd><code class="hash-full">{{.Addr}}</code></dd>
+<dt>Balance</dt><dd><span class="big-number" title="{{units .Balance}} base units">{{coins .Balance}}</span> <span class="unit">coins</span></dd>
+</dl>
+<div class="cols-2">
+<section class="section" aria-labelledby="utxo">
+<div class="section-head"><h2 class="section-title" id="utxo">Unspent outputs</h2></div>
 {{- if .UTXOs}}
-<table>
-<caption>Unspent outputs</caption>
-<thead><tr><th>Transaction</th><th>Index</th><th>Amount (base units)</th></tr></thead>
+<div class="table-wrap"><table class="table table--compact">
+<caption class="sr-only">Unspent outputs</caption>
+<thead><tr><th scope="col">Transaction</th><th scope="col" class="col-fit">Index</th><th scope="col" class="col-num">Amount (coins)</th></tr></thead>
 <tbody>
 {{- range .UTXOs}}
-<tr><td><a class="mono" href="/n/{{pe $node}}/tx/{{pe .TxID}}">{{.TxID}}</a></td><td>{{.Index}}</td><td>{{.Amount}}</td></tr>
+<tr><td class="col-hash"><a class="hash" href="/n/{{pe $node}}/tx/{{pe .TxID}}" title="{{.TxID}}"><span class="hash-start">{{hstart .TxID}}</span><span class="hash-end">{{hend .TxID}}</span></a></td><td class="col-fit">{{.Index}}</td><td class="col-num"><span class="num" title="{{units .Amount}} base units">{{coins .Amount}}</span></td></tr>
 {{- end}}
 </tbody>
-</table>
+</table></div>
 {{- else}}
 <p class="muted">No unspent outputs.</p>
 {{- end}}
-<h3>History</h3>
+</section>
+<section class="section" aria-labelledby="hist">
+<div class="section-head"><h2 class="section-title" id="hist">History</h2></div>
 {{- if .Restarted}}
-<p role="status">The page cursor is no longer valid; showing the first page.</p>
+<p class="note" role="status">The page cursor is no longer valid; showing the first page.</p>
 {{- end}}
 {{- if .PrunedBelow}}
 <p class="muted">Heights below {{.PrunedBelow}} are pruned and not listed.</p>
 {{- end}}
 {{- if .Txs}}
-<table>
-<thead><tr><th>Transaction</th><th>Block</th><th>Time</th></tr></thead>
+<div class="table-wrap"><table class="table table--compact">
+<caption class="sr-only">History</caption>
+<thead><tr><th scope="col">Transaction</th><th scope="col" class="col-fit">Block</th><th scope="col">Block hash</th><th scope="col" class="hide-sm">Time</th></tr></thead>
 <tbody>
 {{- range .Txs}}
-<tr><td><a class="mono" href="/n/{{pe $node}}/tx/{{pe .Transaction.ID}}">{{.Transaction.ID}}</a></td><td><a href="/n/{{pe $node}}/block/{{.Height}}">{{.Height}}</a> <span class="mono">{{.BlockHash}}</span></td><td>{{.Timestamp.Format "2006-01-02T15:04:05Z07:00"}}</td></tr>
+<tr><td class="col-hash"><a class="hash" href="/n/{{pe $node}}/tx/{{pe .Transaction.ID}}" title="{{.Transaction.ID}}"><span class="hash-start">{{hstart .Transaction.ID}}</span><span class="hash-end">{{hend .Transaction.ID}}</span></a></td><td class="col-fit"><a href="/n/{{pe $node}}/block/{{.Height}}">{{.Height}}</a></td><td class="col-hash"><span class="hash" title="{{.BlockHash}}"><span class="hash-start">{{hstart .BlockHash}}</span><span class="hash-end">{{hend .BlockHash}}</span></span></td><td class="nowrap hide-sm">{{.Timestamp.Format "2006-01-02T15:04:05Z07:00"}}</td></tr>
 {{- end}}
 </tbody>
-</table>
+</table></div>
 {{- else}}
 <p class="muted">No transactions.</p>
 {{- end}}
 {{- if .Next}}
-<p><a href="/n/{{pe .Node}}/address/{{pe .Addr}}?after={{.Next}}">Older transactions</a></p>
+<nav class="pager" aria-label="Pagination"><ul class="pager-list"><li><a class="pager-link" href="/n/{{pe .Node}}/address/{{pe .Addr}}?after={{.Next}}">Older transactions</a></li></ul></nav>
 {{- end}}
 </section>
+</div>
 {{- end}}

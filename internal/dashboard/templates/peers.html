@@ -1,37 +1,49 @@
+{{define "peerspage" -}}
+<div class="page-head">
+<div class="page-title"><h1>Peers</h1><span class="info">{{template "infobtn" "peers-help"}}<span class="info-tip" id="peers-help" role="tooltip">
+<p><strong>How to read this page.</strong> Each table lists the peers one node is connected to, as that node reports them.</p>
+<dl>
+<dt>Node id</dt><dd>the identity the peer announced in the handshake.</dd>
+<dt>Address</dt><dd>where this peer can be reached.</dd>
+<dt>Height, Tip</dt><dd>the chain the peer last reported. A tip different from the other peers' means a fork, or a peer that is catching up.</dd>
+<dt>Inbound</dt><dd>yes: the peer dialed this node. no: this node dialed the peer.</dd>
+<dt>Last seen</dt><dd>the last message received from the peer.</dd>
+<dt>Known addresses</dt><dd>peers the node has heard of and may dial.</dd>
+</dl>
+</span></span></div>
+<p class="page-meta"><span>Connections reported by each node</span></p>
+</div>
+{{template "peers" .}}
+{{- end}}
+
 {{define "peers" -}}
-<section id="peers" hx-get="/fragments/peers" hx-trigger="every 2s" hx-swap="outerHTML">
-<h2>Peers</h2>
+<section id="peers" class="stack stack--lg" hx-get="/fragments/peers" hx-trigger="every 2s" hx-swap="outerHTML">
 {{- range .Nodes}}
-<article class="card">
-<h3>{{.Name}}</h3>
+<section class="section" id="{{.Name}}" aria-labelledby="{{.Name}}-peers">
+<div class="section-head"><h2 class="section-title"><a href="/n/{{pe .Name}}/" id="{{.Name}}-peers">{{.Name}}</a></h2></div>
 {{- if .Err}}
-<p role="alert">{{.Err}}</p>
+<p class="error-text" role="alert">{{.Err}}</p>
 {{- else if .Disabled}}
 <p class="muted">No peer-to-peer layer.</p>
 {{- else}}
 {{- if .Peers}}
-<table>
-<caption>Connected peers</caption>
-<thead><tr><th>Node id</th><th>Address</th><th>Height</th><th>Tip</th><th>Inbound</th><th>Last seen</th></tr></thead>
+<div class="table-wrap"><table class="table">
+<caption class="sr-only">Connected peers</caption>
+<thead><tr><th scope="col">Node id</th><th scope="col">Address</th><th scope="col" class="col-num">Height</th><th scope="col">Tip</th><th scope="col">Inbound</th><th scope="col" class="col-num">Last seen</th></tr></thead>
 <tbody>
 {{- range .Peers}}
-<tr><td class="mono">{{.NodeID}}</td><td class="mono">{{.Addr}}</td><td>{{.Height}}</td><td class="mono">{{.TipHash}}</td><td>{{if .Inbound}}yes{{else}}no{{end}}</td><td>{{.LastSeen.Format "2006-01-02T15:04:05Z07:00"}}</td></tr>
+<tr><td class="mono">{{.NodeID}}</td><td class="mono nowrap">{{.Addr}}</td><td class="col-num">{{.Height}}</td><td class="col-hash"><span class="hash" title="{{.TipHash}}"><span class="hash-start">{{hstart .TipHash}}</span><span class="hash-end">{{hend .TipHash}}</span></span></td><td>{{if .Inbound}}yes{{else}}no{{end}}</td><td class="col-num">{{.LastSeen.Format "2006-01-02T15:04:05Z07:00"}}</td></tr>
 {{- end}}
 </tbody>
-</table>
+</table></div>
 {{- else}}
 <p class="muted">No connected peers.</p>
 {{- end}}
 {{- if .Addrs}}
-<h4>Known addresses</h4>
-<ul class="peers">
-{{- range .Addrs}}
-<li>{{.}}</li>
-{{- end}}
-</ul>
+<p class="page-meta"><span class="subhead">Known addresses</span>{{range .Addrs}}<code>{{.}}</code>{{end}}</p>
 {{- end}}
 {{- end}}
-</article>
+</section>
 {{- end}}
 </section>
 {{- end}}

@@ -1,19 +1,24 @@
+{{define "infobtn" -}}
+<button type="button" class="info-btn" aria-label="How to read this page" aria-describedby="{{.}}">i</button>
+{{- end}}
+
 {{define "txlist" -}}
+<div class="tx-list">
 {{- range .}}
 <article class="tx">
-<h3>{{if .Tx.ID}}<a class="mono" href="/n/{{pe .Node}}/tx/{{pe .Tx.ID}}">{{.Tx.ID}}</a>{{else}}<span class="mono">(no id)</span>{{end}}</h3>
+<div class="tx-head">{{if .Tx.ID}}<a class="hash" href="/n/{{pe .Node}}/tx/{{pe .Tx.ID}}" title="{{.Tx.ID}}"><span class="hash-start">{{hstart .Tx.ID}}</span><span class="hash-end">{{hend .Tx.ID}}</span></a>{{else}}<span class="mono">(no id)</span>{{end}}<span class="muted">{{.Tx.Timestamp.Format "2006-01-02T15:04:05Z07:00"}}</span></div>
 {{template "txbody" .}}
 </article>
 {{- else}}
-<p class="muted">No transactions.</p>
+<div class="empty empty--inline"><span class="empty-icon" aria-hidden="true">∅</span><p class="empty-title">No transactions</p></div>
 {{- end}}
+</div>
 {{- end}}
 
 {{define "txbody" -}}
 {{- $node := .Node}}
-<p class="muted">{{.Tx.Timestamp.Format "2006-01-02T15:04:05Z07:00"}}</p>
 {{- if .Tx.Contract}}
-<dl>
+<dl class="kv">
 <dt>Contract</dt><dd>{{.Tx.Contract.Kind}}</dd>
 {{- if .Tx.Contract.Code}}<dt>Code</dt><dd class="mono">{{.Tx.Contract.Code}}</dd>{{end}}
 {{- if .Tx.Contract.Target}}<dt>Target</dt><dd><a class="mono" href="/n/{{pe $node}}/contract/{{pe .Tx.Contract.Target}}">{{.Tx.Contract.Target}}</a></dd>{{end}}
@@ -21,26 +26,33 @@
 <dt>Gas limit</dt><dd>{{.Tx.Contract.GasLimit}}</dd>
 </dl>
 {{- end}}
+<div class="tx-flow">
+<div class="io"><span class="subhead">Inputs</span>
 {{- if .Tx.Inputs}}
-<table>
-<caption>Inputs</caption>
-<thead><tr><th>Spends</th><th>Index</th><th>Public key</th><th>Signature</th></tr></thead>
+<div class="table-wrap"><table class="table table--compact">
+<caption class="sr-only">Inputs</caption>
+<thead><tr><th scope="col">Spends</th><th scope="col" class="col-fit">Index</th><th scope="col">Public key</th><th scope="col">Signature</th></tr></thead>
 <tbody>
 {{- range .Tx.Inputs}}
-<tr><td><a class="mono" href="/n/{{pe $node}}/tx/{{pe .PrevTxID}}">{{.PrevTxID}}</a></td><td>{{.OutIndex}}</td><td class="mono">{{.PublicKey}}</td><td class="mono">{{.Signature}}</td></tr>
+<tr><td class="col-hash"><a class="hash" href="/n/{{pe $node}}/tx/{{pe .PrevTxID}}" title="{{.PrevTxID}}"><span class="hash-start">{{hstart .PrevTxID}}</span><span class="hash-end">{{hend .PrevTxID}}</span></a></td><td class="col-fit">{{.OutIndex}}</td><td class="mono">{{.PublicKey}}</td><td class="mono">{{.Signature}}</td></tr>
 {{- end}}
 </tbody>
-</table>
+</table></div>
 {{- else}}
-<p class="muted">No inputs (coinbase or genesis).</p>
+<p class="empty-value">No inputs (coinbase or genesis).</p>
 {{- end}}
-<table>
-<caption>Outputs</caption>
-<thead><tr><th>Index</th><th>Amount (base units)</th><th>Address</th></tr></thead>
+</div>
+<span class="tx-flow-arrow" aria-hidden="true">→</span>
+<div class="io"><span class="subhead">Outputs</span>
+<div class="table-wrap"><table class="table table--compact">
+<caption class="sr-only">Outputs</caption>
+<thead><tr><th scope="col" class="col-fit">Index</th><th scope="col">Address</th><th scope="col" class="col-num">Amount (coins)</th></tr></thead>
 <tbody>
 {{- range $i, $o := .Tx.Outputs}}
-<tr><td>{{$i}}</td><td>{{$o.Amount}}</td><td><a class="mono" href="/n/{{pe $node}}/address/{{pe $o.Address}}">{{$o.Address}}</a></td></tr>
+<tr><td class="col-fit">{{$i}}</td><td class="col-hash"><a class="hash" href="/n/{{pe $node}}/address/{{pe $o.Address}}" title="{{$o.Address}}"><span class="hash-start">{{hstart $o.Address}}</span><span class="hash-end">{{hend $o.Address}}</span></a></td><td class="col-num"><span class="num" title="{{units $o.Amount}} base units">{{coins $o.Amount}}</span></td></tr>
 {{- end}}
 </tbody>
-</table>
+</table></div>
+</div>
+</div>
 {{- end}}

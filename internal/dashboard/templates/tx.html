@@ -1,30 +1,39 @@
 {{define "tx" -}}
-<section>
-<h2>Transaction of {{.Node}}</h2>
+<div class="page-head"><div class="page-title"><h1>Transaction</h1><span class="page-sub">{{.Node}}</span><span class="info">{{template "infobtn" "tx-help"}}<span class="info-tip" id="tx-help" role="tooltip">
+<p><strong>How to read this page.</strong> One transaction and the block that includes it.</p>
 <dl>
-<dt>Id</dt><dd class="mono">{{.Item.Tx.ID}}</dd>
-<dt>Block</dt><dd><a href="/n/{{pe .Node}}/block/{{.Height}}">{{.Height}}</a> <span class="mono">{{.BlockHash}}</span></dd>
+<dt>Inputs</dt><dd>outputs of earlier transactions that this one spends (the UTXO model). A coinbase or genesis transaction has none.</dd>
+<dt>Outputs</dt><dd>new coins assigned to an address, shown in coins (1 coin = 10^8 base units; hover an amount for the exact count). An output stays unspent until a later transaction uses it, whole.</dd>
+<dt>Fee</dt><dd>inputs minus outputs; it goes to the miner.</dd>
+<dt>Merkle proof</dt><dd>shows the transaction is in the block without listing the others: hash the leaf together with each sibling on the path (side = left or right) up to the root, which must equal the block's Merkle root. An empty path means it is the only transaction.</dd>
+</dl>
+</span></span></div></div>
+<dl class="kv kv--wide">
+<dt>Id</dt><dd><code class="hash-full">{{.Item.Tx.ID}}</code></dd>
+<dt>Block</dt><dd><a href="/n/{{pe .Node}}/block/{{.Height}}">{{.Height}}</a> <span class="muted">·</span> <span class="hash mono" title="{{.BlockHash}}">{{.BlockHash}}</span></dd>
+<dt>Time</dt><dd>{{.Item.Tx.Timestamp.Format "2006-01-02T15:04:05Z07:00"}}</dd>
 </dl>
 {{template "txbody" .Item}}
-<h3>Merkle proof</h3>
+<section class="section" aria-labelledby="merkle">
+<div class="section-head"><h2 class="section-title" id="merkle">Merkle proof</h2></div>
 {{- with .Proof}}
-<dl>
-<dt>Merkle root</dt><dd class="mono">{{.MerkleRoot}}</dd>
+<dl class="kv kv--wide">
+<dt>Merkle root</dt><dd><code class="hash-full">{{.MerkleRoot}}</code></dd>
 <dt>Leaf index</dt><dd>{{.LeafIndex}}</dd>
-<dt>Leaf hash</dt><dd class="mono">{{.LeafHash}}</dd>
+<dt>Leaf hash</dt><dd><code class="hash-full">{{.LeafHash}}</code></dd>
 </dl>
 {{- if .Steps}}
-<table>
-<caption>Sibling path, leaf to root</caption>
-<thead><tr><th>Step</th><th>Side</th><th>Hash</th></tr></thead>
+<div class="table-wrap"><table class="table table--compact">
+<caption class="sr-only">Sibling path, leaf to root</caption>
+<thead><tr><th scope="col" class="col-fit">Step</th><th scope="col">Side</th><th scope="col">Hash</th></tr></thead>
 <tbody>
 {{- range $i, $s := .Steps}}
-<tr><td>{{$i}}</td><td>{{$s.Side}}</td><td class="mono">{{$s.Hash}}</td></tr>
+<tr><td class="col-fit">{{$i}}</td><td>{{$s.Side}}</td><td class="mono">{{$s.Hash}}</td></tr>
 {{- end}}
 </tbody>
-</table>
+</table></div>
 {{- else}}
-<p class="muted">The sibling path is empty: the leaf is the root.</p>
+<p class="empty-value">The sibling path is empty: the leaf is the root.</p>
 {{- end}}
 {{- else}}
 <p class="muted">The node has no proof for this transaction.</p>
