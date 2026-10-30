@@ -124,8 +124,9 @@ func (s *server) nodePage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := struct {
-		Name string
-		Card *Card
+		Name   string
+		Card   *Card
+		Latest homeView
 	}{Name: name}
 
 	for _, c := range s.poll.View().Cards {
@@ -134,6 +135,13 @@ func (s *server) nodePage(w http.ResponseWriter, r *http.Request) {
 
 			break
 		}
+	}
+
+	if data.Card != nil && data.Card.Seen {
+		node, _ := s.lookup(name)
+		data.Latest = s.loadHome(r.Context(), node, data.Card.Height)
+	} else {
+		data.Latest.Msg = "Latest activity appears after the first poll of this node."
 	}
 
 	s.show(w, name, "node", data, false)

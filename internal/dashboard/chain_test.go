@@ -1,8 +1,13 @@
 package dashboard_test
 
 import (
+	"context"
+	"fmt"
+	"maps"
+	"math"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,7 +23,10 @@ const (
 	owner   = "00112233445566778899aabbccddeeff0011223344556677"
 )
 
-var ownerAddr = owner + "ab" // 50 lowercase hex
+var (
+	ownerAddr       = owner + "ab" // 50 lowercase hex
+	badChecksumAddr = owner + "cd" // 50 lowercase hex the node answers 400 for
+)
 
 // reply is a canned node answer.
 type reply struct {
@@ -91,6 +99,7 @@ func fullChainNode(t *testing.T) *countingNode {
 	routes["/tx/"+txA] = ok(`{"transaction":` + txJSON(txA, ownerAddr) + `,"block_hash":"` + blkHash + `","height":1}`)
 	routes["/tx/"+txA+"/proof"] = ok(`{"tx_id":"` + txA + `","block_index":1,"block_hash":"` + blkHash + `","merkle_root":"rootrootroot","leaf_index":2,"leaf_hash":"leafleaf","proof":[{"hash":"sib0","side":"left"},{"hash":"sib1","side":"right"}]}`)
 	routes["/balance/"+ownerAddr] = ok(`{"address":"` + ownerAddr + `","balance":4200,"utxos":[{"txid":"` + txA + `","index":0,"amount":4200}]}`)
+	routes["/balance/"+badChecksumAddr] = reply{http.StatusBadRequest, `{"error":"checksum"}`}
 	routes["/address/"+ownerAddr+"/txs?limit=25"] = ok(`{"address":"` + ownerAddr + `","txs":[{"transaction":` + txJSON(txA, ownerAddr) + `,"block_hash":"` + blkHash + `","height":1,"timestamp":"2026-01-02T03:04:05Z"}],"limit":25,"next":"` + txA + `","pruned_below":0}`)
 	routes["/address/"+ownerAddr+"/txs?limit=25&after="+txA] = ok(`{"address":"` + ownerAddr + `","txs":[],"limit":25,"pruned_below":7}`)
 	routes["/contracts/"+txA] = ok(`{"id":"` + txA + `","code":"0102","storage":{"10":7,"2":5,"11":8}}`)
@@ -130,6 +139,118 @@ func TestChainRoutesShowTheNodeValues(t *testing.T) {
 				t.Errorf("GET %s lacks %q", path, want)
 			}
 		}
+	}
+}
+
+// homeServer serves one node, node1, after one poll. blocksBody, when set, answers /blocks.
+func homeServer(t *testing.T, height int, blocksBody string) (http.Handler, *chainNode) {
+	t.Helper()
+
+	c := newChainNode(t, height, strings.Repeat("a", 64))
+	if blocksBody != "" {
+		c.blocks.Store(blocksBody)
+	}
+
+	p := newPoller(t, c)
+	p.Tick(context.Background())
+
+	node := c.node(t)
+	node.Name = "node1"
+
+	h, err := dashboard.NewServer([]dashboard.Node{node}, dashboard.NewFetcher(time.Second, 1<<20), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return h, c
+}
+
+func TestNodeHomeShowsLatestBlocksAndTransactions(t *testing.T) {
+	t.Parallel()
+
+	var blocks []string
+
+	for i := 3; i <= 12; i++ {
+		blocks = append(blocks, blockJSON(i, fmt.Sprintf("%064x", 1000+i),
+			txJSON(fmt.Sprintf("%064x", 2*i), ownerAddr), txJSON(fmt.Sprintf("%064x", 2*i+1), ownerAddr)))
+	}
+
+	h, c := homeServer(t, 12, `{"blocks":[`+strings.Join(blocks, ",")+`]}`)
+
+	c.mu.Lock()
+	before := len(c.seen)
+	c.mu.Unlock()
+
+	rec := do(h, http.MethodGet, "/n/node1/")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /n/node1/ = %d: %s", rec.Code, rec.Body)
+	}
+
+	page := rec.Body.String()
+
+	if !strings.Contains(page, `class="stat-value">12</span>`) || !strings.Contains(page, `href="/n/node1/block/`+strings.Repeat("a", 64)+`"`) {
+		t.Error("the redesign stats are missing")
+	}
+
+	top := strings.Index(page, `href="/n/node1/block/12"`)
+	bottom := strings.Index(page, `href="/n/node1/block/3"`)
+
+	if top < 0 || bottom < 0 || top > bottom {
+		t.Errorf("blocks are not newest first: block 12 at %d, block 3 at %d", top, bottom)
+	}
+
+	var want []string
+
+	for i := 12; i >= 8; i-- {
+		want = append(want, fmt.Sprintf("%064x", 2*i), fmt.Sprintf("%064x", 2*i+1))
+	}
+
+	if n := strings.Count(page, `href="/n/node1/tx/`); n != 10 {
+		t.Errorf("transaction links = %d, want 10", n)
+	}
+
+	last := -1
+
+	for _, id := range want {
+		at := strings.Index(page, `href="/n/node1/tx/`+id+`"`)
+		if at <= last {
+			t.Errorf("transaction %s is missing or out of order (at %d after %d)", id, at, last)
+		}
+
+		last = at
+	}
+
+	c.mu.Lock()
+	got := slices.Clone(c.seen[before:])
+	c.mu.Unlock()
+
+	if !slices.Equal(got, []string{"GET /blocks?from=3&limit=10"}) {
+		t.Errorf("the page made %v, want one GET /blocks?from=3&limit=10", got)
+	}
+}
+
+func TestNodeHomeBlocksFailureIsLocal(t *testing.T) {
+	t.Parallel()
+
+	h, _ := homeServer(t, 12, "")
+
+	rec := do(h, http.MethodGet, "/n/node1/")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /n/node1/ = %d: %s", rec.Code, rec.Body)
+	}
+
+	page := rec.Body.String()
+
+	if !strings.Contains(page, "Latest activity not available") {
+		t.Error("the failed read is not shown")
+	}
+
+	if strings.Contains(page, ">Latest blocks<") {
+		t.Error("the block list is shown after a failed read")
+	}
+
+	if !strings.Contains(page, `href="/n/node1/blocks"`) {
+		t.Error("the tiles are missing")
 	}
 }
 
@@ -280,15 +401,19 @@ func TestSearch(t *testing.T) {
 		q    string
 		want string // Location, empty for the search page
 	}{
-		{"7", "/n/node1/block/7"},
-		{"  7 ", "/n/node1/block/7"},
+		{"1", "/n/node1/block/1"},
+		{"  1 ", "/n/node1/block/1"},
 		{txA, "/n/node1/tx/" + txA},
-		{txB, "/n/node1/block/" + txB},
+		{strings.ToUpper(txA), "/n/node1/tx/" + txA},
+		{blkHash, "/n/node1/block/" + blkHash},
 		{ownerAddr, "/n/node1/address/" + ownerAddr},
+		{strings.ToUpper(ownerAddr), "/n/node1/address/" + ownerAddr},
+		{"7", ""},
+		{"  7 ", ""},
+		{txB, ""},
+		{badChecksumAddr, ""},
 		{"hello", ""},
 		{"", ""},
-		{strings.ToUpper(txA), ""},
-		{strings.ToUpper(ownerAddr), ""},
 		{"../etc", ""},
 		{"http://evil.example/", ""},
 		{strings.Repeat("9", 200), ""},
@@ -301,12 +426,18 @@ func TestSearch(t *testing.T) {
 		rec := do(h, http.MethodGet, "/search?node=node1&q="+url.QueryEscape(tc.q))
 
 		if tc.want == "" {
-			if rec.Code != http.StatusOK || rec.Header().Get("Location") != "" {
-				t.Errorf("q=%q: %d Location %q, want the search page", tc.q, rec.Code, rec.Header().Get("Location"))
+			// An empty query, or one too long to look at, gets the plain page; a miss is a 404.
+			wantStatus, wantMiss := http.StatusNotFound, true
+			if q := strings.TrimSpace(tc.q); q == "" || len(q) > 128 {
+				wantStatus, wantMiss = http.StatusOK, false
 			}
 
-			if tc.q != "" && len(tc.q) <= 128 && !strings.Contains(rec.Body.String(), "Not found") {
-				t.Errorf("q=%q: page lacks Not found", tc.q)
+			if rec.Code != wantStatus || rec.Header().Get("Location") != "" {
+				t.Errorf("q=%q: %d Location %q, want %d without a Location", tc.q, rec.Code, rec.Header().Get("Location"), wantStatus)
+			}
+
+			if strings.Contains(rec.Body.String(), "Not found") != wantMiss {
+				t.Errorf("q=%q: Not found shown = %t, want %t", tc.q, !wantMiss, wantMiss)
 			}
 
 			continue
@@ -340,18 +471,50 @@ func TestSearchUsesOnlyAllowlistedReads(t *testing.T) {
 	n := fullChainNode(t)
 	h := chainServer(t, n)
 
-	for _, q := range []string{"7", ownerAddr, "nope", "../x", strings.ToUpper(txA)} {
+	for _, q := range []string{"nope", "../x"} {
 		do(h, http.MethodGet, "/search?node=node1&q="+url.QueryEscape(q))
 	}
 
 	if n.hits.Load() != 0 {
-		t.Errorf("search without a transaction id read the node: %v", n.seen)
+		t.Errorf("search without a known shape read the node: %v", n.seen)
 	}
 
-	do(h, http.MethodGet, "/search?node=node1&q="+txA)
+	for _, q := range []string{"7", ownerAddr, strings.ToUpper(txA)} {
+		do(h, http.MethodGet, "/search?node=node1&q="+url.QueryEscape(q))
+	}
 
-	if len(n.seen) != 1 || n.seen[0] != "GET /tx/"+txA {
-		t.Errorf("node saw %v, want one GET /tx/%s", n.seen, txA)
+	// One read per query: the height and the address stop at their first answer, the id at the transaction.
+	want := []string{"GET /block/7", "GET /balance/" + ownerAddr, "GET /tx/" + txA}
+	if !slices.Equal(n.seen, want) {
+		t.Errorf("node saw %v, want %v", n.seen, want)
+	}
+}
+
+func TestSearchPrefersTransactionOverBlockHash(t *testing.T) {
+	t.Parallel()
+
+	n := routedNode(t, map[string]reply{
+		"/tx/" + txA:    ok(`{}`),
+		"/block/" + txA: ok(`{}`),
+	})
+
+	rec := do(chainServer(t, n), http.MethodGet, "/search?node=node1&q="+txA)
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/n/node1/tx/"+txA {
+		t.Errorf("= %d Location %q, want 303 to the transaction", rec.Code, rec.Header().Get("Location"))
+	}
+}
+
+func TestSearchNodeErrorIsAPageNotARedirect(t *testing.T) {
+	t.Parallel()
+
+	n := routedNode(t, map[string]reply{
+		"/tx/" + txA:    {http.StatusInternalServerError, `{}`},
+		"/block/" + txA: ok(`{}`),
+	})
+
+	rec := do(chainServer(t, n), http.MethodGet, "/search?node=node1&q="+txA)
+	if rec.Code != http.StatusBadGateway || rec.Header().Get("Location") != "" || !strings.Contains(rec.Body.String(), "node node1 answered with status 500") {
+		t.Errorf("= %d Location %q: %s", rec.Code, rec.Header().Get("Location"), rec.Body)
 	}
 }
 
@@ -536,6 +699,215 @@ func TestEveryChainScreenExplainsItselfOutsideTheRefreshedFragment(t *testing.T)
 	for _, frag := range []string{"/fragments/peers", "/fragments/n/node1/mempool", "/fragments/n/node1/blocks"} {
 		if body := do(h, http.MethodGet, frag).Body.String(); strings.Contains(body, `role="tooltip"`) {
 			t.Errorf("GET %s carries the help tooltip", frag)
+		}
+	}
+}
+
+func TestPendingTxShowsItsPosition(t *testing.T) {
+	t.Parallel()
+
+	n := routedNode(t, map[string]reply{
+		"/tx/" + txB: {http.StatusNotFound, `{"error":"nope"}`},
+		"/mempool":   ok(`{"transactions":[` + txJSON(txA, ownerAddr) + `,` + txJSON(txB, ownerAddr) + `]}`),
+	})
+
+	rec := do(chainServer(t, n), http.MethodGet, "/n/node1/tx/"+txB)
+	body := rec.Body.String()
+
+	// The proof section's anchor, not its text: the help tooltip always names the Merkle proof.
+	if rec.Code != http.StatusOK || !strings.Contains(body, "Pending: position 2 of 2") || strings.Contains(body, `id="merkle"`) {
+		t.Errorf("= %d: %s", rec.Code, body)
+	}
+
+	if slices.Contains(n.seen, "GET /tx/"+txB+"/proof") {
+		t.Errorf("pending transaction read its proof: %v", n.seen)
+	}
+}
+
+func TestTxPageNodeErrorIsNotPending(t *testing.T) {
+	t.Parallel()
+
+	n := routedNode(t, map[string]reply{
+		"/tx/" + txA: {http.StatusInternalServerError, `{}`},
+		"/mempool":   ok(`{"transactions":[` + txJSON(txA, ownerAddr) + `]}`),
+	})
+
+	rec := do(chainServer(t, n), http.MethodGet, "/n/node1/tx/"+txA)
+	if rec.Code != http.StatusBadGateway {
+		t.Errorf("= %d, want 502: %s", rec.Code, rec.Body)
+	}
+
+	if slices.Contains(n.seen, "GET /mempool") {
+		t.Errorf("node error read the mempool: %v", n.seen)
+	}
+}
+
+func TestTxNeitherInChainNorInPoolIs404(t *testing.T) {
+	t.Parallel()
+
+	n := routedNode(t, map[string]reply{
+		"/mempool": ok(`{"transactions":[` + txJSON(txA, ownerAddr) + `]}`),
+	})
+
+	if rec := do(chainServer(t, n), http.MethodGet, "/n/node1/tx/"+txB); rec.Code != http.StatusNotFound {
+		t.Errorf("= %d, want 404: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestMempoolRowsShowPosition(t *testing.T) {
+	t.Parallel()
+
+	n := routedNode(t, map[string]reply{
+		"/mempool": ok(`{"transactions":[` + txJSON(txA, ownerAddr) + `,` + txJSON(txB, ownerAddr) + `]}`),
+	})
+
+	body := do(chainServer(t, n), http.MethodGet, "/n/node1/mempool").Body.String()
+
+	first, second := strings.Index(body, "#1 "), strings.Index(body, "#2 ")
+	if first < 0 || second < first {
+		t.Errorf("rows lack #1 before #2: %s", body)
+	}
+}
+
+// feeTxJSON is a transaction whose inputs and outputs are JSON fragments.
+func feeTxJSON(id, inputs, outputs string) string {
+	return `{"ID":"` + id + `","Inputs":[` + inputs + `],"Outputs":[` + outputs + `],"Timestamp":"2026-01-02T03:04:05Z"}`
+}
+
+// spendJSON is an input that spends output index of prev.
+func spendJSON(prev string, index int) string {
+	return `{"PrevTxID":"` + prev + `","OutIndex":` + itoa(index) + `,"PublicKey":"pk1","Signature":"sig1"}`
+}
+
+// payJSON is an output of amount to ownerAddr.
+func payJSON(amount uint64) string {
+	return `{"Amount":` + strconv.FormatUint(amount, 10) + `,"Address":"` + ownerAddr + `"}`
+}
+
+const unknownFee = "Fee unknown: a spent output could not be read."
+
+func TestTxFee(t *testing.T) {
+	t.Parallel()
+
+	// txB's output 3 holds 5000 base units.
+	prevB := feeTxJSON(txB, "", strings.Join([]string{payJSON(1), payJSON(2), payJSON(3), payJSON(5000)}, ","))
+
+	cases := []struct {
+		name    string
+		id      string // the transaction the page asks for; txA when empty
+		inputs  string
+		outputs string
+		extra   map[string]reply
+		want    string
+	}{
+		{name: "coinbase", inputs: "", outputs: payJSON(4200), want: "No fee (coinbase or genesis)."},
+		{name: "one input", inputs: spendJSON(txB, 3), outputs: payJSON(4200), want: `title="800 base units"`},
+		{name: "outputs above inputs", inputs: spendJSON(txB, 3), outputs: payJSON(5001), want: unknownFee},
+		{name: "index out of range", inputs: spendJSON(txB, 9), outputs: payJSON(1), want: unknownFee},
+		{name: "outputs overflow", inputs: spendJSON(txB, 3), outputs: payJSON(math.MaxUint64) + "," + payJSON(1), want: unknownFee},
+		{name: "index equals output count", inputs: spendJSON(txB, 4), outputs: payJSON(1), want: unknownFee},
+		{name: "inputs equal outputs", inputs: spendJSON(txB, 3), outputs: payJSON(5000), want: `title="0 base units"`},
+		{
+			name: "inputs overflow", inputs: spendJSON(txB, 0) + "," + spendJSON(txB, 1), outputs: payJSON(1),
+			extra: map[string]reply{"/tx/" + txB: ok(`{"transaction":` + feeTxJSON(txB, "", payJSON(math.MaxUint64)+","+payJSON(math.MaxUint64)) + `}`)},
+			want:  unknownFee,
+		},
+		{
+			name: "spent tx fails", inputs: spendJSON(txB, 3), outputs: payJSON(4200),
+			extra: map[string]reply{"/tx/" + txB: {http.StatusInternalServerError, `{}`}}, want: unknownFee,
+		},
+		{
+			// txA is not in a block any more: its output comes from the pool, and txB is pending.
+			name: "pending spends the pool", id: txB,
+			extra: map[string]reply{
+				"/tx/" + txA: {http.StatusNotFound, `{"error":"nope"}`},
+				"/tx/" + txB: {http.StatusNotFound, `{"error":"nope"}`},
+				"/mempool":   ok(`{"transactions":[` + feeTxJSON(txA, "", payJSON(9000)) + `,` + feeTxJSON(txB, spendJSON(txA, 0), payJSON(8000)) + `]}`),
+			},
+			want: `title="1,000 base units"`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			id := tc.id
+			if id == "" {
+				id = txA
+			}
+
+			routes := map[string]reply{
+				"/tx/" + txA: ok(`{"transaction":` + feeTxJSON(txA, tc.inputs, tc.outputs) + `,"block_hash":"` + blkHash + `","height":1}`),
+				"/tx/" + txB: ok(`{"transaction":` + prevB + `}`),
+			}
+			maps.Copy(routes, tc.extra)
+
+			n := routedNode(t, routes)
+
+			rec := do(chainServer(t, n), http.MethodGet, "/n/node1/tx/"+id)
+			if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), tc.want) {
+				t.Errorf("= %d, want %q in the page: %s", rec.Code, tc.want, rec.Body)
+			}
+		})
+	}
+}
+
+func TestTxFeeCapsSpentReads(t *testing.T) {
+	t.Parallel()
+
+	// spends distinct transactions, each paying 10 base units; the tx pays 5 out, so 16 spends are 155.
+	for _, spends := range []int{16, 17} {
+		routes := map[string]reply{}
+
+		var inputs []string
+
+		var prevs []string
+
+		for i := range spends {
+			prev := fmt.Sprintf("%064x", i+1)
+			prevs = append(prevs, prev)
+			routes["/tx/"+prev] = ok(`{"transaction":` + feeTxJSON(prev, "", payJSON(10)) + `}`)
+			inputs = append(inputs, spendJSON(prev, 0))
+		}
+
+		routes["/tx/"+txA] = ok(`{"transaction":` + feeTxJSON(txA, strings.Join(inputs, ","), payJSON(5)) + `,"block_hash":"` + blkHash + `","height":1}`)
+
+		n := routedNode(t, routes)
+
+		rec := do(chainServer(t, n), http.MethodGet, "/n/node1/tx/"+txA)
+		body := rec.Body.String()
+
+		if spends == 17 {
+			if rec.Code != http.StatusOK || !strings.Contains(body, "Fee not computed: it spends more than 16 transactions.") {
+				t.Errorf("17 spends: = %d: %s", rec.Code, body)
+			}
+
+			for _, prev := range prevs {
+				if slices.Contains(n.seen, "GET /tx/"+prev) {
+					t.Errorf("17 spends read %s: %v", prev, n.seen)
+				}
+			}
+
+			continue
+		}
+
+		if rec.Code != http.StatusOK || !strings.Contains(body, `title="155 base units"`) {
+			t.Errorf("16 spends: = %d: %s", rec.Code, body)
+		}
+
+		for _, prev := range prevs {
+			got := 0
+
+			for _, req := range n.seen {
+				if req == "GET /tx/"+prev {
+					got++
+				}
+			}
+
+			if got != 1 {
+				t.Errorf("16 spends: %s read %d times, want 1", prev, got)
+			}
 		}
 	}
 }

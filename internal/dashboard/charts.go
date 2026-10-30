@@ -40,29 +40,34 @@ type lineChart struct {
 	Min, Max string
 }
 
-// chartsView is what the charts fragment renders. IntervalMsg replaces the interval chart when the
-// chosen node's headers cannot be drawn; the height chart does not depend on it.
+// chartsView is what the charts fragment renders. Each *Msg replaces its chart when that chart's
+// data cannot be drawn; the others do not depend on it. The height chart does not depend on any.
 type chartsView struct {
-	Node        string
-	Intervals   barChart
-	IntervalMsg string
-	Heights     lineChart
-	HasHeights  bool
-	Ticks       int
+	Node          string
+	Intervals     barChart
+	IntervalMsg   string
+	Txs           barChart
+	TxsMsg        string
+	Difficulty    barChart
+	DifficultyMsg string
+	Heights       lineChart
+	HasHeights    bool
+	Ticks         int
 }
 
 func f2(v float64) string { return fmt.Sprintf("%.2f", v) }
 
-// intervalChart draws one bar per value, scaled so the largest fills the plot. Values come only
-// from parsed numbers; a negative one (clock skew between nodes) is drawn as zero.
-func intervalChart(values []float64) barChart {
+// bars draws one bar per value, scaled so the largest fills the plot and captioned with label of
+// that largest value. Values come only from parsed numbers; a negative one (clock skew between
+// nodes) is drawn as zero.
+func bars(values []float64, label func(top float64) string) barChart {
 	top := 0.0
 	for _, v := range values {
 		top = max(top, v)
 	}
 
 	slot := float64(chartWidth) / float64(max(len(values), 1))
-	chart := barChart{Max: fmt.Sprintf("%.1f s", top)}
+	chart := barChart{Max: label(top)}
 
 	for i, v := range values {
 		h := 0.0
@@ -77,6 +82,14 @@ func intervalChart(values []float64) barChart {
 
 	return chart
 }
+
+// intervalChart draws the seconds between consecutive blocks.
+func intervalChart(values []float64) barChart {
+	return bars(values, func(t float64) string { return fmt.Sprintf("%.1f s", t) })
+}
+
+// whole labels a chart whose values are counts or difficulties.
+func whole(t float64) string { return fmt.Sprintf("%.0f", t) }
 
 // heightChart draws one polyline per node over the ticks the poller kept. All lines share one
 // scale; a chart where every height is equal is drawn at mid height.
@@ -115,31 +128,34 @@ func heightChart(history []Series) lineChart {
 	return chart
 }
 
-// charts builds both charts for node. The height history comes from the poller; the intervals cost
-// one /headers read of the node, from the height the poller last saw.
+// charts builds the charts for node. The height history comes from the poller; the intervals and
+// difficulties cost one /headers read of the node, the transactions one /blocks read, all over the
+// same last headerCount blocks as of the height the poller last saw.
 func (s *server) charts(ctx context.Context, node Node) chartsView {
 	view := chartsView{Node: node.Name, Ticks: HistoryTicks, Heights: heightChart(s.poll.History())}
 	view.HasHeights = len(view.Heights.Lines) > 0
 
 	snap, ok := s.cardOf(node.Name)
 	if !ok || !snap.Seen || snap.Height < 1 {
-		view.IntervalMsg = "Not enough blocks yet."
+		view.IntervalMsg, view.TxsMsg, view.DifficultyMsg = tooFewBlocks, tooFewBlocks, tooFewBlocks
 
 		return view
 	}
 
+	from := max(snap.Height-headerCount+1, 0)
+
 	var headers headersBody
 
-	perr := s.read(ctx, node, Headers(max(snap.Height-headerCount+1, 0), headerCount), &headers)
+	perr := s.read(ctx, node, Headers(from, headerCount), &headers)
 	if perr != nil {
-		view.IntervalMsg = notAvailable
+		view.IntervalMsg, view.TxsMsg, view.DifficultyMsg = notAvailable, notAvailable, notAvailable
 
 		return view
 	}
 
 	blocks := headers.Blocks
 	if len(blocks) < 2 {
-		view.IntervalMsg = "Not enough blocks yet."
+		view.IntervalMsg, view.TxsMsg, view.DifficultyMsg = tooFewBlocks, tooFewBlocks, tooFewBlocks
 
 		return view
 	}
@@ -150,6 +166,30 @@ func (s *server) charts(ctx context.Context, node Node) chartsView {
 	}
 
 	view.Intervals = intervalChart(values)
+
+	difficulties := make([]float64, len(blocks))
+	for i := range difficulties {
+		difficulties[i] = float64(blocks[i].Difficulty)
+	}
+
+	view.Difficulty = bars(difficulties, whole)
+
+	var body struct {
+		Blocks []nodeBlock `json:"blocks"`
+	}
+
+	if err := s.read(ctx, node, Blocks(from, headerCount), &body); err != nil {
+		view.TxsMsg = notAvailable
+
+		return view
+	}
+
+	txs := make([]float64, len(body.Blocks))
+	for i := range txs {
+		txs[i] = float64(len(body.Blocks[i].Transactions))
+	}
+
+	view.Txs = bars(txs, whole)
 
 	return view
 }
@@ -185,3 +225,5 @@ func (s *server) cardOf(name string) (Snapshot, bool) {
 
 	return Snapshot{}, false
 }
+
+const tooFewBlocks = "Not enough blocks yet."

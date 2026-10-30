@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/bits"
 	"net/http"
 	"net/url"
 	"slices"
@@ -22,8 +23,17 @@ const historyLimit = 25
 // blocksLimit is the page size of the Blocks screen, the node default.
 const blocksLimit = 20
 
+// homeBlocks and homeTxs bound the latest activity on a node page.
+const (
+	homeBlocks = 10
+	homeTxs    = 10
+)
+
 // maxQueryLen bounds what /search will look at.
 const maxQueryLen = 128
+
+// maxFeeReads bounds how many spent transactions the fee of one page reads.
+const maxFeeReads = 16
 
 // The node's JSON, as far as the screens show it. Field names without tags match the node's Go
 // field names the way encoding/json always does.
@@ -115,10 +125,12 @@ type (
 
 	peersView struct{ Nodes []peersNode }
 
-	// txItem is a transaction with the node name its links need.
+	// txItem is a transaction with the node name its links need. Pos is its 1-based place in the
+	// mempool selection order; 0 means none is shown.
 	txItem struct {
 		Node string
 		Tx   nodeTx
+		Pos  int
 	}
 
 	mempoolView struct {
@@ -134,18 +146,38 @@ type (
 		Poll   bool
 	}
 
+	// homeTx is one transaction of the node page, with the height of its block.
+	homeTx struct {
+		Node   string
+		Height int
+		Tx     nodeTx
+	}
+
+	// homeView is the latest activity on a node page. Msg replaces both lists when they were not read.
+	homeView struct {
+		Blocks []nodeBlock // newest first
+		Txs    []homeTx    // newest block first, block order inside a block, at most homeTxs
+		Msg    string
+	}
+
 	blockView struct {
 		Node  string
 		Block nodeBlock
 		Txs   []txItem
 	}
 
+	// A pending view is a mempool transaction: Position of PoolSize in the selection order, no block.
 	txView struct {
 		Node      string
 		Item      txItem
 		BlockHash string
 		Height    int
 		Proof     *nodeProof
+		Pending   bool
+		Position  int
+		PoolSize  int
+		Fee       uint64
+		FeeMsg    string // why Fee is not shown; empty when it is
 	}
 
 	addressView struct {
@@ -374,7 +406,12 @@ func (s *server) loadMempool(r *http.Request, node Node) (any, *pageError) {
 		return nil, perr
 	}
 
-	return mempoolView{Node: node.Name, Txs: items(node.Name, body.Transactions)}, nil
+	txs := items(node.Name, body.Transactions)
+	for i := range txs {
+		txs[i].Pos = i + 1
+	}
+
+	return mempoolView{Node: node.Name, Txs: txs}, nil
 }
 
 func (s *server) loadBlocks(r *http.Request, node Node) (any, *pageError) {
@@ -398,6 +435,35 @@ func (s *server) loadBlocks(r *http.Request, node Node) (any, *pageError) {
 	}
 
 	return blocksView{Node: node.Name, From: from, Blocks: body.Blocks, Next: body.Next, Poll: from == 0}, nil
+}
+
+// loadHome reads the homeBlocks blocks ending at height, the height the poller last saw. A failed
+// read is shown in place of the lists; the rest of the node page does not depend on it.
+func (s *server) loadHome(ctx context.Context, node Node, height int) homeView {
+	var body struct {
+		Blocks []nodeBlock `json:"blocks"`
+	}
+
+	if perr := s.read(ctx, node, Blocks(max(height-homeBlocks+1, 0), homeBlocks), &body); perr != nil {
+		return homeView{Msg: "Latest activity not available: " + perr.Message + "."}
+	}
+
+	slices.Reverse(body.Blocks)
+
+	var txs []homeTx
+
+outer:
+	for _, block := range body.Blocks {
+		for _, tx := range block.Transactions {
+			if len(txs) == homeTxs {
+				break outer
+			}
+
+			txs = append(txs, homeTx{Node: node.Name, Height: block.Index, Tx: tx})
+		}
+	}
+
+	return homeView{Blocks: body.Blocks, Txs: txs}
 }
 
 func (s *server) loadBlock(r *http.Request, node Node) (any, *pageError) {
@@ -428,10 +494,40 @@ func (s *server) loadTx(r *http.Request, node Node) (any, *pageError) {
 	}
 
 	if perr := s.read(r.Context(), node, Tx(id), &body); perr != nil {
+		if perr.Upstream != http.StatusNotFound {
+			return nil, perr
+		}
+
+		// Not in a block: a transaction the node's pool holds is pending, at its selection position.
+		var pool struct {
+			Transactions []nodeTx `json:"transactions"`
+		}
+
+		if p := s.read(r.Context(), node, Mempool(), &pool); p != nil {
+			return nil, p
+		}
+
+		for i, tx := range pool.Transactions {
+			if tx.ID == id {
+				fee, msg := s.txFee(r.Context(), node, tx, pool.Transactions)
+
+				return txView{
+					Node:     node.Name,
+					Item:     txItem{Node: node.Name, Tx: tx},
+					Pending:  true,
+					Position: i + 1,
+					PoolSize: len(pool.Transactions),
+					Fee:      fee,
+					FeeMsg:   msg,
+				}, nil
+			}
+		}
+
 		return nil, perr
 	}
 
-	view := txView{Node: node.Name, Item: txItem{node.Name, body.Transaction}, BlockHash: body.BlockHash, Height: body.Height}
+	view := txView{Node: node.Name, Item: txItem{Node: node.Name, Tx: body.Transaction}, BlockHash: body.BlockHash, Height: body.Height}
+	view.Fee, view.FeeMsg = s.txFee(r.Context(), node, body.Transaction, nil)
 
 	var proof nodeProof
 
@@ -440,6 +536,80 @@ func (s *server) loadTx(r *http.Request, node Node) (any, *pageError) {
 	}
 
 	return view, nil
+}
+
+// txFee returns the fee of tx, or a message saying why there is none. The fee is the outputs tx
+// spends minus its own outputs. pool is the decoded mempool (nil for a confirmed tx): a spent
+// transaction the node does not have in a block may be pending there.
+func (s *server) txFee(ctx context.Context, node Node, tx nodeTx, pool []nodeTx) (uint64, string) {
+	const unknown = "Fee unknown: a spent output could not be read."
+
+	if len(tx.Inputs) == 0 {
+		return 0, "No fee (coinbase or genesis)."
+	}
+
+	var ids []string
+
+	for _, in := range tx.Inputs {
+		if !slices.Contains(ids, in.PrevTxID) {
+			ids = append(ids, in.PrevTxID)
+		}
+	}
+
+	if len(ids) > maxFeeReads {
+		return 0, fmt.Sprintf("Fee not computed: it spends more than %d transactions.", maxFeeReads)
+	}
+
+	spent := make(map[string]nodeTx, len(ids))
+
+	for _, id := range ids {
+		var body struct {
+			Transaction nodeTx `json:"transaction"`
+		}
+
+		perr := s.read(ctx, node, Tx(id), &body)
+		if perr != nil {
+			if perr.Upstream != http.StatusNotFound || pool == nil {
+				return 0, unknown
+			}
+
+			i := slices.IndexFunc(pool, func(p nodeTx) bool { return p.ID == id })
+			if i < 0 {
+				return 0, unknown
+			}
+
+			body.Transaction = pool[i]
+		}
+
+		spent[id] = body.Transaction
+	}
+
+	var in, out, carry uint64
+
+	for _, input := range tx.Inputs {
+		prev := spent[input.PrevTxID]
+		if uint64(input.OutIndex) >= uint64(len(prev.Outputs)) {
+			return 0, unknown
+		}
+
+		in, carry = bits.Add64(in, prev.Outputs[input.OutIndex].Amount, 0)
+		if carry != 0 {
+			return 0, unknown
+		}
+	}
+
+	for _, o := range tx.Outputs {
+		out, carry = bits.Add64(out, o.Amount, 0)
+		if carry != 0 {
+			return 0, unknown
+		}
+	}
+
+	if in < out {
+		return 0, unknown
+	}
+
+	return in - out, ""
 }
 
 func (s *server) loadAddress(r *http.Request, node Node) (any, *pageError) {
@@ -515,9 +685,35 @@ func (s *server) loadContract(r *http.Request, node Node) (any, *pageError) {
 	return contractView{Node: node.Name, ID: body.ID, Code: body.Code, Storage: cells}, nil
 }
 
-// search sends a decimal height to the block view, 64 hex to the transaction view when the node
-// finds it and to the block view otherwise, and an address to the address view. The Location is
-// built here from the node name in the configuration and the text the allowlist just accepted.
+// searchProbe is one candidate of /search: the read that confirms it and the path it links to.
+type searchProbe struct {
+	req  Request
+	path string
+	// badRequestMiss: the node answers 400 for an address with a bad checksum, which is a miss too.
+	badRequestMiss bool
+}
+
+// searchProbes lists the candidates for q, already lowercase and trimmed, in the order /search
+// tries them. A query that matches no shape has none.
+func searchProbes(q string) []searchProbe {
+	switch {
+	case isDecimal(q):
+		return []searchProbe{{req: Block(q), path: "/block/" + q}}
+	case isLowerHex(q, hexIDLen):
+		return []searchProbe{{req: Tx(q), path: "/tx/" + q}, {req: Block(q), path: "/block/" + q}}
+	case isLowerHex(q, addressLen):
+		return []searchProbe{{req: Balance(q), path: "/address/" + q, badRequestMiss: true}}
+	}
+
+	return nil
+}
+
+// search redirects to the first candidate of the query's shape that the node answers 200 for: a
+// decimal height to its block, 64 hex to the transaction and then the block, 50 hex to the address.
+// A 404 from the node, or a 400 for an address, is a miss and the next candidate is tried. When none
+// answers, or the query matches no shape, the search page says Not found (404); an empty query, or
+// one over maxQueryLen, gets the plain page. Any other node failure is a page. The Location is built
+// here from the node name in the configuration and the text the allowlist just accepted.
 func (s *server) search(w http.ResponseWriter, r *http.Request) {
 	node, ok := s.lookup(r.URL.Query().Get("node"))
 	if !ok {
@@ -526,37 +722,32 @@ func (s *server) search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
 	if len(q) > maxQueryLen {
 		q = ""
 	}
 
 	base := "/n/" + url.PathEscape(node.Name)
 
-	var loc string
-
-	switch {
-	case isDecimal(q):
-		loc = base + "/block/" + q
-	case isLowerHex(q, hexIDLen):
-		loc = base + "/block/" + q
-
-		_, err := s.fetch.Get(r.Context(), node, Tx(q))
+	for _, p := range searchProbes(q) {
+		_, err := s.fetch.Get(r.Context(), node, p.req)
 		if err == nil {
-			loc = base + "/tx/" + q
-		} else if perr := nodeFailure(node, err); perr.Status != http.StatusNotFound {
+			http.Redirect(w, r, base+p.path, http.StatusSeeOther)
+
+			return
+		}
+
+		perr := nodeFailure(node, err)
+		if perr.Status != http.StatusNotFound && (!p.badRequestMiss || perr.Status != http.StatusBadRequest) {
 			s.fail(w, node.Name, perr)
 
 			return
 		}
-	case isLowerHex(q, addressLen):
-		loc = base + "/address/" + q
 	}
 
-	if loc != "" {
-		http.Redirect(w, r, loc, http.StatusSeeOther) //nolint:gosec // G710: loc is a dashboard path from a configured node name and text the allowlist accepted
-
-		return
+	status := http.StatusOK
+	if q != "" {
+		status = http.StatusNotFound
 	}
 
 	var buf bytes.Buffer
@@ -568,5 +759,5 @@ func (s *server) search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.layout(w, http.StatusOK, node.Name, buf.String())
+	s.layout(w, status, node.Name, buf.String())
 }

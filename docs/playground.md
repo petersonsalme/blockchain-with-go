@@ -265,9 +265,19 @@ $ curl -s $N:18080/fragments/metrics | grep '<td>node1</td>'
 (0.005231223 / 5 = 0.001046 s.) Below the table, every 10 s:
 
 - **Block interval**: one bar per pair of consecutive blocks among the last 50 headers of the node chosen in the selector (one `GET /headers` per refresh); the scale is the largest bar, printed top left. In the playground the first bar is the time from the fixed genesis (`GENESIS_TIME` in `docker-compose.yml`) to block 1, which dwarfs the others until more blocks are mined.
+- **Transactions per block**: one bar per block among the last 50 blocks of the node chosen in the selector, the same node as the block interval.
+- **Difficulty**: one bar per block among the last 50 blocks of the same node, with the largest value printed on the chart. When the node has too few blocks, or does not answer, the chart shows a message in its place.
 - **Height per node**: one line per node over the poller's last 60 polls (about two minutes), on one shared scale. The history lives in the dashboard process and starts empty on restart; reading it costs no request to the nodes.
 
 For time series, retention and alerts use the `observability` profile (Prometheus and Grafana, below), not the dashboard.
+
+### Node page, search and transactions
+
+- **Node page** `/n/<node>/`: below the stats, the 10 latest blocks and up to 10 of their transactions, newest block first. This is one read of the node; nothing is read before the dashboard's first poll of that node.
+- **Search**: case-insensitive, so `ABC...` and `abc...` find the same thing. The dashboard tries a height, then a transaction ID, then a block hash, then an address, and goes to the first one the node answers. A value the node does not have shows "Not found" (HTTP 404) on the search page, which stays open with the query in it.
+- **Transaction page** `/n/<node>/tx/<id>`: the fee is the sum of the inputs minus the sum of the outputs, in coins. A coinbase or genesis transaction has no fee, and the page says so; if a spent output cannot be read, the page says the fee is unknown instead of showing a wrong number.
+- **Pending transaction**: the transaction page shows its position in the selection order, for example `Pending: position 2 of 5`, linked to the mempool. The mempool lists `#1..#n` in that order, highest fee rate first, which is the order mining takes them.
+- **Not shown**: the fee rate, per transaction or on the mempool page (the node does not expose it yet); the total supply; and the richest addresses (they need data the node does not keep).
 
 ### Walkthrough: stop node3
 
