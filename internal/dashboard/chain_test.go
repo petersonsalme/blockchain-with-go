@@ -805,6 +805,13 @@ func TestTxFee(t *testing.T) {
 		{name: "outputs above inputs", inputs: spendJSON(txB, 3), outputs: payJSON(5001), want: unknownFee},
 		{name: "index out of range", inputs: spendJSON(txB, 9), outputs: payJSON(1), want: unknownFee},
 		{name: "outputs overflow", inputs: spendJSON(txB, 3), outputs: payJSON(math.MaxUint64) + "," + payJSON(1), want: unknownFee},
+		{name: "index equals output count", inputs: spendJSON(txB, 4), outputs: payJSON(1), want: unknownFee},
+		{name: "inputs equal outputs", inputs: spendJSON(txB, 3), outputs: payJSON(5000), want: `title="0 base units"`},
+		{
+			name: "inputs overflow", inputs: spendJSON(txB, 0) + "," + spendJSON(txB, 1), outputs: payJSON(1),
+			extra: map[string]reply{"/tx/" + txB: ok(`{"transaction":` + feeTxJSON(txB, "", payJSON(math.MaxUint64)+","+payJSON(math.MaxUint64)) + `}`)},
+			want:  unknownFee,
+		},
 		{
 			name: "spent tx fails", inputs: spendJSON(txB, 3), outputs: payJSON(4200),
 			extra: map[string]reply{"/tx/" + txB: {http.StatusInternalServerError, `{}`}}, want: unknownFee,
