@@ -67,7 +67,7 @@ Everything else (HTTP handlers and DTOs, logging, docs, README, CLI, build files
 ## Rules and Commands
 
 1. **Validation and Tests:**
-   - Toolchain: `go` and `golangci-lint` come from mise. If a command fails with "executable not found", the mise shims directory is missing from `PATH` (`export PATH="$HOME/.local/share/mise/shims:$PATH"`); fix `PATH` instead of retrying with `rtk bypass`, which is not allowed and bypasses the output filter.
+   - Toolchain: `go`, `gofmt` and `golangci-lint` come from mise and are not on `PATH`: run every one of them through mise, e.g. `mise exec -- go test ./...` (the commands below are written without the prefix). The agent permissions (`.claude/settings.json`) allow only the `mise exec -- ...` forms; do not retry with `rtk bypass`, which is not allowed and skips the output filter.
    - Run tests and type checking: `go test ./...`
    - Go formatting (gofumpt + goimports): `golangci-lint fmt`; auto-fix style findings (wsl, nlreturn, godot): `golangci-lint run --fix ./...`
    - Build check: `go build -o /dev/null ./cmd/bwg`
