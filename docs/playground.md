@@ -33,7 +33,7 @@ N=http://127.0.0.1
 ## Start and fund
 
 ```shell
-$ scripts/playground.sh        # 3 blocks by default; scripts/playground.sh 10 mines 10
+$ scripts/playground.sh        # 3 blocks by default; scripts/playground.sh 10 mines 10; scripts/playground.sh 0 mines none
 ```
 
 The script builds `.playground/bwg`, creates the miner keystore `.playground/miner.key` (only the first time), writes `.playground/compose.env` with `MINER_ADDRESS`, brings the three nodes up with `--build`, waits for `GET /health`, asks node1 to mine, and prints:
@@ -51,6 +51,67 @@ balance on 127.0.0.1:18083: 15000000000
 The genesis is empty (no `GENESIS_ALLOCATIONS`); the only coins come from the coinbase of the mined blocks: 3 × 5,000,000,000 base units. Re-running the script reuses the miner keystore and the existing volumes.
 
 Look at: `http://127.0.0.1:18081/explorer/` lists the latest blocks; each mined block has one coinbase transaction without inputs paying the miner address.
+
+## Start from a truly empty chain
+
+Reset first (see "Reset" below: `dc --profile '*' down -v --remove-orphans`), then:
+
+```shell
+$ scripts/playground.sh 0
+miner address: 00c23b7d77761a011fdd6c61a0297f0fb8400a213eb887f7c1
+balance on 127.0.0.1:18081: 0
+balance on 127.0.0.1:18082: 0
+balance on 127.0.0.1:18083: 0
+```
+
+With `0` the script does everything except mining: it builds `.playground/bwg`, creates the miner wallet, writes `.playground/compose.env`, starts the three nodes and waits for `/health`. It never calls `bwg miner`. An argument that is not a non-negative integer (`abc`, `-1`, `1.5`) prints a usage message on stderr and exits with status 2 before anything is built or started.
+
+The script runs this compose command, which you can also run yourself once `.playground/compose.env` exists (the compose file refuses to start without `MINER_ADDRESS`):
+
+```shell
+$ docker compose -p bwg-playground --env-file .playground/compose.env -f docker-compose.yml -f compose.playground.yml up -d --build
+```
+
+The three nodes are at height 0 (the genesis block only, `tip` is empty):
+
+```shell
+$ curl -s $N:18081/health
+{
+  "status": "ok",
+  "height": 0,
+  "tip": ""
+}
+```
+
+18082 and 18083 print the same. Mine the first block on node1 and look at the balance on all three nodes:
+
+```shell
+$ $B miner --node $N:18081 --count 1
+block 1 458866542d238c908b14b02652a382124c67d84268b8ab4a073ac73b991270d5 txs=1
+$ $B wallet balance --node $N:18081 $(cat .playground/miner.addr)
+5000000000
+```
+
+After about 3 seconds (gossip) the balance is `5000000000` on 18082 and 18083 too. `txs=1` is the coinbase.
+
+> **Do not use `--count 0` to mean "no blocks".** `bwg miner --count 0` mines until `Ctrl+C`. That is why `scripts/playground.sh` handles `0` itself and never passes it to the miner.
+
+### Who pays the coinbase
+
+Only node1 has `MINER_ADDRESS`, so only node1 pays a coinbase. Mining one block through node2 and one through node3 on the same network (after the block above) gave:
+
+```shell
+$ $B miner --node $N:18082 --count 1
+block 2 4e6f5bf5373882cbb875ff79dcb9e0bc18263b44d7684b27711239010699ea49 txs=0
+$ $B miner --node $N:18083 --count 1
+block 3 6e1859f09f949a4f1193ea32897da3dc375e012f47e3df05074c475bf1ab3ef0 txs=0
+$ $B wallet balance --node $N:18081 $(cat .playground/miner.addr)
+5000000000
+```
+
+Both blocks have `txs=0` (their `Transactions` is `[]`, there is no coinbase) and the miner balance did not change (`5000000000` on all three nodes, height 3 everywhere). The other nodes accept these blocks.
+
+Nodes that only receive blocks by gossip do not emit `/events` for them until roadmap item 2 lands.
 
 ## Health, convergence and peers
 
