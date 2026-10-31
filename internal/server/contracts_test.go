@@ -238,6 +238,38 @@ var _ = Describe("Contract routes", func() {
 		Expect(rec.Body.String()).To(ContainSubstring(tx.ID))
 	})
 
+	It("serves a transaction without contract with no contract key, before and after mining", func() {
+		tx := funds.tx(newWallet().Address(), 10)
+		tx.ID = tx.CalculateHash()
+		Expect(domain.SignInput(&tx, 0, funds.owner)).To(Succeed())
+
+		raw, err := json.Marshal(tx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(raw)).NotTo(ContainSubstring("ontract"))
+
+		rec := do(http.MethodPost, "/tx", string(raw))
+		Expect(rec.Code).To(Equal(http.StatusAccepted), rec.Body.String())
+
+		rec = do(http.MethodGet, "/mempool", "")
+		Expect(rec.Code).To(Equal(http.StatusOK))
+		Expect(rec.Body.String()).To(ContainSubstring(tx.ID))
+		Expect(rec.Body.String()).NotTo(ContainSubstring("ontract"))
+
+		Expect(do(http.MethodPost, "/mine", "").Code).To(Equal(http.StatusCreated))
+
+		rec = do(http.MethodGet, "/tx/"+tx.ID, "")
+		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec.Body.String()).NotTo(ContainSubstring("ontract"))
+
+		var body struct {
+			Transaction domain.Transaction `json:"transaction"`
+		}
+		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
+		got := body.Transaction
+		Expect(got.CalculateHash()).To(Equal(tx.ID))
+		Expect(got.Contract).To(BeNil())
+	})
+
 	It("answers 400 invalid_contract_id for an ID that is not canonical hex", func() {
 		for _, id := range []string{"xyz", strings.Repeat("A", 64), zeroHash[:62]} {
 			rec := do(http.MethodGet, "/contracts/"+id, "")
