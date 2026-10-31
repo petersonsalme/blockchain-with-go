@@ -265,11 +265,21 @@ func nodeFailure(node Node, err error) *pageError {
 	return perr
 }
 
+// notFoundCrumb is the breadcrumb of a page for a node that is not in the configuration.
+const notFoundCrumb = "Not found"
+
 // screen is one page: how to load its data from one node (or all, for Peers) and the template
 // that renders it. The same template is the polled fragment.
 type screen struct {
-	body string
-	load func(r *http.Request, node Node) (any, *pageError)
+	body  string
+	page  string                       // key of the node tab that is this screen; blank for none
+	crumb func(r *http.Request) string // last breadcrumb label
+	load  func(r *http.Request, node Node) (any, *pageError)
+}
+
+// label is a breadcrumb that does not depend on the request.
+func label(text string) func(*http.Request) string {
+	return func(*http.Request) string { return text }
 }
 
 // nodeScreen serves a screen of the node in the path, as a full page or, when fragment, as the
@@ -278,19 +288,21 @@ func (s *server) nodeScreen(sc screen, fragment bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		node, ok := s.lookup(r.PathValue("node"))
 		if !ok {
-			s.fail(w, "", noSuchNode())
+			s.fail(w, place{Crumb: notFoundCrumb}, noSuchNode())
 
 			return
 		}
+
+		at := place{Node: node.Name, Page: sc.page, Crumb: sc.crumb(r)}
 
 		data, perr := sc.load(r, node)
 		if perr != nil {
-			s.fail(w, node.Name, perr)
+			s.fail(w, at, perr)
 
 			return
 		}
 
-		s.show(w, node.Name, sc.body, data, fragment)
+		s.show(w, at, sc.body, data, fragment)
 	}
 }
 
@@ -304,7 +316,7 @@ func (s *server) lookup(name string) (Node, bool) {
 	return Node{}, false
 }
 
-func (s *server) show(w http.ResponseWriter, current, body string, data any, fragment bool) {
+func (s *server) show(w http.ResponseWriter, at place, body string, data any, fragment bool) {
 	var buf bytes.Buffer
 
 	// A full page may wrap the fragment with a header that htmx must not replace (the help tooltip).
@@ -326,10 +338,10 @@ func (s *server) show(w http.ResponseWriter, current, body string, data any, fra
 		return
 	}
 
-	s.layout(w, http.StatusOK, current, buf.String())
+	s.layout(w, http.StatusOK, at, buf.String())
 }
 
-func (s *server) fail(w http.ResponseWriter, current string, perr *pageError) {
+func (s *server) fail(w http.ResponseWriter, at place, perr *pageError) {
 	var buf bytes.Buffer
 
 	err := s.tmpl.ExecuteTemplate(&buf, "error", struct {
@@ -343,7 +355,7 @@ func (s *server) fail(w http.ResponseWriter, current string, perr *pageError) {
 		return
 	}
 
-	s.layout(w, perr.Status, current, buf.String())
+	s.layout(w, perr.Status, at, buf.String())
 }
 
 func (s *server) peersScreen(fragment bool) http.HandlerFunc {
@@ -360,7 +372,7 @@ func (s *server) peersScreen(fragment bool) http.HandlerFunc {
 
 		wg.Wait()
 
-		s.show(w, "", "peers", view, fragment)
+		s.show(w, place{Page: "peers", Crumb: "Peers"}, "peers", view, fragment)
 	}
 }
 
@@ -717,7 +729,7 @@ func searchProbes(q string) []searchProbe {
 func (s *server) search(w http.ResponseWriter, r *http.Request) {
 	node, ok := s.lookup(r.URL.Query().Get("node"))
 	if !ok {
-		s.fail(w, "", noSuchNode())
+		s.fail(w, place{Crumb: notFoundCrumb}, noSuchNode())
 
 		return
 	}
@@ -739,7 +751,7 @@ func (s *server) search(w http.ResponseWriter, r *http.Request) {
 
 		perr := nodeFailure(node, err)
 		if perr.Status != http.StatusNotFound && (!p.badRequestMiss || perr.Status != http.StatusBadRequest) {
-			s.fail(w, node.Name, perr)
+			s.fail(w, place{Node: node.Name, Crumb: "Search"}, perr)
 
 			return
 		}
@@ -759,5 +771,5 @@ func (s *server) search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.layout(w, status, node.Name, buf.String())
+	s.layout(w, status, place{Node: node.Name, Crumb: "Search"}, buf.String())
 }

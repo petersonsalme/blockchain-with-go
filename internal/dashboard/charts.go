@@ -197,12 +197,12 @@ func (s *server) charts(ctx context.Context, node Node) chartsView {
 func (s *server) chartsFragment(w http.ResponseWriter, r *http.Request) {
 	node, ok := s.chosenNode(r)
 	if !ok {
-		s.fail(w, "", noSuchNode())
+		s.fail(w, place{}, noSuchNode())
 
 		return
 	}
 
-	s.show(w, "", "charts", s.charts(r.Context(), node), true)
+	s.show(w, place{}, "charts", s.charts(r.Context(), node), true)
 }
 
 // chosenNode is the node named by ?node=, or the first one when the query has none.
