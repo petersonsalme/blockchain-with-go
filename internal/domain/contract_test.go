@@ -15,6 +15,12 @@ import (
 var _ = Describe("ContractOp", func() {
 	ts := time.Date(2026, 10, 16, 20, 0, 0, 123456000, time.UTC)
 	target := strings.Repeat("ab", 32)
+	validDeploy := func() *domain.ContractOp {
+		return &domain.ContractOp{Kind: domain.ContractDeploy, Code: "0100", GasLimit: 1}
+	}
+	validCall := func() *domain.ContractOp {
+		return &domain.ContractOp{Kind: domain.ContractCall, Target: target, GasLimit: domain.MaxContractGas}
+	}
 
 	Describe("CalculateHash without a contract", func() {
 		// Hashes taken from master before ContractOp existed.
@@ -41,6 +47,23 @@ var _ = Describe("ContractOp", func() {
 		raw, err := json.Marshal(domain.Transaction{Timestamp: ts})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(string(raw)).NotTo(ContainSubstring("Contract"))
+	})
+
+	It("keeps the contract and the hash through a JSON round trip", func() {
+		tx := newTx(0, nil, domain.TxOut{Amount: 100, Address: "bob"})
+		tx.Contract = &domain.ContractOp{
+			Kind:     domain.ContractCall,
+			Target:   target,
+			Args:     []uint64{1, 2},
+			GasLimit: domain.MaxContractGas,
+		}
+		raw, err := json.Marshal(tx)
+		Expect(err).NotTo(HaveOccurred())
+
+		var back domain.Transaction
+		Expect(json.Unmarshal(raw, &back)).To(Succeed())
+		Expect(back.Contract).To(Equal(tx.Contract))
+		Expect(back.CalculateHash()).To(Equal(tx.CalculateHash()))
 	})
 
 	Describe("CalculateHash with a contract", func() {
@@ -100,13 +123,6 @@ var _ = Describe("ContractOp", func() {
 	})
 
 	Describe("ValidateContractOp", func() {
-		validDeploy := func() *domain.ContractOp {
-			return &domain.ContractOp{Kind: domain.ContractDeploy, Code: "0100", GasLimit: 1}
-		}
-		validCall := func() *domain.ContractOp {
-			return &domain.ContractOp{Kind: domain.ContractCall, Target: target, GasLimit: domain.MaxContractGas}
-		}
-
 		It("accepts nil", func() {
 			Expect(domain.ValidateContractOp(nil)).To(Succeed())
 		})
@@ -117,6 +133,12 @@ var _ = Describe("ContractOp", func() {
 		It("accepts code of exactly MaxContractCodeBytes", func() {
 			op := validDeploy()
 			op.Code = hex.EncodeToString(make([]byte, domain.MaxContractCodeBytes))
+			Expect(domain.ValidateContractOp(op)).To(Succeed())
+		})
+		It("puts no limit on the number of args (ENG-261 F1)", func() {
+			// No ADR-0014 limit on len(Args); only MAX_BLOCK_BYTES bounds it (ENG-261 F1).
+			op := validCall()
+			op.Args = make([]uint64, 10000)
 			Expect(domain.ValidateContractOp(op)).To(Succeed())
 		})
 
@@ -146,6 +168,77 @@ var _ = Describe("ContractOp", func() {
 			Entry("call with non-hex target", func(op *domain.ContractOp) { op.Target = strings.Repeat("zz", 32) }, validCall),
 			Entry("call with zero gas", func(op *domain.ContractOp) { op.GasLimit = 0 }, validCall),
 			Entry("call with gas above MaxContractGas", func(op *domain.ContractOp) { op.GasLimit = domain.MaxContractGas + 1 }, validCall),
+		)
+	})
+
+	Describe("with the UTXO rules", func() {
+		var (
+			alice string
+			bob   string
+			g0    domain.OutPoint
+			set   domain.UTXOSet
+		)
+
+		BeforeEach(func() {
+			alice = seededWallet(1).Address()
+			bob = seededWallet(100).Address()
+			genesisTx := newTx(0, nil, domain.TxOut{Amount: 100, Address: alice})
+
+			var err error
+
+			set, err = domain.BuildUTXOSet([]*domain.Block{blockOf(0, genesisTx)})
+			Expect(err).NotTo(HaveOccurred())
+
+			g0 = outpoint(genesisTx, 0)
+		})
+
+		missingInputsBlock := func(op *domain.ContractOp) *domain.Block {
+			spendTx := newTx(1, []domain.OutPoint{g0}, domain.TxOut{Amount: 100, Address: bob})
+			tx := newTx(2, nil, domain.TxOut{Amount: 100, Address: bob})
+			tx.Contract = op
+
+			return blockOf(1, spendTx, tx)
+		}
+		insufficientInputsBlock := func(op *domain.ContractOp) *domain.Block {
+			tx := newTx(1, []domain.OutPoint{g0}, domain.TxOut{Amount: 101, Address: bob})
+			tx.Contract = op
+
+			return blockOf(1, tx)
+		}
+		doubleSpendBlock := func(op *domain.ContractOp) *domain.Block {
+			tx1 := newTx(1, []domain.OutPoint{g0}, domain.TxOut{Amount: 50, Address: bob})
+			tx1.Contract = op
+			tx2 := newTx(2, []domain.OutPoint{g0}, domain.TxOut{Amount: 50, Address: bob})
+			tx2.Contract = op
+
+			return blockOf(1, tx1, tx2)
+		}
+		feeBlock := func(op *domain.ContractOp) *domain.Block {
+			tx := newTx(1, []domain.OutPoint{g0}, domain.TxOut{Amount: 90, Address: bob})
+			tx.Contract = op
+
+			return blockOf(1, tx)
+		}
+
+		DescribeTable("applies the rule to contract transactions",
+			func(buildBlock func(op *domain.ContractOp) *domain.Block, op func() *domain.ContractOp, matchErr error) {
+				b := buildBlock(op())
+
+				_, err := domain.BlockDelta(set, b, false)
+				if matchErr != nil {
+					Expect(err).To(MatchError(matchErr))
+				} else {
+					Expect(err).To(Succeed())
+				}
+			},
+			Entry("input-less tx at position 1 (deploy)", missingInputsBlock, validDeploy, domain.ErrMissingInputs),
+			Entry("input-less tx at position 1 (call)", missingInputsBlock, validCall, domain.ErrMissingInputs),
+			Entry("outputs 101 from input 100 (deploy)", insufficientInputsBlock, validDeploy, domain.ErrInsufficientInputs),
+			Entry("outputs 101 from input 100 (call)", insufficientInputsBlock, validCall, domain.ErrInsufficientInputs),
+			Entry("the same outpoint in two transactions of one block (deploy)", doubleSpendBlock, validDeploy, domain.ErrDoubleSpend),
+			Entry("the same outpoint in two transactions of one block (call)", doubleSpendBlock, validCall, domain.ErrDoubleSpend),
+			Entry("outputs 90 from input 100 is accepted (deploy)", feeBlock, validDeploy, nil),
+			Entry("outputs 90 from input 100 is accepted (call)", feeBlock, validCall, nil),
 		)
 	})
 })
