@@ -17,9 +17,9 @@
 <div class="nav-group">
 <span class="nav-label" id="nav-net">Network</span>
 <ul class="nav-list" aria-labelledby="nav-net">
-<li><a class="nav-link" href="/">Overview</a></li>
-<li><a class="nav-link" href="/peers">Peers</a></li>
-<li><a class="nav-link" href="/metrics">Metrics</a></li>
+<li><a class="nav-link" href="/"{{if eq .Page "network"}} aria-current="page"{{end}}>Overview</a></li>
+<li><a class="nav-link" href="/peers"{{if eq .Page "peers"}} aria-current="page"{{end}}>Peers</a></li>
+<li><a class="nav-link" href="/metrics"{{if eq .Page "metrics"}} aria-current="page"{{end}}>Metrics</a></li>
 </ul>
 </div>
 <div class="nav-group">
@@ -32,8 +32,12 @@
 <div class="main">
 <header class="topbar">
 <nav aria-label="Breadcrumb"><ol class="crumbs">
-{{- if .Current}}
+{{- if and .Current .Crumb}}
+<li><a href="/">Network</a></li><li><a href="/n/{{pe .Current}}/">{{.Current}}</a></li><li><span aria-current="page">{{.Crumb}}</span></li>
+{{- else if .Current}}
 <li><a href="/">Network</a></li><li><span aria-current="page">{{.Current}}</span></li>
+{{- else if .Crumb}}
+<li><a href="/">Network</a></li><li><span aria-current="page">{{.Crumb}}</span></li>
 {{- else}}
 <li><span aria-current="page">Network</span></li>
 {{- end}}
@@ -54,9 +58,9 @@
 <nav class="subnav" aria-label="Node screens">
 <span class="subnav-node">{{.Current}}</span>
 <ul class="tabs">
-<li><a class="tab" href="/n/{{pe .Current}}/">Overview</a></li>
-<li><a class="tab" href="/n/{{pe .Current}}/blocks">Blocks</a></li>
-<li><a class="tab" href="/n/{{pe .Current}}/mempool">Mempool</a></li>
+<li><a class="tab" href="/n/{{pe .Current}}/"{{if eq .Page "node"}} aria-current="page"{{end}}>Overview</a></li>
+<li><a class="tab" href="/n/{{pe .Current}}/blocks"{{if eq .Page "blocks"}} aria-current="page"{{end}}>Blocks</a></li>
+<li><a class="tab" href="/n/{{pe .Current}}/mempool"{{if eq .Page "mempool"}} aria-current="page"{{end}}>Mempool</a></li>
 <li><a class="tab" href="/peers">Peers</a></li>
 </ul>
 </nav>

@@ -255,16 +255,16 @@ type metricsPage struct {
 func (s *server) metricsScreen(w http.ResponseWriter, r *http.Request) {
 	node, ok := s.chosenNode(r)
 	if !ok {
-		s.fail(w, "", noSuchNode())
+		s.fail(w, place{Page: "metrics", Crumb: "Metrics"}, noSuchNode())
 
 		return
 	}
 
-	s.show(w, "", "metricspage", metricsPage{
+	s.show(w, place{Page: "metrics", Crumb: "Metrics"}, "metricspage", metricsPage{
 		Nodes: s.nodes, Node: node.Name, Rows: s.metricsRows(r.Context()), Charts: s.charts(r.Context(), node),
 	}, false)
 }
 
 func (s *server) metricsFragment(w http.ResponseWriter, r *http.Request) {
-	s.show(w, "", "metrics", s.metricsRows(r.Context()), true)
+	s.show(w, place{}, "metrics", s.metricsRows(r.Context()), true)
 }

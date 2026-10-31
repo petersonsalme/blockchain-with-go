@@ -80,18 +80,18 @@ func secure(next http.Handler) http.Handler {
 
 func (s *server) page(w http.ResponseWriter, _ *http.Request) {
 	view := s.poll.View()
-	s.show(w, "", "network", &view, false)
+	s.show(w, place{Page: "network"}, "network", &view, false)
 }
 
 func (s *server) networkFragment(w http.ResponseWriter, _ *http.Request) {
 	view := s.poll.View()
-	s.show(w, "", "network", &view, true)
+	s.show(w, place{}, "network", &view, true)
 }
 
 // sidebarFragment is the node list of the sidebar, polled on every page.
 func (s *server) sidebarFragment(w http.ResponseWriter, _ *http.Request) {
 	view := s.poll.View()
-	s.show(w, "", "sidebar", view.Cards, true)
+	s.show(w, place{}, "sidebar", view.Cards, true)
 }
 
 // hashLastChars is how many characters of a hash the pages always show at the end.
@@ -144,11 +144,18 @@ func (s *server) nodePage(w http.ResponseWriter, r *http.Request) {
 		data.Latest.Msg = "Latest activity appears after the first poll of this node."
 	}
 
-	s.show(w, name, "node", data, false)
+	s.show(w, place{Node: name, Page: "node"}, "node", data, false)
+}
+
+// place is where a page sits in the shell: Node is the node of the page (blank on the network
+// pages), Page the key of the sidebar link or node tab that is this page (blank when none is) and
+// Crumb the last breadcrumb label (blank: the node name, or Network).
+type place struct {
+	Node, Page, Crumb string
 }
 
 // layout wraps an already rendered body (html/template output) in the page shell.
-func (s *server) layout(w http.ResponseWriter, status int, current, body string) {
+func (s *server) layout(w http.ResponseWriter, status int, at place, body string) {
 	var buf bytes.Buffer
 
 	view := s.poll.View()
@@ -157,9 +164,11 @@ func (s *server) layout(w http.ResponseWriter, status int, current, body string)
 		Nodes   []Node
 		Cards   []Card
 		Current string
+		Page    string
+		Crumb   string
 		Updated string
 		Body    template.HTML
-	}{s.nodes, view.Cards, current, s.poll.now().UTC().Format("15:04:05"), template.HTML(body)}) //nolint:gosec // body is the output of html/template
+	}{s.nodes, view.Cards, at.Node, at.Page, at.Crumb, s.poll.now().UTC().Format("15:04:05"), template.HTML(body)}) //nolint:gosec // body is the output of html/template
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 
@@ -174,8 +183,12 @@ func (s *server) layout(w http.ResponseWriter, status int, current, body string)
 // routes registers the chain screens. Detail routes take the rest of the path ({x...}) so a value
 // with a slash reaches validation and gets 400 instead of falling through to 404.
 func (s *server) routes(mux *http.ServeMux) {
-	mempool := screen{"mempool", s.loadMempool}
-	blocks := screen{"blocks", s.loadBlocks}
+	mempool := screen{body: "mempool", page: "mempool", crumb: label("Mempool"), load: s.loadMempool}
+	blocks := screen{body: "blocks", page: "blocks", crumb: label("Blocks"), load: s.loadBlocks}
+	block := screen{body: "block", crumb: func(r *http.Request) string { return "Block " + r.PathValue("ref") }, load: s.loadBlock}
+	tx := screen{body: "tx", crumb: label("Transaction"), load: s.loadTx}
+	address := screen{body: "address", crumb: label("Address"), load: s.loadAddress}
+	contract := screen{body: "contract", crumb: label("Contract"), load: s.loadContract}
 
 	mux.HandleFunc("GET /peers", s.peersScreen(false))
 	mux.HandleFunc("GET /fragments/peers", s.peersScreen(true))
@@ -183,10 +196,10 @@ func (s *server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /fragments/n/{node}/mempool", s.nodeScreen(mempool, true))
 	mux.HandleFunc("GET /n/{node}/blocks", s.nodeScreen(blocks, false))
 	mux.HandleFunc("GET /fragments/n/{node}/blocks", s.nodeScreen(blocks, true))
-	mux.HandleFunc("GET /n/{node}/block/{ref...}", s.nodeScreen(screen{"block", s.loadBlock}, false))
-	mux.HandleFunc("GET /n/{node}/tx/{id...}", s.nodeScreen(screen{"tx", s.loadTx}, false))
-	mux.HandleFunc("GET /n/{node}/address/{addr...}", s.nodeScreen(screen{"address", s.loadAddress}, false))
-	mux.HandleFunc("GET /n/{node}/contract/{id...}", s.nodeScreen(screen{"contract", s.loadContract}, false))
+	mux.HandleFunc("GET /n/{node}/block/{ref...}", s.nodeScreen(block, false))
+	mux.HandleFunc("GET /n/{node}/tx/{id...}", s.nodeScreen(tx, false))
+	mux.HandleFunc("GET /n/{node}/address/{addr...}", s.nodeScreen(address, false))
+	mux.HandleFunc("GET /n/{node}/contract/{id...}", s.nodeScreen(contract, false))
 	mux.HandleFunc("GET /search", s.search)
 	mux.HandleFunc("GET /metrics", s.metricsScreen)
 	mux.HandleFunc("GET /fragments/metrics", s.metricsFragment)
