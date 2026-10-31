@@ -3,11 +3,14 @@ package vm_test
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"go/parser"
 	"go/token"
+	"maps"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -56,6 +59,7 @@ var _ = Describe("Execute", func() {
 	// SSTORE pops the key first, then the value.
 	out := func(body ...any) []byte { return asm(append(body, 0, vm.OpSSTORE)...) }
 	maxWord := ^uint64(0)
+	loop := asm(0, vm.OpARG, vm.OpDUP, vm.OpISZERO, 42, vm.OpJUMPI, 1, vm.OpSUB, 10, vm.OpJUMP, vm.OpSTOP)
 
 	cases := []vmCase{
 		{name: "STOP halts at zero cost", code: asm(vm.OpSTOP, 1), gas: 5, writes: map[uint64]uint64{}, used: 0},
@@ -113,6 +117,10 @@ var _ = Describe("Execute", func() {
 		{name: "SSTORE out of gas keeps no writes", code: asm(1, 1, vm.OpSSTORE), gas: 21, used: 2, wantErr: vm.ErrOutOfGas},
 		{name: "SLOAD costs 5", code: asm(1, vm.OpSLOAD), gas: 5, used: 1, wantErr: vm.ErrOutOfGas},
 		{name: "infinite loop runs out of gas", code: asm(0, vm.OpJUMP), gas: 100, used: 100, wantErr: vm.ErrOutOfGas},
+		{name: "countdown loop terminates with exact gas", code: loop, args: []uint64{3}, gas: 30, writes: map[uint64]uint64{}, used: 30},
+		{name: "countdown loop one gas short", code: loop, args: []uint64{3}, gas: 29, used: 29, wantErr: vm.ErrOutOfGas},
+		{name: "Execute accepts 1024 bytes", code: bytes.Repeat([]byte{vm.OpSTOP}, domain.MaxContractCodeBytes), gas: 1, writes: map[uint64]uint64{}, used: 0},
+		{name: "Execute rejects 1025 bytes", code: bytes.Repeat([]byte{vm.OpSTOP}, domain.MaxContractCodeBytes+1), gas: 1, used: 0, wantErr: vm.ErrInvalidCode},
 	}
 
 	for _, c := range cases {
@@ -161,6 +169,60 @@ var _ = Describe("Execute", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fall.Writes).To(Equal(map[uint64]uint64{0: 2}))
 		Expect(fall.GasUsed).To(Equal(uint64(1 + 1 + 1 + 1 + 1 + 1 + 20)))
+	})
+
+	It("gives the same Result from 16 goroutines as from a sequential run", func() {
+		const workers = 16
+
+		type parallelInput struct {
+			code  []byte
+			args  []uint64
+			store mapStorage
+			gas   uint64
+		}
+
+		inputs := []parallelInput{
+			{code: vm.CounterCode, args: nil, store: mapStorage{0: 41}, gas: 29},
+			{code: loop, args: []uint64{3}, store: mapStorage{}, gas: 30},
+			{code: loop, args: []uint64{3}, store: mapStorage{}, gas: 29},
+		}
+
+		type outcome struct {
+			res vm.Result
+			err error
+		}
+
+		for _, in := range inputs {
+			origStore := make(mapStorage, len(in.store))
+			maps.Copy(origStore, in.store)
+
+			seqRes, seqErr := vm.Execute(in.code, in.args, in.store, in.gas)
+
+			outcomes := make([]outcome, workers)
+
+			var wg sync.WaitGroup
+
+			for i := range workers {
+				wg.Go(func() {
+					res, err := vm.Execute(in.code, in.args, in.store, in.gas)
+					outcomes[i] = outcome{res: res, err: err}
+				})
+			}
+
+			wg.Wait()
+
+			for _, out := range outcomes {
+				Expect(out.res).To(Equal(seqRes))
+
+				if seqErr == nil {
+					Expect(out.err).NotTo(HaveOccurred())
+				} else {
+					Expect(errors.Is(out.err, seqErr)).To(BeTrue())
+				}
+			}
+
+			Expect(in.store).To(Equal(origStore))
+		}
 	})
 
 	Describe("domain limits", func() {
