@@ -318,6 +318,42 @@ var _ = Describe("Rate Limiting", func() {
 			Expect(rec2.Code).To(Equal(http.StatusTooManyRequests))
 		})
 
+		It("charges one bucket per RemoteAddr whatever forwarded headers say", func() {
+			okHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			})
+			serve := func(wrapped http.Handler, remote string, headers map[string]string) int {
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
+
+				req.RemoteAddr = remote
+				for k, v := range headers {
+					req.Header.Set(k, v)
+				}
+
+				rec := httptest.NewRecorder()
+				wrapped.ServeHTTP(rec, req)
+
+				return rec.Code
+			}
+
+			// Behind a reverse proxy every public client shares the proxy's RemoteAddr
+			limiter := newRateLimiter(1, nowFunc)
+			wrapped := limiter.middleware(okHandler)
+			Expect(serve(wrapped, "172.20.0.5:40000", map[string]string{
+				"X-Forwarded-For": "2.2.2.2", "Forwarded": "for=2.2.2.2", "X-Real-IP": "2.2.2.2",
+			})).To(Equal(http.StatusOK))
+			Expect(serve(wrapped, "172.20.0.5:40001", map[string]string{
+				"X-Forwarded-For": "3.3.3.3", "Forwarded": "for=3.3.3.3", "X-Real-IP": "3.3.3.3",
+			})).To(Equal(http.StatusTooManyRequests))
+
+			// Different RemoteAddr with the same forwarded headers keep separate buckets
+			limiter = newRateLimiter(1, nowFunc)
+			wrapped = limiter.middleware(okHandler)
+			same := map[string]string{"X-Forwarded-For": "9.9.9.9", "Forwarded": "for=9.9.9.9", "X-Real-IP": "9.9.9.9"}
+			Expect(serve(wrapped, "10.0.0.1:1000", same)).To(Equal(http.StatusOK))
+			Expect(serve(wrapped, "10.0.0.2:1000", same)).To(Equal(http.StatusOK))
+		})
+
 		It("handles RemoteAddr without a port correctly", func() {
 			const n = 1
 

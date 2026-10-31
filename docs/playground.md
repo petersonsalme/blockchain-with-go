@@ -12,6 +12,7 @@ Every command below was run on a real playground (Docker Compose, difficulty 1).
 | 18084 | `snap1` (snapshots and pruning) | `--profile snapshots` |
 | 18091, 18092 | `poa1`, `poa2` (Proof of Authority) | `--profile poa` |
 | 18080 | `dashboard` (read-only network view; `NODES` names the nodes it reads) | `--profile dashboard` |
+| 18443, 18444 | `caddy` (TLS proxy for the node API and for the dashboard) | `compose.tls.yml`, separate project `bwg-tls` |
 | 19090 | `prometheus` | `--profile observability` |
 | 13000 | `grafana` | `--profile observability` |
 
@@ -503,3 +504,47 @@ $ rm -rf .playground                            # deletes the binary, the env fi
 > **Warning:** `rm -rf .playground` deletes `miner.key`, `alice.key`, `bob.key` and the PoA validator keystores. Without them the coins mined to the miner address, and any PoA chain, cannot be spent or continued. That is fine for a playground; do not keep real funds here.
 
 `--profile '*'` is needed: without it `down` ignores the services of the `snapshots` and `poa` profiles and leaves `snap1`, `poa1`, `poa2` and their volumes behind. This also removes a network started with `compose.tuning.yml` (same project name). After a reset, `scripts/playground.sh` starts again from an empty chain with a new miner address.
+
+## Running behind a reverse proxy (compose.tls.yml)
+
+`compose.tls.yml` (ADR-0024) is a separate stack for showing how an operator exposes a node: only a TLS-terminating Caddy is published; `node1`, `node2` and the `dashboard` sit on an internal network with no published port. It does not use 18080-18084, so it can run next to the base network. `node2` seeds from `node1` on the internal network, so p2p works there while the proxy blocks it.
+
+```shell
+$ docker compose -p bwg-tls -f compose.tls.yml up -d --build
+$ scripts/tls-smoke.sh          # brings it up, checks everything below, tears it down
+```
+
+Caddy makes its own local CA (`tls internal`); it lives only in the `caddy-data` volume and no key or certificate is in the repository. Pass the root certificate to curl, or the browser shows a warning for `https://localhost:18443/explorer/`:
+
+```shell
+$ docker compose -p bwg-tls -f compose.tls.yml cp caddy:/data/caddy/pki/authorities/local/root.crt /tmp/bwg-root.crt
+$ curl --cacert /tmp/bwg-root.crt https://localhost:18443/health
+$ curl --cacert /tmp/bwg-root.crt https://localhost:18444/
+```
+
+Never use `curl -k`: it hides exactly what this stack is meant to show. Stop it with `docker compose -p bwg-tls -f compose.tls.yml down -v`.
+
+### Routes
+
+| Through `https://localhost:18443` | Methods | Answer |
+|---|---|---|
+| `/health`, `/blocks`, `/headers`, `/mempool`, `/block/*`, `/tx/*` (also `/tx/{id}/proof`), `/balance/*`, `/address/*`, `/contracts/*`, `/events` (SSE), `/explorer`, `/explorer/*` | `GET`, `HEAD` | exposed: forwarded to `node1` |
+| `/p2p/*`, `POST /tx`, `POST /mine`, `GET /` and `POST /`, `/legacy/*`, `/metrics`, any other path or method | any | internal: `403` with the plain-text body `blocked by proxy` |
+| `https://localhost:18444` (dashboard), any path | `GET`, `HEAD` | exposed |
+| `https://localhost:18444`, other methods | any | `403 blocked by proxy` |
+
+`/metrics` stays internal because Prometheus scrapes the node inside the network (ADR-0022). The proxy's `403` is plain text, so it is told apart from a node `403` such as `unknown_peer`, which is JSON.
+
+Both sites add `Strict-Transport-Security: max-age=31536000`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`, and remove `Server`. There is no CSP on the dashboard site: the dashboard sets its own.
+
+### Rate limiter behind the proxy
+
+The limiter keys each bucket on the connection's `RemoteAddr`; `X-Forwarded-For`, `Forwarded` and `X-Real-IP` are ignored (pinned by `internal/server/ratelimit_test.go`). Behind Caddy every public client reaches the node from Caddy's container address, so `RATE_LIMIT` becomes **one global cap shared by all public clients**: one noisy client can use it all. The dashboard and node2 reach the node directly on the internal network and keep their own buckets. In `compose.tls.yml` node1 sets `RATE_LIMIT=1200` (requests per minute, about 20 per second for all public traffic together) as a starting value; lower it to see `429` answers through the proxy, and leave it off when only trusted clients use the proxy. Per-client limits behind a proxy need forwarded-header support in the node, which is future work (ENG-259).
+
+### What this does not protect
+
+- No authentication on any route: whoever reaches port 18443 can read everything on the exposed list.
+- `node_id` is spoofable (ADR-0018); the proxy blocks `/p2p/*` from outside, but anything on the internal network can still send gossip.
+- Peers still speak plain HTTP on the internal network.
+- The certificate comes from a self-signed local CA, not from a public authority.
+- Not audited and not for public deployment.
