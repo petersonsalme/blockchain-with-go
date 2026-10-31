@@ -1,0 +1,49 @@
+# TLS-terminating reverse proxy for compose.tls.yml (ADR-0024).
+# The local CA and the certificates live only in the caddy-data volume; none is committed.
+{
+	local_certs
+	skip_install_trust
+}
+
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		-Server
+	}
+}
+
+# Node API and explorer: read routes only. Everything else (p2p, writes, legacy, metrics) is
+# answered here with a plain-text 403, so a test can tell it from a JSON 403 of the node.
+localhost:18443 {
+	tls internal
+	import security_headers
+
+	@exposed {
+		method GET HEAD
+		path /health /blocks /headers /mempool /block/* /tx/* /balance/* /address/* /contracts/* /events /explorer /explorer/*
+	}
+	handle @exposed {
+		reverse_proxy node1:8080 {
+			flush_interval -1
+		}
+	}
+	handle {
+		respond "blocked by proxy" 403
+	}
+}
+
+# Dashboard: read-only, so GET and HEAD on any path.
+localhost:18444 {
+	tls internal
+	import security_headers
+
+	@read method GET HEAD
+	handle @read {
+		reverse_proxy dashboard:8080
+	}
+	handle {
+		respond "blocked by proxy" 403
+	}
+}

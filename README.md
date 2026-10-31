@@ -8,7 +8,7 @@
 > **It is also a pilot project to evaluate the adoption of [Paperclip](https://github.com/paperclipai/paperclip) with AI agents.** Every improvement, refactor, test, document and architectural change made to this repository since then is **purely an AI-generated suggestion** and nothing more.
 >
 > - ❌ It is **NOT** production-ready, audited, or secure. **Do not use it to hold, move or represent real value.** "Professional-grade" describes how it is built (ADRs, tests, CI gates), not fitness for production.
-> - ❌ It has **NO** TLS and **NO** authentication: the HTTP API and the peer-to-peer protocol are plain HTTP, rate limiting is off by default, and any client that reaches a node can call it (see [SECURITY.md](SECURITY.md)).
+> - ❌ It has **NO** TLS and **NO** authentication: the HTTP API and the peer-to-peer protocol are plain HTTP, rate limiting is off by default, and any client that reaches a node can call it (see [SECURITY.md](SECURITY.md)). For a worked example of a TLS reverse proxy in front of a node, with its limits, see [Running behind a reverse proxy](docs/playground.md#running-behind-a-reverse-proxy-composetlsyml).
 > - ❌ It is **NOT** an official product, a reference implementation of any protocol, or a statement of any company.
 > - ❌ It is **NOT** affiliated with, endorsed by, or related to the work, products, or views of the author's employer, clients, or any other organization.
 > - ❌ The AI-suggested changes do **NOT** represent professional advice, engineering recommendations, or best practices vetted by the author's employer or clients.
@@ -145,6 +145,8 @@ Design decisions live in [`docs/adr/`](docs/adr/0009-merkle-tree.md):
 | [0020](docs/adr/0020-genesis-time.md) | Deterministic genesis time from `GENESIS_TIME` |
 | [0021](docs/adr/0021-professional-grade-study-reference.md) | Professional-grade study reference: hand-written chain core, market tools around it, never for real value |
 | [0022](docs/adr/0022-prometheus-client-golang.md) | Prometheus metrics with client_golang (registry per server) and an observability compose profile; supersedes 0010 |
+| [0023](docs/adr/0023-network-dashboard.md) | Read-only network dashboard as `bwg dashboard` |
+| [0024](docs/adr/0024-caddy-tls-reverse-proxy.md) | Caddy as the TLS-terminating reverse proxy in `compose.tls.yml` (no module added) |
 
 ## Configuration & Environment Variables
 
@@ -174,7 +176,7 @@ The application can be configured via environment variables (e.g., in a `.env` f
 | `MAX_OUTBOUND_PEERS` | Maximum outbound peers (positive integer; invalid values use the default) | `8` |
 | `PEER_INTERVAL` | Time between dialer rounds, as a Go duration. Empty, invalid or non-positive values use the default; peers not seen for 3 intervals expire | `30s` |
 | `MAX_BLOCK_BYTES` | Maximum JSON-serialized block size in bytes (positive integer; invalid values fall back to the default) | `1048576` |
-| `RATE_LIMIT` | Maximum requests per minute per IP (positive integer; empty, invalid, or non-positive disables rate limiting) | disabled (`0`) |
+| `RATE_LIMIT` | Maximum requests per minute per client address as seen by the node (`RemoteAddr`); forwarded headers are ignored, so behind a proxy it is one shared limit (positive integer; empty, invalid, or non-positive disables rate limiting) | disabled (`0`) |
 | `NODE_URL` | Base URL of the node used by `bwg wallet` and `bwg miner` (`--node` overrides it) | `http://localhost:8080` |
 | `WALLET_KEYSTORE` | Keystore path used by `bwg wallet new` and `bwg wallet send` (`--keystore` overrides it) | `wallet.key` |
 | `WALLET_PASSWORD` | Password of the wallet keystore; required by `bwg wallet new` and `bwg wallet send`. There is no flag for it, so it stays out of the shell history | empty |

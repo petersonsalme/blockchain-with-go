@@ -12,6 +12,10 @@ Gossip ([ADR-0018](docs/adr/0018-block-and-tx-gossip.md)) ties each request to a
 
 Sync ([ADR-0019](docs/adr/0019-initial-sync-and-forks.md)) bans a peer that sends invalid headers or blocks, by `node_id` and address, for one hour. The ban lives in memory and is forgotten on restart; a hostile peer can return with a new id from another address. Headers are not checked by the consensus before the bodies arrive, so a peer that claims fake work can cost the bodies of the claimed branch before it is banned. A peer whose branch has more work but a lower height is never tried.
 
+## Reverse proxy setup
+
+`compose.tls.yml` shows a node behind a TLS-terminating Caddy that publishes only read routes and keeps `/p2p/*`, writes and `/metrics` internal ([ADR-0024](docs/adr/0024-caddy-tls-reverse-proxy.md), [guide](docs/playground.md#running-behind-a-reverse-proxy-composetlsyml)). It adds encryption in transit to the exposed routes and nothing else: there is still no authentication, `node_id` is still spoofable, peers still use plain HTTP on the internal network, the certificate comes from a self-signed local CA, and the rate limiter keys on the connection address, so behind the proxy `RATE_LIMIT` is one cap shared by all public clients. It is an example, not audited and not for public deployment.
+
 ## Reporting a vulnerability
 
 If you find a security issue, you are welcome to report it privately through GitHub's

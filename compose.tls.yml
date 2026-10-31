@@ -1,0 +1,67 @@
+# Operator example: a bwg node behind a TLS-terminating Caddy (ADR-0024).
+# Only caddy is published (127.0.0.1:18443 node API and explorer, 127.0.0.1:18444 dashboard);
+# node1, node2 and the dashboard sit on an internal network with no published port.
+# Run: docker compose -p bwg-tls -f compose.tls.yml up -d --build
+# Does not use 18080-18084, so it can run next to the base network. See docs/playground.md.
+x-node: &node
+  build: .
+  image: bwg:compose
+  environment: &env
+    DATA_DIR: /data
+    GENESIS_TIME: "2026-01-01T00:00:00Z"
+    CONSENSUS: pow
+    POW_DIFFICULTY: "1"
+    POW_RETARGET_INTERVAL: "0"
+    PEER_INTERVAL: 1s
+
+services:
+  node1:
+    <<: *node
+    environment:
+      <<: *env
+      P2P_LISTEN_ADDR: http://node1:8080
+      # The limiter keys on RemoteAddr: every public client reaches the node from caddy's address,
+      # so this is one global cap on public traffic, not a per-client limit (ADR-0024, ENG-259).
+      # The dashboard and node2 reach the node directly and keep their own buckets.
+      RATE_LIMIT: "1200"
+    volumes: ["node1-data:/data"]
+    networks: [backend]
+
+  node2:
+    <<: *node
+    environment:
+      <<: *env
+      P2P_LISTEN_ADDR: http://node2:8080
+      SEED_PEERS: http://node1:8080
+    volumes: ["node2-data:/data"]
+    networks: [backend]
+
+  dashboard:
+    <<: *node
+    command: ["dashboard"]
+    environment:
+      NODES: node1=http://node1:8080,node2=http://node2:8080
+    networks: [backend]
+
+  caddy:
+    image: caddy:2.11.7
+    depends_on: [node1, dashboard]
+    ports:
+      - "127.0.0.1:18443:18443"
+      - "127.0.0.1:18444:18444"
+    volumes:
+      - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [backend, edge]
+
+networks:
+  backend:
+    internal: true
+  edge:
+
+volumes:
+  node1-data:
+  node2-data:
+  caddy-data:
+  caddy-config:
