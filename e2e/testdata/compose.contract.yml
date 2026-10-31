@@ -1,0 +1,21 @@
+# Override for the contract e2e test (e2e/contract_test.go): funds the test key
+# (e2e/testdata/key.seed) with 12 genesis outputs of 100 on every node, so all
+# nodes share one genesis. docker-compose.yml stays untouched.
+x-funded: &funded
+  GENESIS_ALLOCATIONS: "0065b60673d6ed884bf01c2c222d82ada0740f29ac667699b1:100,0065b60673d6ed884bf01c2c222d82ada0740f29ac667699b1:100,0065b60673d6ed884bf01c2c222d82ada0740f29ac667699b1:100,0065b60673d6ed884bf01c2c222d82ada0740f29ac667699b1:100,0065b60673d6ed884bf01c2c222d82ada0740f29ac667699b1:100,0065b60673d6ed884bf01c2c222d82ada0740f29ac667699b1:100,0065b60673d6ed884bf01c2c222d82ada0740f29ac667699b1:100,0065b60673d6ed884bf01c2c222d82ada0740f29ac667699b1:100,0065b60673d6ed884bf01c2c222d82ada0740f29ac667699b1:100,0065b60673d6ed884bf01c2c222d82ada0740f29ac667699b1:100,0065b60673d6ed884bf01c2c222d82ada0740f29ac667699b1:100,0065b60673d6ed884bf01c2c222d82ada0740f29ac667699b1:100"
+
+services:
+  node1:
+    environment: *funded
+    networks: [default, host-access]
+  node2:
+    environment: *funded
+    networks: [default, host-access]
+  node3:
+    environment: *funded
+    networks: [default, host-access]
+
+# The test cuts a node off from "default" (the network the nodes talk on). A second
+# network keeps its published port reachable from the host while it is isolated.
+networks:
+  host-access:
