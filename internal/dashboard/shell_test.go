@@ -146,3 +146,55 @@ func TestShellMarksTheCurrentPage(t *testing.T) {
 		}
 	}
 }
+
+func TestSearchNodeErrorKeepsTheSearchPlace(t *testing.T) {
+	t.Parallel()
+
+	n := routedNode(t, map[string]reply{
+		"/tx/" + txA:    {http.StatusInternalServerError, `{}`},
+		"/block/" + txA: ok(`{}`),
+	})
+	rec := do(chainServer(t, n), http.MethodGet, "/search?node=node1&q="+txA)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("code got %d, want %d", rec.Code, http.StatusBadGateway)
+	}
+
+	body := rec.Body.String()
+
+	crumbsGroup, ok := extractBetween(body, `<ol class="crumbs">`, "</ol>")
+	if !ok {
+		t.Fatal("missing crumbs group")
+	}
+
+	var gotCrumbs []string
+	for _, m := range reCrumb.FindAllStringSubmatch(crumbsGroup, -1) {
+		gotCrumbs = append(gotCrumbs, m[1])
+	}
+
+	wantCrumbs := []string{"Network", "node1", "Search"}
+	if !slices.Equal(gotCrumbs, wantCrumbs) {
+		t.Errorf("crumbs got %v, want %v", gotCrumbs, wantCrumbs)
+	}
+
+	if !strings.Contains(crumbsGroup, `<span aria-current="page">Search<`) {
+		t.Errorf("crumbs group missing <span aria-current=\"page\">Search<: %s", crumbsGroup)
+	}
+
+	if !strings.Contains(crumbsGroup, `<a href="/n/node1/">node1</a>`) {
+		t.Errorf("crumbs group missing <a href=\"/n/node1/\">node1</a>: %s", crumbsGroup)
+	}
+
+	tabsGroup, hasTabs := extractBetween(body, `<ul class="tabs">`, "</ul>")
+	if !hasTabs {
+		t.Fatal("tabs group missing")
+	}
+
+	if matches := reAriaCurrent.FindAllStringSubmatch(tabsGroup, -1); len(matches) != 0 {
+		t.Errorf("tabs group has aria-current: %v", matches)
+	}
+
+	if count := strings.Count(body, `aria-current="page"`); count != 1 {
+		t.Errorf("total aria-current count got %d, want 1", count)
+	}
+}
