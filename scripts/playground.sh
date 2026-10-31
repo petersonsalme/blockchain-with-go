@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 # Starts the playground (docs/playground.md) from an empty chain and funds a
 # wallet by mining on node1. Usage: WALLET_PASSWORD=... scripts/playground.sh [BLOCKS]
+# BLOCKS is a non-negative integer (default 3). With 0 the script starts the
+# network and mines nothing (bwg miner --count 0 would mine until Ctrl+C).
 set -euo pipefail
 
 blocks="${1:-3}"
+if [[ ! "$blocks" =~ ^[0-9]+$ ]]; then
+  echo "usage: WALLET_PASSWORD=... scripts/playground.sh [BLOCKS]   (BLOCKS: non-negative integer, default 3; 0 mines nothing)" >&2
+  exit 2
+fi
 : "${WALLET_PASSWORD:?set WALLET_PASSWORD (it is never printed or stored)}"
 
 cd "$(dirname "$0")/.."
@@ -34,8 +40,10 @@ for port in 18081 18082 18083; do
   curl -fsS "http://127.0.0.1:$port/health" >/dev/null
 done
 
-"$dir/bwg" miner --node http://127.0.0.1:18081 --count "$blocks"
-sleep 3 # gossip reaches node2 and node3 (PEER_INTERVAL=1s)
+if [ "$blocks" -gt 0 ]; then
+  "$dir/bwg" miner --node http://127.0.0.1:18081 --count "$blocks"
+  sleep 3 # gossip reaches node2 and node3 (PEER_INTERVAL=1s)
+fi
 
 echo "miner address: $addr"
 for port in 18081 18082 18083; do
