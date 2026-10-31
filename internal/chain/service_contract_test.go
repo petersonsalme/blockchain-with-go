@@ -383,6 +383,209 @@ var _ = Describe("Service contracts", func() {
 				})
 			})
 
+			Describe("ReplaceChain across the deploy", func() {
+				c := pow.NewProofOfWork(1)
+
+				var (
+					dep      domain.Transaction
+					id       string
+					genesis  []*domain.Block
+					spends   []*domain.Block // heavier than local, no contract
+					calls    []*domain.Block // heavier than spends, deploy and 4 calls
+					callsOps = []int{7, 8, 9, 10}
+				)
+
+				BeforeEach(func() {
+					if be.pruned {
+						// A pruned repository drops the deploy body, so
+						// vm.BuildState(repo.All()) cannot replay it (ADR-0014
+						// keeps contract state unpersisted).
+						Skip("pruned repositories cannot replay contract state from All()")
+					}
+
+					dep = withContract(f.owner, f.ops[0], 9, deployOp(vm.CounterCode))
+					id = dep.CalculateHash()
+					_, err := svc.Mine(ctx, []domain.Transaction{dep})
+					Expect(err).NotTo(HaveOccurred())
+
+					for _, i := range []int{1, 2} {
+						_, err = svc.Mine(ctx, []domain.Transaction{withContract(f.owner, f.ops[i], 9, callOp(id, 100))})
+						Expect(err).NotTo(HaveOccurred())
+					}
+
+					genesis = mustAll(repo)[:1]
+					spends = grow(c, genesis,
+						[]domain.Transaction{spend(f.owner, f.ops[3], 9)},
+						[]domain.Transaction{spend(f.owner, f.ops[4], 9)},
+						[]domain.Transaction{spend(f.owner, f.ops[5], 9)},
+						[]domain.Transaction{spend(f.owner, f.ops[6], 9)},
+					)
+
+					txss := [][]domain.Transaction{{dep}}
+					for _, i := range callsOps {
+						txss = append(txss, []domain.Transaction{withContract(f.owner, f.ops[i], 9, callOp(id, 100))})
+					}
+
+					calls = grow(c, genesis, txss...)
+				})
+
+				It("drops the contract below the fork and restores it on the way back", func() {
+					expectContracts(svc, repo, id)
+					Expect(counter(id)).To(Equal(uint64(2)))
+
+					r, err := svc.ReplaceChain(ctx, spends)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(r.ForkHeight).To(Equal(1))
+					Expect(chainHashes()).To(Equal(hashes(spends)))
+
+					_, _, ok := svc.Contract(id)
+					Expect(ok).To(BeFalse())
+					expectContracts(svc, repo, id)
+
+					r, err = svc.ReplaceChain(ctx, calls)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(r.ForkHeight).To(Equal(1))
+					Expect(chainHashes()).To(Equal(hashes(calls)))
+					Expect(counter(id)).To(Equal(uint64(4)))
+					expectContracts(svc, repo, id)
+				})
+
+				It("reports after a restart the contracts of the service that reorganised", func() {
+					_, err := svc.ReplaceChain(ctx, spends)
+					Expect(err).NotTo(HaveOccurred())
+
+					again, err := NewService(repo, c)
+					Expect(err).NotTo(HaveOccurred())
+
+					_, _, ok := again.Contract(id)
+					Expect(ok).To(BeFalse())
+					expectContracts(again, repo, id)
+
+					_, err = svc.ReplaceChain(ctx, calls)
+					Expect(err).NotTo(HaveOccurred())
+
+					again, err = NewService(repo, c)
+					Expect(err).NotTo(HaveOccurred())
+
+					code, st, ok := svc.Contract(id)
+					Expect(ok).To(BeTrue())
+
+					againCode, againSt, againOK := again.Contract(id)
+					Expect(againOK).To(BeTrue())
+					Expect(againCode).To(Equal(code))
+					Expect(againSt).To(Equal(st))
+					Expect(againSt).To(Equal(map[uint64]uint64{0: 4}))
+					expectContracts(again, repo, id)
+				})
+
+				DescribeTable("rejects a candidate whose contract op fails after its first block",
+					func(bad func() domain.Transaction, want error) {
+						base := mustAll(repo)[:2]
+						cand := grow(c, base,
+							[]domain.Transaction{withContract(f.owner, f.ops[7], 9, callOp(id, 100))},
+							[]domain.Transaction{bad()},
+							[]domain.Transaction{spend(f.owner, f.ops[9], 9)},
+						)
+						before, utxos := chainHashes(), utxoSnapshot(repo)
+
+						_, err := svc.ReplaceChain(ctx, cand)
+						Expect(err).To(MatchError(want))
+						Expect(chainHashes()).To(Equal(before))
+						Expect(utxoSnapshot(repo)).To(Equal(utxos))
+						Expect(counter(id)).To(Equal(uint64(2)))
+						expectContracts(svc, repo, id, missing)
+					},
+					Entry("out of gas", func() domain.Transaction {
+						return withContract(f.owner, f.ops[8], 9, callOp(id, 10))
+					}, vm.ErrOutOfGas),
+					Entry("unknown contract", func() domain.Transaction {
+						return withContract(f.owner, f.ops[8], 9, callOp(missing, 100))
+					}, vm.ErrUnknownContract),
+				)
+
+				// ErrContractExists is unreachable here: a second deploy of the
+				// same transaction spends outputs already spent, so the UTXO rules
+				// stop it first; vm asserts the sentinel itself.
+				It("stops a repeated deploy in a later block on the UTXO rules", func() {
+					cand := grow(c, genesis,
+						[]domain.Transaction{dep},
+						[]domain.Transaction{spend(f.owner, f.ops[3], 9)},
+						[]domain.Transaction{dep},
+						[]domain.Transaction{spend(f.owner, f.ops[4], 9)},
+					)
+					before, utxos := chainHashes(), utxoSnapshot(repo)
+
+					_, err := svc.ReplaceChain(ctx, cand)
+					Expect(err).To(HaveOccurred())
+					Expect(err).NotTo(MatchError(vm.ErrContractExists))
+					Expect(chainHashes()).To(Equal(before))
+					Expect(utxoSnapshot(repo)).To(Equal(utxos))
+					Expect(counter(id)).To(Equal(uint64(2)))
+					expectContracts(svc, repo, id)
+				})
+
+				It("only ever shows a whole chain to readers while ReplaceChain alternates branches", func() {
+					// Every candidate forks at the deploy block (height 2) and is
+					// one block longer than the previous one, the first longer
+					// than the local chain: even ones count i+3 calls, odd ones
+					// only spend.
+					base := mustAll(repo)[:2]
+					seen := map[uint64]bool{0: true, 2: true} // 2: the local chain before the first swap
+					cands := make([][]*domain.Block, 7)
+
+					for i := range cands {
+						txss := make([][]domain.Transaction, i+3)
+						for j := range txss {
+							if i%2 == 0 {
+								txss[j] = []domain.Transaction{withContract(f.owner, f.ops[1+j], 9, callOp(id, 100))}
+							} else {
+								txss[j] = []domain.Transaction{spend(f.owner, f.ops[1+j], 9)}
+							}
+						}
+
+						cands[i] = grow(c, base, txss...)
+						if i%2 == 0 {
+							seen[uint64(i+3)] = true
+						}
+					}
+
+					var wg sync.WaitGroup
+
+					stop := make(chan struct{})
+
+					for range 4 {
+						wg.Go(func() {
+							defer GinkgoRecover()
+
+							for {
+								select {
+								case <-stop:
+									return
+								default:
+								}
+
+								_, st, ok := svc.Contract(id)
+								Expect(ok).To(BeTrue())
+								Expect(seen).To(HaveKey(st[0]))
+
+								_ = svc.Submit(withContract(f.owner, f.ops[fundedOutputs-1], 9, callOp(id, 100)))
+							}
+						})
+					}
+
+					for _, cand := range cands {
+						_, err := svc.ReplaceChain(ctx, cand)
+						Expect(err).NotTo(HaveOccurred())
+					}
+
+					close(stop)
+					wg.Wait()
+					Expect(chainHashes()).To(Equal(hashes(cands[len(cands)-1])))
+					Expect(counter(id)).To(Equal(uint64(9)))
+					expectContracts(svc, repo, id)
+				})
+			})
+
 			It("serves Submit and Contract while Mine runs", func() {
 				id := deploy(vm.CounterCode)
 
