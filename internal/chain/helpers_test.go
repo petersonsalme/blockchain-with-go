@@ -15,6 +15,7 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/bolt"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/memory"
+	"github.com/petersonsalme/blockchain-with-go/internal/vm"
 	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
 )
 
@@ -266,5 +267,24 @@ func minePending(svc *Service) (*domain.Block, error) {
 		Fail("MinePending did not return within " + mineTimeout.String())
 
 		return nil, nil
+	}
+}
+
+// expectContracts asserts that svc reports, for every id, exactly the contract
+// vm.BuildState derives from the chain stored in repo.
+func expectContracts(svc *Service, repo storage.IndexedRepository, ids ...string) {
+	want, err := vm.BuildState(mustAll(repo))
+	Expect(err).NotTo(HaveOccurred())
+
+	for _, id := range ids {
+		code, st, ok := svc.Contract(id)
+
+		c, wantOK := want.Contract(id)
+		Expect(ok).To(Equal(wantOK), "contract %s", id)
+
+		if wantOK {
+			Expect(code).To(Equal(c.Code))
+			Expect(st).To(Equal(c.Storage))
+		}
 	}
 }
