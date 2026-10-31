@@ -1,6 +1,8 @@
 package server
 
 import (
+	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -112,13 +114,17 @@ var _ = Describe("Contract routes", func() {
 		return tx.ID, string(out)
 	}
 
-	deploy := func() string {
-		id, body := contractTx(&domain.ContractOp{Kind: domain.ContractDeploy, Code: hex.EncodeToString(vm.CounterCode), GasLimit: 100})
+	deployCode := func(code []byte) string {
+		id, body := contractTx(&domain.ContractOp{Kind: domain.ContractDeploy, Code: hex.EncodeToString(code), GasLimit: 100})
 		rec := do(http.MethodPost, "/tx", body)
 		Expect(rec.Code).To(Equal(http.StatusAccepted), rec.Body.String())
 		Expect(do(http.MethodPost, "/mine", "").Code).To(Equal(http.StatusCreated))
 
 		return id
+	}
+
+	deploy := func() string {
+		return deployCode(vm.CounterCode)
 	}
 
 	call := func(id string, gas uint64) *httptest.ResponseRecorder {
@@ -168,6 +174,30 @@ var _ = Describe("Contract routes", func() {
 		Expect(rec.Body.String()).To(ContainSubstring(`"code": "unknown_contract"`))
 	})
 
+	push := func(v uint64) []byte { return binary.BigEndian.AppendUint64([]byte{vm.OpPUSH8}, v) }
+
+	DescribeTable("rejects a call that fails in the VM with 422",
+		func(code []byte, want string) {
+			id := deployCode(code)
+
+			rec := call(id, 100)
+
+			Expect(rec.Code).To(Equal(http.StatusUnprocessableEntity), rec.Body.String())
+			Expect(rec.Body.String()).To(ContainSubstring(`"code": "` + want + `"`))
+
+			mempool := do(http.MethodGet, "/mempool", "")
+			Expect(mempool.Code).To(Equal(http.StatusOK))
+			Expect(mempool.Body.String()).To(ContainSubstring(`"transactions": []`))
+
+			Expect(do(http.MethodGet, "/contracts/"+id, "").Body.String()).To(ContainSubstring(`"storage": {}`))
+		},
+		Entry("reverted", []byte{vm.OpREVERT}, "reverted"),
+		Entry("bad jump", append(push(1000), vm.OpJUMP), "bad_jump"),
+		Entry("stack underflow", []byte{vm.OpPOP}, "stack_underflow"),
+		Entry("stack overflow", bytes.Repeat(push(1), vm.MaxStack+1), "stack_overflow"),
+		Entry("argument index", append(push(0), vm.OpARG), "arg_index"),
+	)
+
 	It("refuses the replay of a mined deploy with 409", func() {
 		_, body := contractTx(&domain.ContractOp{Kind: domain.ContractDeploy, Code: hex.EncodeToString(vm.CounterCode), GasLimit: 100})
 		Expect(do(http.MethodPost, "/tx", body).Code).To(Equal(http.StatusAccepted))
@@ -206,6 +236,38 @@ var _ = Describe("Contract routes", func() {
 
 		Expect(rec.Code).To(Equal(http.StatusAccepted), rec.Body.String())
 		Expect(rec.Body.String()).To(ContainSubstring(tx.ID))
+	})
+
+	It("serves a transaction without contract with no contract key, before and after mining", func() {
+		tx := funds.tx(newWallet().Address(), 10)
+		tx.ID = tx.CalculateHash()
+		Expect(domain.SignInput(&tx, 0, funds.owner)).To(Succeed())
+
+		raw, err := json.Marshal(tx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(raw)).NotTo(ContainSubstring("ontract"))
+
+		rec := do(http.MethodPost, "/tx", string(raw))
+		Expect(rec.Code).To(Equal(http.StatusAccepted), rec.Body.String())
+
+		rec = do(http.MethodGet, "/mempool", "")
+		Expect(rec.Code).To(Equal(http.StatusOK))
+		Expect(rec.Body.String()).To(ContainSubstring(tx.ID))
+		Expect(rec.Body.String()).NotTo(ContainSubstring("ontract"))
+
+		Expect(do(http.MethodPost, "/mine", "").Code).To(Equal(http.StatusCreated))
+
+		rec = do(http.MethodGet, "/tx/"+tx.ID, "")
+		Expect(rec.Code).To(Equal(http.StatusOK), rec.Body.String())
+		Expect(rec.Body.String()).NotTo(ContainSubstring("ontract"))
+
+		var body struct {
+			Transaction domain.Transaction `json:"transaction"`
+		}
+		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
+		got := body.Transaction
+		Expect(got.CalculateHash()).To(Equal(tx.ID))
+		Expect(got.Contract).To(BeNil())
 	})
 
 	It("answers 400 invalid_contract_id for an ID that is not canonical hex", func() {
