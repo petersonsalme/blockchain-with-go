@@ -847,9 +847,12 @@ func TestMempoolRowsShowFeeRateOnlyFromTheirEntry(t *testing.T) {
 		checkOrder bool
 	}{
 		{
-			name:       "matched",
-			body:       `{"transactions":[` + twoTxs + `],"entries":[{"id":"` + txA + `","fee":4200,"size":300},{"id":"` + txB + `","fee":1000,"size":300}]}`,
-			wants:      []string{">0.000042<", `title="4,200 base units"`, "14.00 base units/byte", "3.33 base units/byte"},
+			name: "matched",
+			body: `{"transactions":[` + twoTxs + `],"entries":[{"id":"` + txA + `","fee":4200,"size":300},{"id":"` + txB + `","fee":1000,"size":300}]}`,
+			wants: []string{
+				`fee <span class="num" title="4,200 base units">0.000042</span> coins · 14.00 base units/byte`,
+				`fee <span class="num" title="1,000 base units">0.00001</span> coins · 3.33 base units/byte`,
+			},
 			checkOrder: true,
 		},
 		{
