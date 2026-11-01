@@ -241,6 +241,19 @@ func TestLanesFork(t *testing.T) {
 			noFork:   []int{0},
 		},
 		{
+			name: "minority node first",
+			cards: []Card{
+				laneCard("n1", true, 10, "b10", forked),
+				laneCard("n2", true, 10, "a10", chain("a", 3, 10)),
+				laneCard("n3", true, 10, "a10", chain("a", 3, 10)),
+			},
+			state:    StateFork,
+			majority: "a10",
+			lane:     0,
+			want:     []string{"", "", "", "", "fork", "fork", "fork", "fork"},
+			noFork:   []int{1, 2},
+		},
+		{
 			name: "reference skips a behind card",
 			cards: []Card{
 				laneCard("n1", true, 8, "a8", chain("a", 3, 8)),
