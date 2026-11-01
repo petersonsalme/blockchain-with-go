@@ -788,6 +788,127 @@ func TestNetworkFragment(t *testing.T) {
 	}
 }
 
+func TestNetworkFragmentShowsChainLanes(t *testing.T) {
+	t.Parallel()
+
+	a, b, c := newChainNode(t, 10, "h10"), newChainNode(t, 10, "h10"), newChainNode(t, 10, "h10")
+	p := newPoller(t, a, b, c)
+	ticks(p, 1)
+
+	frag := do(newTestServerWithPoller(t, p, a, b, c), http.MethodGet, "/fragments/network").Body.String()
+	for _, want := range []string{
+		">Chain per node<", "heights 3 to 10",
+		`<a class="blk blk--tip" href="/n/node1/block/h10" title="h10">`,
+		`<a class="blk" href="/n/node3/block/h3" title="h3">`,
+	} {
+		if !strings.Contains(frag, want) {
+			t.Errorf("fragment lacks %q:\n%s", want, frag)
+		}
+	}
+
+	if n := strings.Count(frag, `<ol class="chain">`); n != 3 {
+		t.Errorf("%d chain lanes, want 3", n)
+	}
+
+	if strings.Contains(frag, "blk--fork") {
+		t.Errorf("agreeing nodes mark a fork:\n%s", frag)
+	}
+}
+
+func TestChainLanesShowAStoppedNode(t *testing.T) {
+	t.Parallel()
+
+	a, b, c := newChainNode(t, 10, "h10"), newChainNode(t, 10, "h10"), newChainNode(t, 10, "h10")
+	p := newPoller(t, a, b, c)
+	ticks(p, 1)
+
+	c.up.Store(false)
+	a.height.Store(12)
+	a.tip.Store("h12")
+	b.height.Store(12)
+	b.tip.Store("h12")
+	ticks(p, 1)
+
+	frag := do(newTestServerWithPoller(t, p, a, b, c), http.MethodGet, "/fragments/network").Body.String()
+	for _, want := range []string{
+		"heights 5 to 12", `<a class="blk blk--stale" href="/n/node3/block/h10"`, `<div class="lane lane--bad">`,
+	} {
+		if !strings.Contains(frag, want) {
+			t.Errorf("fragment lacks %q:\n%s", want, frag)
+		}
+	}
+
+	// The node comparison table links every node too, but the lanes come after it: take the last link.
+	start := strings.LastIndex(frag, `<a href="/n/node3/">`)
+	if start < 0 {
+		t.Fatalf("node3 has no lane:\n%s", frag)
+	}
+
+	lane := frag[start:]
+
+	before, _, ok := strings.Cut(lane, "</ol>")
+	if !ok {
+		t.Fatalf("node3's lane has no chain:\n%s", frag)
+	}
+
+	if n := strings.Count(before, "blk--missing"); n != 2 {
+		t.Errorf("node3's lane has %d missing heights, want 2:\n%s", n, before)
+	}
+}
+
+func TestChainLanesMarkAFork(t *testing.T) {
+	t.Parallel()
+
+	a, c := newChainNode(t, 10, "h10"), newChainNode(t, 10, "h10")
+	b := newChainNode(t, 10, "b10")
+	b.hashes.Store(map[int]string{7: "b7", 8: "b8", 9: "b9"})
+	p := newPoller(t, a, b, c)
+	h := newTestServerWithPoller(t, p, a, b, c)
+
+	ticks(p, 1)
+
+	frag := do(h, http.MethodGet, "/fragments/network").Body.String()
+	for _, want := range []string{
+		`<a class="blk blk--fork" href="/n/node2/block/b7"`,
+		`<a class="blk blk--tip" href="/n/node2/block/b10"`,
+	} {
+		if !strings.Contains(frag, want) {
+			t.Errorf("after one tick, fragment lacks %q:\n%s", want, frag)
+		}
+	}
+
+	ticks(p, 3)
+
+	frag = do(h, http.MethodGet, "/fragments/network").Body.String()
+	if !strings.Contains(frag, `<a class="blk blk--fork" href="/n/node2/block/b10"`) {
+		t.Errorf("after the fork is confirmed, fragment lacks the fork tip:\n%s", frag)
+	}
+
+	for _, node := range []string{"node1", "node3"} {
+		if strings.Contains(frag, `blk--fork" href="/n/`+node+`/`) {
+			t.Errorf("%s, on the majority chain, is marked as a fork:\n%s", node, frag)
+		}
+	}
+}
+
+func TestNetworkFragmentWithoutAnyNodeSeen(t *testing.T) {
+	t.Parallel()
+
+	n := newChainNode(t, 10, "h10")
+	n.up.Store(false)
+	p := newPoller(t, n)
+	ticks(p, 1)
+
+	frag := do(newTestServerWithPoller(t, p, n), http.MethodGet, "/fragments/network").Body.String()
+	if !strings.Contains(frag, "No node has answered yet.") {
+		t.Errorf("fragment lacks the empty message:\n%s", frag)
+	}
+
+	if strings.Contains(frag, `<ol class="chain">`) {
+		t.Errorf("fragment draws lanes with no node seen:\n%s", frag)
+	}
+}
+
 // sidebarPoll is the node list in the sidebar, which every full page refreshes.
 const sidebarPoll = `hx-get="/fragments/sidebar" hx-trigger="every 2s" hx-swap="outerHTML"`
 
