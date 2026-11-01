@@ -142,6 +142,22 @@ func newPoller(t *testing.T, nodes ...*chainNode) *dashboard.Poller {
 	return dashboard.NewPoller(list, dashboard.NewFetcher(time.Second, 1<<20), time.Hour, func() time.Time { return t0 })
 }
 
+func TestViewCarriesLanes(t *testing.T) {
+	t.Parallel()
+
+	p := newPoller(t, newChainNode(t, 10, hex64), newChainNode(t, 10, hex64), newChainNode(t, 10, hex64))
+	p.Tick(context.Background())
+
+	v := p.View()
+	if v.LaneFrom != 3 || v.LaneTo != 10 {
+		t.Fatalf("lanes window = %d..%d, want 3..10", v.LaneFrom, v.LaneTo)
+	}
+
+	if len(v.Lanes) != 3 {
+		t.Fatalf("lanes = %d, want 3", len(v.Lanes))
+	}
+}
+
 func TestPollerSnapshot(t *testing.T) {
 	t.Parallel()
 

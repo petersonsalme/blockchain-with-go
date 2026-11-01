@@ -153,10 +153,13 @@ type Card struct {
 type View struct {
 	Assessment Assessment
 	Cards      []Card
-	Agree      int  // reachable nodes on the majority tip
-	Reachable  int  // reachable nodes
-	Pool       int  // largest known pool among reachable nodes
-	PoolKnown  bool // at least one reachable node has a known pool
+	Agree      int    // reachable nodes on the majority tip
+	Reachable  int    // reachable nodes
+	Pool       int    // largest known pool among reachable nodes
+	PoolKnown  bool   // at least one reachable node has a known pool
+	Lanes      []Lane // chain per node, same heights in every lane
+	LaneFrom   int    // the heights of the lanes
+	LaneTo     int
 }
 
 // Banner is the CSS class suffix and text of the verdict.
@@ -205,6 +208,8 @@ func (p *Poller) View() View {
 		c.Level, c.Status = nodeStatus(*c)
 	}
 
+	lo, top, ls := lanes(cards, a.State, majority)
+
 	return View{
 		Assessment: a,
 		Cards:      cards,
@@ -212,6 +217,9 @@ func (p *Poller) View() View {
 		Reachable:  len(snaps) - a.Unreachable,
 		Pool:       pool,
 		PoolKnown:  poolKnown,
+		Lanes:      ls,
+		LaneFrom:   lo,
+		LaneTo:     top,
 	}
 }
 
