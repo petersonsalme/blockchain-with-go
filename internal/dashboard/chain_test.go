@@ -724,6 +724,71 @@ func TestPendingTxShowsItsPosition(t *testing.T) {
 	}
 }
 
+func TestPendingTxShowsItsFeeRate(t *testing.T) {
+	t.Parallel()
+
+	twoTxs := txJSON(txA, ownerAddr) + `,` + txJSON(txB, ownerAddr)
+
+	t.Run("matched entry", func(t *testing.T) {
+		t.Parallel()
+
+		n := routedNode(t, map[string]reply{
+			"/tx/" + txB: {http.StatusNotFound, `{"error":"nope"}`},
+			"/mempool":   ok(`{"transactions":[` + twoTxs + `],"entries":[{"id":"` + txA + `","fee":4200,"size":300},{"id":"` + txB + `","fee":1000,"size":300}]}`),
+		})
+
+		rec := do(chainServer(t, n), http.MethodGet, "/n/node1/tx/"+txB)
+		body := rec.Body.String()
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("= %d: %s", rec.Code, body)
+		}
+
+		if !strings.Contains(body, "3.33 base units/byte") || strings.Contains(body, "14.00 base units/byte") {
+			t.Errorf("page missing rate or has txA rate: %s", body)
+		}
+	})
+
+	t.Run("zero size", func(t *testing.T) {
+		t.Parallel()
+
+		n := routedNode(t, map[string]reply{
+			"/tx/" + txB: {http.StatusNotFound, `{"error":"nope"}`},
+			"/mempool":   ok(`{"transactions":[` + twoTxs + `],"entries":[{"id":"` + txA + `","fee":4200,"size":300},{"id":"` + txB + `","fee":1000,"size":0}]}`),
+		})
+
+		rec := do(chainServer(t, n), http.MethodGet, "/n/node1/tx/"+txB)
+		body := rec.Body.String()
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("= %d: %s", rec.Code, body)
+		}
+
+		if !strings.Contains(body, "Fee rate unknown: the node did not report this transaction") {
+			t.Errorf("missing rate unknown message: %s", body)
+		}
+	})
+}
+
+func TestConfirmedTxSaysFeeRateIsPendingOnly(t *testing.T) {
+	t.Parallel()
+
+	n := routedNode(t, map[string]reply{
+		"/tx/" + txA: ok(`{"transaction":` + feeTxJSON(txA, "", payJSON(4200)) + `,"block_hash":"` + blkHash + `","height":1}`),
+	})
+
+	rec := do(chainServer(t, n), http.MethodGet, "/n/node1/tx/"+txA)
+	body := rec.Body.String()
+
+	if rec.Code != http.StatusOK || !strings.Contains(body, "Fee rate is shown only while the transaction is pending") {
+		t.Errorf("= %d, want fee rate pending-only message: %s", rec.Code, body)
+	}
+
+	if slices.Contains(n.seen, "GET /mempool") {
+		t.Errorf("confirmed transaction read mempool: %v", n.seen)
+	}
+}
+
 func TestTxPageNodeErrorIsNotPending(t *testing.T) {
 	t.Parallel()
 
