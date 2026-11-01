@@ -389,6 +389,13 @@ func TestConsensusPage(t *testing.T) {
 		if n := strings.Count(page, `href="/n/`+node+`/block/`); n != 2 {
 			t.Errorf("%s: header rows = %d, want 2", node, n)
 		}
+
+		newer := strings.Index(page, `href="/n/`+node+`/block/`+fmt.Sprintf("%064x", 12))
+		older := strings.Index(page, `href="/n/`+node+`/block/`+fmt.Sprintf("%064x", 11))
+
+		if newer < 0 || older < 0 || newer >= older {
+			t.Errorf("%s: blocks not newest first: block 12 at %d, block 11 at %d", node, newer, older)
+		}
 	}
 }
 
