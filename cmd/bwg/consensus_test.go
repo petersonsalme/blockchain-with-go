@@ -9,10 +9,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/petersonsalme/blockchain-with-go/internal/consensus"
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus/poa"
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus/pow"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
@@ -300,5 +302,212 @@ func writeFile(t *testing.T, path, content string) {
 	err := os.WriteFile(path, []byte(content), 0o600)
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestNewConsensusInfoPoW(t *testing.T) {
+	t.Setenv(consensusEnvVar, "pow")
+	t.Setenv("POW_DIFFICULTY", "5")
+	t.Setenv("POW_RETARGET_INTERVAL", "7")
+	t.Setenv("TARGET_BLOCK_TIME", "3s")
+
+	eng, err := newConsensus()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := newConsensusInfo(eng)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if info.Engine != "pow" || info.Difficulty != 5 || info.RetargetInterval != 7 || info.TargetBlockTime != 3*time.Second {
+		t.Fatalf("info = %+v, want pow, diff 5, retarget 7, target 3s", *info)
+	}
+
+	if info.Validators != nil {
+		t.Fatalf("info.Validators = %v, want nil", info.Validators)
+	}
+}
+
+func TestNewConsensusInfoPoA(t *testing.T) {
+	other, _ := wallet.New()
+	self, _ := poaEnv(t, func(s *wallet.Wallet) string {
+		return hexKey(s) + "," + hexKey(other)
+	})
+
+	eng, err := newConsensus()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := newConsensusInfo(eng)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if info.Engine != "poa" {
+		t.Fatalf("Engine = %q, want %q", info.Engine, "poa")
+	}
+
+	wantValidators := []string{hexKey(self), hexKey(other)}
+	if !slices.Equal(info.Validators, wantValidators) {
+		t.Fatalf("Validators = %v, want %v", info.Validators, wantValidators)
+	}
+}
+
+type unknownEngine struct{}
+
+var _ consensus.Consensus = unknownEngine{}
+
+func (u unknownEngine) Seal(_ context.Context, _ []*domain.Block, _ *domain.Block) error {
+	return nil
+}
+
+func (u unknownEngine) Verify(_ []*domain.Block, _ *domain.Block) error {
+	return nil
+}
+
+func TestNewConsensusInfoUnknownEngine(t *testing.T) {
+	_, err := newConsensusInfo(unknownEngine{})
+	if err == nil {
+		t.Fatal("newConsensusInfo succeeded, want error for unknown engine")
+	}
+}
+
+func TestNodeConsensusRoutePoW(t *testing.T) {
+	t.Setenv(consensusEnvVar, "pow")
+	t.Setenv("POW_DIFFICULTY", "2")
+	t.Setenv("POW_RETARGET_INTERVAL", "7")
+	t.Setenv("TARGET_BLOCK_TIME", "3s")
+
+	eng, err := newConsensus()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := newConsensusInfo(eng)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	repo := memory.New()
+
+	svc, err := newService(repo, eng)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srv, err := server.NewServer(svc, server.Config{Consensus: info})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := getURL(ts.URL + "/consensus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /consensus = %d, want 200", resp.StatusCode)
+	}
+
+	var got struct {
+		Engine    string `json:"engine"`
+		ChainWork string `json:"chain_work"`
+		PoW       struct {
+			RetargetInterval int `json:"retarget_interval"`
+		} `json:"pow"`
+	}
+
+	err = json.NewDecoder(resp.Body).Decode(&got)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blocks, err := svc.Blocks()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantChainWork := domain.ChainWork(blocks).String()
+
+	if got.Engine != "pow" {
+		t.Fatalf("engine = %q, want %q", got.Engine, "pow")
+	}
+
+	if got.PoW.RetargetInterval != 7 {
+		t.Fatalf("pow.retarget_interval = %d, want 7", got.PoW.RetargetInterval)
+	}
+
+	if got.ChainWork != wantChainWork {
+		t.Fatalf("chain_work = %q, want %q", got.ChainWork, wantChainWork)
+	}
+}
+
+func TestNodeConsensusRoutePoA(t *testing.T) {
+	other, _ := wallet.New()
+	self, _ := poaEnv(t, func(s *wallet.Wallet) string {
+		return hexKey(s) + "," + hexKey(other)
+	})
+
+	eng, err := newConsensus()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := newConsensusInfo(eng)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	repo := memory.New()
+
+	svc, err := newService(repo, eng)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srv, err := server.NewServer(svc, server.Config{Consensus: info})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := getURL(ts.URL + "/consensus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /consensus = %d, want 200", resp.StatusCode)
+	}
+
+	var got struct {
+		Engine string `json:"engine"`
+		PoA    struct {
+			Validators []string `json:"validators"`
+		} `json:"poa"`
+	}
+
+	err = json.NewDecoder(resp.Body).Decode(&got)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got.Engine != "poa" {
+		t.Fatalf("engine = %q, want %q", got.Engine, "poa")
+	}
+
+	wantValidators := []string{hexKey(self), hexKey(other)}
+	if !slices.Equal(got.PoA.Validators, wantValidators) {
+		t.Fatalf("poa.validators = %v, want %v", got.PoA.Validators, wantValidators)
 	}
 }

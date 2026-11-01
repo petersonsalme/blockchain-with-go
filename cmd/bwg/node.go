@@ -191,6 +191,29 @@ func newConsensus() (consensus.Consensus, error) {
 	}
 }
 
+// newConsensusInfo describes engine for GET /consensus (ADR-0026). The poa validator set is
+// read again from POA_VALIDATORS, which newConsensus has already validated.
+func newConsensusInfo(engine consensus.Consensus) (*server.ConsensusInfo, error) {
+	switch e := engine.(type) {
+	case *pow.ProofOfWork:
+		return &server.ConsensusInfo{Engine: "pow", Difficulty: e.Difficulty, RetargetInterval: e.RetargetInterval, TargetBlockTime: e.TargetBlockTime}, nil
+	case *poa.ProofOfAuthority:
+		keys, err := parseValidators(os.Getenv(poaValidatorsEnvVar))
+		if err != nil {
+			return nil, err
+		}
+
+		info := &server.ConsensusInfo{Engine: "poa"}
+		for _, k := range keys {
+			info.Validators = append(info.Validators, hex.EncodeToString(k))
+		}
+
+		return info, nil
+	default:
+		return nil, fmt.Errorf("consensus: no status for engine %T", engine)
+	}
+}
+
 // newProofOfAuthority builds poa from POA_VALIDATORS and the POA_KEYSTORE signer.
 func newProofOfAuthority() (consensus.Consensus, error) {
 	validators, err := parseValidators(os.Getenv(poaValidatorsEnvVar))
@@ -405,6 +428,11 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		return err
 	}
 
+	info, err := newConsensusInfo(engine)
+	if err != nil {
+		return err
+	}
+
 	svc, err := newService(repo, engine)
 	if err != nil {
 		return err
@@ -423,6 +451,7 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	}
 
 	srv, err := server.NewServer(svc, server.Config{
+		Consensus:      info,
 		P2P:            peers,
 		Events:         events,
 		MiningTimeout:  server.ParseMiningTimeout(os.Getenv(server.MiningTimeoutEnvVar)),

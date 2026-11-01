@@ -356,6 +356,31 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/errorResponse"
+  /consensus:
+    get:
+      operationId: getConsensus
+      summary: Report the consensus engine, its parameters and the chain work
+      responses:
+        "200":
+          description: The engine the node was configured with and the accumulated work of its chain (ADR-0026).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/consensusResponse"
+        "404":
+          description: The server has no consensus info (`consensus_unknown`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          description: The chain cannot be read (`unhealthy`) or changed during the read (`chain_changed`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
   /metrics:
     get:
       operationId: getMetrics
@@ -957,6 +982,38 @@ components:
           type: integer
         tip:
           type: string
+    consensusResponse:
+      type: object
+      required: [engine, height, tip, chain_work]
+      properties:
+        engine:
+          type: string
+          enum: [pow, poa]
+        height:
+          type: integer
+        tip:
+          type: string
+        chain_work:
+          type: string
+          pattern: "^[0-9]+$"
+        pow:
+          type: object
+          required: [initial_difficulty, retarget_interval, target_block_time_ms]
+          properties:
+            initial_difficulty:
+              type: integer
+            retarget_interval:
+              type: integer
+            target_block_time_ms:
+              type: integer
+        poa:
+          type: object
+          required: [validators]
+          properties:
+            validators:
+              type: array
+              items:
+                type: string
     txResponse:
       type: object
       required: [transaction, block_hash, height]

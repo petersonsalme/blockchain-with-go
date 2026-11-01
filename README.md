@@ -148,6 +148,7 @@ Design decisions live in [`docs/adr/`](docs/adr/0009-merkle-tree.md):
 | [0023](docs/adr/0023-network-dashboard.md) | Read-only network dashboard as `bwg dashboard` |
 | [0024](docs/adr/0024-caddy-tls-reverse-proxy.md) | Caddy as the TLS-terminating reverse proxy in `compose.tls.yml` (no module added) |
 | [0025](docs/adr/0025-trusted-proxies-forwarded-for.md) | Client address from `X-Forwarded-For` only behind `TRUSTED_PROXIES` (right to left, `net/netip`) |
+| [0026](docs/adr/0026-consensus-status-route.md) | Read-only consensus status route `GET /consensus` |
 
 ## Configuration & Environment Variables
 
@@ -506,6 +507,10 @@ curl 'localhost:8080/address/<addr>/txs?limit=2&after=<next>'
 `200` `{"status": "ok", "height": 12, "tip": "<hash>"}` with the current tip; `503` `{"error": "...", "code": "unhealthy"}` when the repository cannot be read.
 
 None of these reads waits for a `POST /` that is mining.
+
+### GET /consensus
+
+engine, parameters and accumulated chain work (ADR-0026).
 
 ### GET /events
 
