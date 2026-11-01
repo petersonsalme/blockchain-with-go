@@ -28,6 +28,7 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus"
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus/pow"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
+	"github.com/petersonsalme/blockchain-with-go/internal/mempool"
 	"github.com/petersonsalme/blockchain-with-go/internal/p2p"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/memory"
@@ -679,6 +680,10 @@ var _ = Describe("OpenAPI contract", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(pool.JSON200).NotTo(BeNil())
 			Expect(pool.JSON200.Transactions).To(HaveLen(1))
+			Expect(pool.JSON200.Entries).To(HaveLen(1))
+			Expect(pool.JSON200.Entries[0].Id).To(Equal(tx.ID))
+			Expect(pool.JSON200.Entries[0].Fee).To(Equal(uint64(bankAmount - 42)))
+			Expect(pool.JSON200.Entries[0].Size).To(Equal(mempool.Size(tx)))
 
 			mined, err := api.MinePendingWithResponse(ctx)
 			Expect(err).NotTo(HaveOccurred())
@@ -692,6 +697,7 @@ var _ = Describe("OpenAPI contract", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(empty.JSON200).NotTo(BeNil())
 			Expect(empty.JSON200.Transactions).To(BeEmpty())
+			Expect(empty.JSON200.Entries).To(BeEmpty())
 		})
 	})
 })

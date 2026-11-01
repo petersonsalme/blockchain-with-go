@@ -66,6 +66,53 @@ var _ = Describe("Pool", func() {
 		})
 	})
 
+	Describe("Entries", func() {
+		It("lists fee and size in the order of Select, ties by ID and 128-bit rates included", func() {
+			p := mempool.New(0)
+			big := uint64(math.MaxUint64)
+			fees := map[string]uint64{"b": 100, "a": 100, "c": 7, "d": big, "e": big - 1}
+
+			for id, fee := range fees {
+				Expect(p.Add(mkTx(id, "p"+id, 0, 10), fee)).To(Succeed())
+			}
+
+			Expect(p.Add(mkTx("f", "pf", 0, 40), big)).To(Succeed()) // larger tx, same fee as d: ranks after it
+
+			sel := p.Select(math.MaxInt)
+			entries := p.Entries()
+			Expect(entries).To(HaveLen(len(sel)))
+			Expect(entries).To(HaveLen(6))
+
+			for i, e := range entries {
+				Expect(e.Tx.ID).To(Equal(sel[i].ID))
+				Expect(e.Size).To(Equal(mempool.Size(sel[i])))
+			}
+
+			Expect(entries[0].Tx.ID).To(Equal("d"))
+			Expect(entries[0].Fee).To(Equal(big))
+			Expect(entries[1].Tx.ID).To(Equal("e"))
+			Expect(entries[2].Tx.ID).To(Equal("f"))
+			Expect(entries[3].Tx.ID).To(Equal("a")) // rate tie with b: lower ID first
+			Expect(entries[3].Fee).To(Equal(uint64(100)))
+			Expect(entries[4].Tx.ID).To(Equal("b"))
+		})
+
+		It("is empty for an empty pool and returns a copy", func() {
+			p := mempool.New(0)
+			Expect(p.Entries()).To(BeEmpty())
+
+			Expect(p.Add(mkTx("a", "pa", 0, 0), 5)).To(Succeed())
+			Expect(p.Add(mkTx("b", "pb", 0, 0), 9)).To(Succeed())
+
+			got := p.Entries()
+			got[0], got[1] = got[1], got[0]
+			got[0].Fee = 0
+
+			Expect(ids(p.Select(math.MaxInt))).To(Equal([]string{"b", "a"}))
+			Expect(p.Entries()[0].Fee).To(Equal(uint64(9)))
+		})
+	})
+
 	Describe("New", func() {
 		It("uses DefaultMaxTxs for a non-positive limit", func() {
 			for _, n := range []int{0, -3} {

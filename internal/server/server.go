@@ -16,6 +16,7 @@ import (
 
 	"github.com/petersonsalme/blockchain-with-go/internal/chain"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
+	"github.com/petersonsalme/blockchain-with-go/internal/mempool"
 	"github.com/petersonsalme/blockchain-with-go/internal/p2p"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
@@ -50,7 +51,7 @@ type Chain interface {
 	AddressHistory(addr, after string, limit int) (chain.AddressPage, error)
 	Mine(ctx context.Context, txs []domain.Transaction) (*domain.Block, error)
 	Submit(tx domain.Transaction) error
-	Pending() []domain.Transaction
+	PendingEntries() []mempool.Entry
 	MinePending(ctx context.Context) (*domain.Block, error)
 	Contract(id string) (code []byte, storage map[uint64]uint64, ok bool)
 }
@@ -798,12 +799,18 @@ func (s *Server) handleMine(w http.ResponseWriter, r *http.Request) {
 
 // handleGetMempool lists the pool in selection order; it never waits for mining.
 func (s *Server) handleGetMempool(w http.ResponseWriter, r *http.Request) {
-	txs := s.chain.Pending()
-	if txs == nil {
-		txs = []domain.Transaction{}
+	pending := s.chain.PendingEntries()
+	resp := mempoolResponse{
+		Transactions: make([]domain.Transaction, len(pending)),
+		Entries:      make([]mempoolEntry, len(pending)),
 	}
 
-	respondWithJSON(w, http.StatusOK, mempoolResponse{Transactions: txs})
+	for i, e := range pending {
+		resp.Transactions[i] = e.Tx
+		resp.Entries[i] = mempoolEntry{ID: e.Tx.ID, Fee: e.Fee, Size: e.Size}
+	}
+
+	respondWithJSON(w, http.StatusOK, resp)
 }
 
 // handleLegacyBPM answers 410 Gone: BPM payloads cannot be signed, so the node can no longer accept them.

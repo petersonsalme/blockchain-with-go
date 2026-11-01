@@ -221,9 +221,23 @@ type InvRequest struct {
 	NodeId string `json:"node_id"`
 }
 
+// MempoolEntry defines model for mempoolEntry.
+type MempoolEntry struct {
+	// Fee sum(inputs) - sum(outputs), the fee the pool orders by.
+	Fee uint64 `json:"fee"`
+
+	// Id ID of the transaction at the same index of `transactions`.
+	Id string `json:"id"`
+
+	// Size Size of the transaction in bytes, the length of its JSON.
+	Size int `json:"size"`
+}
+
 // MempoolResponse defines model for mempoolResponse.
 type MempoolResponse struct {
-	Transactions []Transaction `json:"transactions"`
+	// Entries Fee and size of the pool, one item per transaction, same length and order as `transactions`. Clients compute fee/size for display.
+	Entries      []MempoolEntry `json:"entries"`
+	Transactions []Transaction  `json:"transactions"`
 }
 
 // Message defines model for message.

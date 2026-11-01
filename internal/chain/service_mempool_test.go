@@ -62,6 +62,21 @@ var _ = Describe("Service mempool", func() {
 			Expect(ids(svc.Pending())).To(Equal([]string{rich.ID, cheap.ID}))
 		})
 
+		It("PendingEntries lists fee and size in the order of Pending", func() {
+			cheap, rich := spendOp(0, 9), spendOp(1, 4)
+			Expect(svc.Submit(cheap)).To(Succeed())
+			Expect(svc.Submit(rich)).To(Succeed())
+
+			entries := svc.PendingEntries()
+			Expect(entries).To(HaveLen(2))
+			Expect(entries[0].Tx.ID).To(Equal(rich.ID))
+			Expect(entries[0].Fee).To(Equal(uint64(6)))
+			Expect(entries[0].Size).To(Equal(mempool.Size(rich)))
+			Expect(entries[1].Tx.ID).To(Equal(cheap.ID))
+			Expect(entries[1].Fee).To(Equal(uint64(1)))
+			Expect(entries[1].Size).To(Equal(mempool.Size(cheap)))
+		})
+
 		It("ranks a transaction by fee = sum of inputs - sum of outputs", func() {
 			multi := domain.Transaction{
 				Inputs: []domain.TxIn{
