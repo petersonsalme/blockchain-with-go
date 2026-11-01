@@ -152,6 +152,18 @@ func TestConsensusViewDiffers(t *testing.T) {
 	if !equal.Same {
 		t.Errorf("Same = false, want true when all configurations are equal")
 	}
+
+	firstDiffers := buildConsensusView([]consensusNode{
+		ctNode("a", ctBody("t1", "10", ctPoW(10))),
+		ctNode("b", ctBody("t1", "10", ctPoW(20))),
+	})
+	if firstDiffers.Nodes[0].Differs {
+		t.Errorf("node 0 Differs = true, want false when the first node is the reference")
+	}
+
+	if !firstDiffers.Nodes[1].Differs {
+		t.Errorf("node 1 Differs = false, want true when its configuration differs from the first node")
+	}
 }
 
 func TestConsensusViewFirstUnreachable(t *testing.T) {
