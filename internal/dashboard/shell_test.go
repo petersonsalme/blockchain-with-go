@@ -43,6 +43,7 @@ func TestShellMarksTheCurrentPage(t *testing.T) {
 	}{
 		{path: "/", nav: "Overview", tabs: false, tab: "", crumbs: []string{"Network"}},
 		{path: "/peers", nav: "Peers", tabs: false, tab: "", crumbs: []string{"Network", "Peers"}},
+		{path: "/consensus", nav: "Consensus", tabs: false, tab: "", crumbs: []string{"Network", "Consensus"}},
 		{path: "/metrics", nav: "Metrics", tabs: false, tab: "", crumbs: []string{"Network", "Metrics"}},
 		{path: "/metrics?node=nodeX", nav: "Metrics", tabs: false, tab: "", crumbs: []string{"Network", "Metrics"}},
 		{path: "/n/node1/", nav: "", tabs: true, tab: "Overview", crumbs: []string{"Network", "node1"}},

@@ -1,0 +1,70 @@
+{{define "consensuspage" -}}
+<div class="page-head">
+<div class="page-title"><h1>Consensus</h1><span class="info">{{template "infobtn" "consensus-help"}}<span class="info-tip" id="consensus-help" role="tooltip">
+<p><strong>How to read this page.</strong> Each section is one node, as it reports itself.</p>
+<dl>
+<dt>Engine</dt><dd>pow: a block is sealed by finding a hash with enough leading zero bits. poa: a block is signed by any key of a fixed validator set; there is no turn order.</dd>
+<dt>Difficulty</dt><dd>the leading zero bits a PoW block hash must have. It starts at the initial difficulty and, every retarget interval, moves toward the target block time.</dd>
+<dt>Block work</dt><dd>2^difficulty, the hashes a miner expects to try. A PoA block weighs 1.</dd>
+<dt>Chain work</dt><dd>the sum of block work from genesis to the tip. When nodes disagree on the tip, the reorg rule keeps the chain with the most work.</dd>
+</dl>
+</span></span></div>
+<p class="page-meta"><span>Engine, parameters and work reported by each node</span></p>
+</div>
+{{template "consensus" .}}
+{{- end}}
+
+{{define "consensus" -}}
+<section id="consensus" class="stack stack--lg" hx-get="/fragments/consensus" hx-trigger="every 2s" hx-swap="outerHTML">
+{{- if .Same}}
+<p><span class="badge badge--ok">All reachable nodes use the same consensus configuration</span></p>
+{{- else if .Reachable}}
+<p><span class="badge badge--bad">Configuration differs</span></p>
+{{- else}}
+<p class="error-text" role="alert">No node could be read.</p>
+{{- end}}
+{{- if .Fork}}
+<p><span class="badge badge--warn">Nodes report different tips; the reorg rule keeps the chain with the most work:{{range .Nodes}}{{if .Heaviest}} {{.Name}}{{end}}{{end}}</span></p>
+{{- end}}
+{{- range .Nodes}}
+<section class="section" aria-labelledby="{{.Name}}-consensus">
+<div class="section-head"><h2 class="section-title"><a href="/n/{{pe .Name}}/" id="{{.Name}}-consensus">{{.Name}}</a></h2>{{if .Differs}} <span class="badge badge--bad">configuration differs</span>{{end}}{{if .Heaviest}} <span class="badge badge--ok">most work</span>{{end}}</div>
+{{- if .Err}}
+<p class="error-text" role="alert">{{.Err}}</p>
+{{- else}}
+<div class="table-wrap"><table class="table">
+<caption class="sr-only">Consensus configuration</caption>
+<tbody>
+<tr><th scope="row">Engine</th><td class="mono">{{.Info.Engine}}</td></tr>
+<tr><th scope="row">Height</th><td class="col-num">{{.Info.Height}}</td></tr>
+<tr><th scope="row">Tip</th><td class="col-hash"><span class="hash" title="{{.Info.Tip}}"><span class="hash-start">{{hstart .Info.Tip}}</span><span class="hash-end">{{hend .Info.Tip}}</span></span></td></tr>
+<tr><th scope="row">Chain work</th><td class="col-num mono">{{.Info.ChainWork}}</td></tr>
+{{- with .Info.PoW}}
+<tr><th scope="row">Initial difficulty</th><td class="col-num">{{.InitialDifficulty}}</td></tr>
+<tr><th scope="row">Retarget interval</th><td class="col-num">{{if .RetargetInterval}}{{.RetargetInterval}} blocks{{else}}off{{end}}</td></tr>
+<tr><th scope="row">Target block time</th><td class="col-num">{{.TargetBlockTimeMS}} ms</td></tr>
+{{- end}}
+{{- with .Info.PoA}}
+<tr><th scope="row">Validators</th><td>{{range .Validators}}<code>{{.}}</code> {{end}}</td></tr>
+{{- end}}
+</tbody>
+</table></div>
+{{- if .BlocksErr}}
+<p class="error-text" role="alert">{{.BlocksErr}}</p>
+{{- else if .Blocks}}
+<div class="table-wrap"><table class="table">
+<caption class="sr-only">Recent blocks</caption>
+<thead><tr><th scope="col" class="col-num">Height</th><th scope="col">Hash</th><th scope="col" class="col-num">Difficulty</th><th scope="col" class="col-num">Block work</th><th scope="col">Sealed by</th></tr></thead>
+<tbody>
+{{- $node := .Name}}
+{{- range .Blocks}}
+<tr><td class="col-num">{{.Height}}</td><td class="col-hash"><a class="hash" href="/n/{{pe $node}}/block/{{pe .Hash}}" title="{{.Hash}}"><span class="hash-start">{{hstart .Hash}}</span><span class="hash-end">{{hend .Hash}}</span></a></td><td class="col-num">{{.Difficulty}}</td><td class="col-num">{{.Work}}</td><td class="mono">{{if .Validator}}{{hstart .Validator}}…{{else}}<span class="muted">mined</span>{{end}}</td></tr>
+{{- end}}
+</tbody>
+</table></div>
+{{- end}}
+{{- end}}
+</section>
+{{- end}}
+</section>
+{{- end}}

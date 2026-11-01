@@ -333,3 +333,165 @@ func TestPagesRenderLargeInputs(t *testing.T) {
 		})
 	}
 }
+
+// consensusNodeRoutes answers a node whose /consensus is consensus and whose recent headers are
+// headers. recentFrom(12) with ConsensusBlocks is 3, so the headers are read from 3 with limit 10.
+func consensusNodeRoutes(consensus, headers string) map[string]reply {
+	return map[string]reply{
+		"/consensus":               ok(consensus),
+		"/headers?from=3&limit=10": ok(headers),
+	}
+}
+
+// powConsensus is a PoW node's /consensus body at height 12.
+func powConsensus(tip, work string, targetMS int64) string {
+	return fmt.Sprintf(`{"engine":"pow","height":12,"tip":"%s","chain_work":"%s","pow":{"initial_difficulty":3,"retarget_interval":0,"target_block_time_ms":%d}}`, tip, work, targetMS)
+}
+
+// powHeaders are the headers at heights 11 and 12, each of difficulty 3 (block work 8).
+func powHeaders() string {
+	return fmt.Sprintf(`{"blocks":[{"Index":11,"Hash":"%064x","Difficulty":3,"Validator":""},{"Index":12,"Hash":"%064x","Difficulty":3,"Validator":""}]}`, 11, 12)
+}
+
+// consensusGet serves path from h and fails the test unless it answers 200.
+func consensusGet(t *testing.T, h http.Handler, path string) string {
+	t.Helper()
+
+	rec := do(h, http.MethodGet, path)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET %s = %d: %s", path, rec.Code, rec.Body)
+	}
+
+	return rec.Body.String()
+}
+
+func TestConsensusPage(t *testing.T) {
+	t.Parallel()
+
+	h := chainServer(t,
+		routedNode(t, consensusNodeRoutes(powConsensus(blkHash, "4096", 1000), powHeaders())),
+		routedNode(t, consensusNodeRoutes(powConsensus(blkHash, "4096", 1000), powHeaders())),
+	)
+	page := consensusGet(t, h, "/consensus")
+
+	for _, want := range []string{
+		"All reachable nodes use the same consensus configuration",
+		`>node1<`, `>node2<`,
+		"4096", "Initial difficulty",
+		`<td class="col-num">8</td>`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("GET /consensus lacks %q", want)
+		}
+	}
+
+	for _, node := range []string{"node1", "node2"} {
+		if n := strings.Count(page, `href="/n/`+node+`/block/`); n != 2 {
+			t.Errorf("%s: header rows = %d, want 2", node, n)
+		}
+
+		newer := strings.Index(page, `href="/n/`+node+`/block/`+fmt.Sprintf("%064x", 12))
+		older := strings.Index(page, `href="/n/`+node+`/block/`+fmt.Sprintf("%064x", 11))
+
+		if newer < 0 || older < 0 || newer >= older {
+			t.Errorf("%s: blocks not newest first: block 12 at %d, block 11 at %d", node, newer, older)
+		}
+	}
+}
+
+func TestConsensusPageDiffers(t *testing.T) {
+	t.Parallel()
+
+	h := chainServer(t,
+		routedNode(t, consensusNodeRoutes(powConsensus(blkHash, "4096", 1000), powHeaders())),
+		routedNode(t, consensusNodeRoutes(powConsensus(blkHash, "4096", 2000), powHeaders())),
+	)
+	page := consensusGet(t, h, "/consensus")
+
+	for _, want := range []string{"Configuration differs", "configuration differs"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("GET /consensus lacks %q", want)
+		}
+	}
+
+	if strings.Contains(page, "All reachable nodes use the same consensus configuration") {
+		t.Error("GET /consensus claims the nodes agree")
+	}
+}
+
+func TestConsensusPageFork(t *testing.T) {
+	t.Parallel()
+
+	h := chainServer(t,
+		routedNode(t, consensusNodeRoutes(powConsensus(blkHash, "9", 1000), powHeaders())),
+		routedNode(t, consensusNodeRoutes(powConsensus(txB, "10", 1000), powHeaders())),
+	)
+	page := consensusGet(t, h, "/consensus")
+
+	if !strings.Contains(page, "Nodes report different tips") {
+		t.Fatal("GET /consensus lacks the fork line")
+	}
+
+	heaviest := regexp.MustCompile(`most work:([^<]*)</span>`).FindStringSubmatch(page)
+	if heaviest == nil {
+		t.Fatal("the fork line names no node")
+	}
+
+	if got := strings.TrimSpace(heaviest[1]); got != "node2" {
+		t.Errorf("the fork line names %q, want only node2", got)
+	}
+}
+
+func TestConsensusPageNodeErrors(t *testing.T) {
+	t.Parallel()
+
+	h := chainServer(t,
+		routedNode(t, map[string]reply{}), // no /consensus: answers 404
+		routedNode(t, map[string]reply{
+			"/consensus":               ok(powConsensus(blkHash, "4096", 1000)),
+			"/headers?from=3&limit=10": {http.StatusInternalServerError, `{"error":"boom"}`},
+		}),
+	)
+	page := consensusGet(t, h, "/consensus")
+
+	for _, want := range []string{"older than ADR-0026", "Initial difficulty", "answered with status 500"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("GET /consensus lacks %q", want)
+		}
+	}
+}
+
+func TestConsensusPagePoA(t *testing.T) {
+	t.Parallel()
+
+	poa := `{"engine":"poa","height":12,"tip":"` + blkHash + `","chain_work":"2","poa":{"validators":["validatorkeyone","validatorkeytwo"]}}`
+	headers := fmt.Sprintf(`{"blocks":[{"Index":12,"Hash":"%064x","Difficulty":0,"Validator":"validatorkeyone"}]}`, 12)
+
+	h := chainServer(t, routedNode(t, consensusNodeRoutes(poa, headers)))
+	page := consensusGet(t, h, "/consensus")
+
+	for _, want := range []string{"<code>validatorkeyone</code>", "<code>validatorkeytwo</code>"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("GET /consensus lacks %q", want)
+		}
+	}
+
+	if strings.Contains(page, "Initial difficulty") {
+		t.Error("GET /consensus shows PoW parameters for a PoA node")
+	}
+}
+
+func TestConsensusFragment(t *testing.T) {
+	t.Parallel()
+
+	h := chainServer(t, routedNode(t, consensusNodeRoutes(powConsensus(blkHash, "4096", 1000), powHeaders())))
+	body := consensusGet(t, h, "/fragments/consensus")
+
+	if !strings.HasPrefix(body, `<section id="consensus"`) {
+		t.Errorf("fragment starts with %.40q, want the consensus section", body)
+	}
+
+	if strings.Contains(body, "<html") {
+		t.Error("fragment is a full page")
+	}
+}

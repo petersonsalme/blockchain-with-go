@@ -192,6 +192,8 @@ func (s *server) routes(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /peers", s.peersScreen(false))
 	mux.HandleFunc("GET /fragments/peers", s.peersScreen(true))
+	mux.HandleFunc("GET /consensus", s.consensusScreen(false))
+	mux.HandleFunc("GET /fragments/consensus", s.consensusScreen(true))
 	mux.HandleFunc("GET /n/{node}/mempool", s.nodeScreen(mempool, false))
 	mux.HandleFunc("GET /fragments/n/{node}/mempool", s.nodeScreen(mempool, true))
 	mux.HandleFunc("GET /n/{node}/blocks", s.nodeScreen(blocks, false))

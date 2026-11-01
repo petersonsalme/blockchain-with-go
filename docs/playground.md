@@ -393,6 +393,10 @@ Screens (the top bar links them; the search box takes a height, a block or trans
 
 The pages work in light and dark (`prefers-color-scheme`), use no inline script or style and run under the same content policy as the node explorer.
 
+### Consensus screen
+
+`/consensus` shows the consensus engine of every node with its parameters, and a "same configuration" check that says whether all the nodes run with the same settings. For each node it lists the last 10 blocks with their difficulty and block work (2^difficulty), then the chain work of each node and, when the nodes are on different chains, the heaviest node on the fork. The screen reads `GET /consensus` on each node (ADR-0026), so it needs nodes that serve that route. Under Proof of Authority there is no turn order: any validator of the set may seal the next block.
+
 ### The banner
 
 | Banner | Meaning |
