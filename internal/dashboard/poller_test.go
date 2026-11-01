@@ -26,6 +26,7 @@ type chainNode struct {
 	noHdrs atomic.Bool  // /headers answers an empty list
 	last   atomic.Value // time.Time
 	blocks atomic.Value // string: the /blocks body; unset → 404
+	pool   atomic.Value // string: JSON array for /mempool; unset → 404
 }
 
 func newChainNode(t *testing.T, height int, tip string) *chainNode {
@@ -81,6 +82,15 @@ func newChainNode(t *testing.T, height int, tip string) *chainNode {
 			}
 
 			_, _ = fmt.Fprint(w, body)
+		case "/mempool":
+			body, set := c.pool.Load().(string)
+			if !set {
+				http.NotFound(w, r)
+
+				return
+			}
+
+			_, _ = fmt.Fprintf(w, `{"transactions":%s}`, body)
 		default:
 			http.NotFound(w, r)
 		}
@@ -120,6 +130,195 @@ func TestPollerSnapshot(t *testing.T) {
 	if !c.Reachable || c.Height != 4 || c.Tip != hex64 || c.Peers != 2 || c.Since != "12 s ago" {
 		t.Errorf("card = %+v", c)
 	}
+}
+
+func TestPollerReadsThePoolSizeEachTick(t *testing.T) {
+	t.Parallel()
+
+	n := newChainNode(t, 4, hex64)
+	n.pool.Store(`[{},{}]`)
+	p := newPoller(t, n)
+	p.Tick(context.Background())
+
+	if c := p.View().Cards[0]; !c.PoolKnown || c.Pool != 2 {
+		t.Errorf("card = pool %d known %t, want 2 and true", c.Pool, c.PoolKnown)
+	}
+
+	n.pool.Store(`[{},{},{}]`)
+	p.Tick(context.Background())
+
+	if c := p.View().Cards[0]; c.Pool != 3 {
+		t.Errorf("pool = %d after the next tick, want 3", c.Pool)
+	}
+}
+
+func TestPollerBlanksOnlyThePoolWhenItsReadFails(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		pool string // "" leaves /mempool unset, so it answers 404
+	}{
+		{"not found", ""},
+		{"bad JSON", `"x"`},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			n := newChainNode(t, 4, hex64)
+			n.peers.Store(`["a:1"]`)
+
+			if tc.pool != "" {
+				n.pool.Store(tc.pool)
+			}
+
+			p := newPoller(t, n)
+			p.Tick(context.Background())
+
+			c := p.View().Cards[0]
+			if !c.Reachable || c.Height != 4 || c.Tip != hex64 || c.Peers != 1 || c.Since != "12 s ago" {
+				t.Errorf("card = %+v, want the other fields intact", c)
+			}
+
+			if c.PoolKnown || c.Pool != 0 {
+				t.Errorf("pool = %d known %t, want 0 and false", c.Pool, c.PoolKnown)
+			}
+		})
+	}
+}
+
+func TestViewMempoolKPIIsTheLargestReachablePool(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	a, b, c := newChainNode(t, 4, hex64), newChainNode(t, 4, hex64), newChainNode(t, 4, hex64)
+	a.pool.Store(`[{}]`)
+	b.pool.Store(`[{},{},{}]`)
+	c.pool.Store(`[{},{}]`)
+
+	p := newPoller(t, a, b, c)
+	p.Tick(ctx)
+
+	if v := p.View(); v.Pool != 3 || !v.PoolKnown {
+		t.Errorf("KPI = %d known %t, want 3 and true", v.Pool, v.PoolKnown)
+	}
+
+	// The largest node goes down: its last pool no longer counts.
+	b.up.Store(false)
+	p.Tick(ctx)
+
+	if v := p.View(); v.Pool != 2 || !v.PoolKnown {
+		t.Errorf("KPI with the largest node down = %d known %t, want 2 and true", v.Pool, v.PoolKnown)
+	}
+
+	none1, none2 := newChainNode(t, 4, hex64), newChainNode(t, 4, hex64)
+	q := newPoller(t, none1, none2)
+	q.Tick(ctx)
+
+	if v := q.View(); v.PoolKnown || v.Pool != 0 {
+		t.Errorf("KPI with no pool known = %d known %t, want 0 and false", v.Pool, v.PoolKnown)
+	}
+}
+
+func TestViewMarksAPoolThatDiffersFromTheMajority(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	marked := func(v dashboard.View) []bool {
+		out := make([]bool, len(v.Cards))
+		for i, c := range v.Cards {
+			out[i] = c.PoolDiffers
+		}
+
+		return out
+	}
+
+	tests := []struct {
+		name  string
+		pools []string // "" leaves /mempool unset
+		want  []bool
+	}{
+		{"majority of two against one", []string{`[{},{}]`, `[{},{}]`, `[{}]`}, []bool{false, false, true}},
+		{"tie goes to the first node", []string{`[{}]`, `[{},{}]`}, []bool{false, true}},
+		{"one known pool is not a majority", []string{`[{}]`, ""}, []bool{false, false}},
+		{"a node with no known pool is never marked", []string{`[{}]`, `[{}]`, ""}, []bool{false, false, false}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var nodes []*chainNode
+
+			for _, pool := range tc.pools {
+				n := newChainNode(t, 4, hex64)
+				if pool != "" {
+					n.pool.Store(pool)
+				}
+
+				nodes = append(nodes, n)
+			}
+
+			p := newPoller(t, nodes...)
+			p.Tick(ctx)
+
+			got := marked(p.View())
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("PoolDiffers = %v, want %v", got, tc.want)
+
+					break
+				}
+			}
+		})
+	}
+
+	t.Run("an unreachable node is never marked", func(t *testing.T) {
+		t.Parallel()
+
+		a, b, c := newChainNode(t, 4, hex64), newChainNode(t, 4, hex64), newChainNode(t, 4, hex64)
+		a.pool.Store(`[{},{}]`)
+		b.pool.Store(`[{},{}]`)
+		c.pool.Store(`[{},{},{},{},{}]`)
+
+		p := newPoller(t, a, b, c)
+		p.Tick(ctx)
+
+		c.up.Store(false)
+		p.Tick(ctx)
+
+		for i, card := range p.View().Cards {
+			if card.PoolDiffers {
+				t.Errorf("card %d marked, want none", i+1)
+			}
+		}
+	})
+
+	t.Run("down nodes do not form the majority", func(t *testing.T) {
+		t.Parallel()
+
+		a, b, c := newChainNode(t, 4, hex64), newChainNode(t, 4, hex64), newChainNode(t, 4, hex64)
+		a.pool.Store(`[{},{},{},{},{}]`)
+		b.pool.Store(`[{},{},{},{},{}]`)
+		c.pool.Store(`[{},{}]`)
+
+		p := newPoller(t, a, b, c)
+		p.Tick(ctx)
+
+		a.up.Store(false)
+		b.up.Store(false)
+		p.Tick(ctx)
+
+		for i, card := range p.View().Cards {
+			if card.PoolDiffers {
+				t.Errorf("card %d marked, want none", i+1)
+			}
+		}
+	})
 }
 
 func TestPollerForkNeedsThreeConsecutiveTicks(t *testing.T) {
@@ -359,7 +558,7 @@ func TestNetworkPageExplainsHowToReadItOutsideTheRefreshedFragment(t *testing.T)
 	page := do(h, http.MethodGet, "/").Body.String()
 	for _, want := range []string{
 		`<button type="button" class="info-btn" aria-label="How to read this page" aria-describedby="network-help">`,
-		`id="network-help" role="tooltip"`, "Behind by N", "Unreachable",
+		`id="network-help" role="tooltip"`, "Behind by N", "Unreachable", "not the sum",
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("page lacks %q", want)
@@ -369,6 +568,48 @@ func TestNetworkPageExplainsHowToReadItOutsideTheRefreshedFragment(t *testing.T)
 	// htmx replaces the fragment every 2 s: a tooltip inside it would close under the pointer.
 	if frag := do(h, http.MethodGet, "/fragments/network").Body.String(); strings.Contains(frag, "network-help") {
 		t.Error("the help tooltip is inside the refreshed fragment")
+	}
+}
+
+func TestMempoolShowsInTheBandAndTheMatrix(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	a, b, c := newChainNode(t, 4, hex64), newChainNode(t, 4, hex64), newChainNode(t, 4, hex64)
+	a.pool.Store(`[{},{}]`)
+	b.pool.Store(`[{},{}]`)
+	c.pool.Store(`[{}]`)
+
+	p := newPoller(t, a, b, c)
+	p.Tick(ctx)
+
+	h := newTestServerWithPoller(t, p, a, b, c)
+
+	frag := do(h, http.MethodGet, "/fragments/network").Body.String()
+	for _, want := range []string{
+		`<span class="kpi-label">Mempool</span><span class="kpi-value">2</span>`,
+		`<th scope="row">Mempool</th>`,
+		`<td class="cell-diff"><span class="cell"><span class="cell-mark" aria-hidden="true">≠</span><span class="sr-only">differs: </span>1</span></td>`,
+	} {
+		if !strings.Contains(frag, want) {
+			t.Errorf("network fragment lacks %q:\n%s", want, frag)
+		}
+	}
+
+	solo := newChainNode(t, 2, "aa")
+	q := newPoller(t, solo)
+	q.Tick(ctx)
+
+	hq := newTestServerWithPoller(t, q, solo)
+
+	one := do(hq, http.MethodGet, "/fragments/network").Body.String()
+	if !strings.Contains(one, `<span class="kpi-label">Mempool</span><span class="kpi-value"><span class="empty-value">—</span></span>`) {
+		t.Errorf("network fragment with no pool known lacks the empty Mempool KPI:\n%s", one)
+	}
+
+	if strings.Contains(one, `cell-diff`) {
+		t.Errorf("a single node without a pool is marked as different:\n%s", one)
 	}
 }
 
@@ -579,5 +820,56 @@ func TestDefaultIntervalIsTwoSeconds(t *testing.T) {
 
 	if dashboard.DefaultInterval != 2*time.Second {
 		t.Errorf("DefaultInterval = %v, want 2s", dashboard.DefaultInterval)
+	}
+}
+
+func TestMempoolShowsOnTheNodePageAndItsTab(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	n := newChainNode(t, 4, hex64)
+	n.pool.Store(`[{},{},{}]`)
+
+	p := newPoller(t, n)
+	p.Tick(ctx)
+
+	h := newTestServerWithPoller(t, p, n)
+
+	page := do(h, http.MethodGet, "/n/node1/").Body.String()
+	for _, want := range []string{
+		`<span class="stat-label">Mempool</span><span class="stat-value">3</span>`,
+		`>Mempool<span class="tab-count">3</span></a>`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("node page lacks %q:\n%s", want, page)
+		}
+	}
+
+	n.up.Store(false)
+	p.Tick(ctx)
+
+	down := do(h, http.MethodGet, "/n/node1/").Body.String()
+	if !strings.Contains(down, `<span class="stat-label">Mempool</span><span class="stat-value"><span class="empty-value">—</span>`) {
+		t.Errorf("down node page lacks the empty Mempool stat:\n%s", down)
+	}
+
+	if strings.Contains(down, `tab-count`) {
+		t.Errorf("down node page shows a Mempool tab count:\n%s", down)
+	}
+
+	quiet := newChainNode(t, 4, hex64)
+	q := newPoller(t, quiet)
+	q.Tick(ctx)
+
+	hq := newTestServerWithPoller(t, q, quiet)
+
+	bare := do(hq, http.MethodGet, "/n/node1/").Body.String()
+	if !strings.Contains(bare, `<span class="stat-label">Mempool</span><span class="stat-value"><span class="empty-value">—</span>`) {
+		t.Errorf("node page with no pool known lacks the empty Mempool stat:\n%s", bare)
+	}
+
+	if strings.Contains(bare, `tab-count`) {
+		t.Errorf("node page with no pool known shows a Mempool count:\n%s", bare)
 	}
 }

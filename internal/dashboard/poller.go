@@ -124,6 +124,10 @@ type peersBody struct {
 	} `json:"peers"`
 }
 
+type mempoolBody struct {
+	Transactions []json.RawMessage `json:"transactions"`
+}
+
 type headersBody struct {
 	Blocks []struct {
 		Timestamp  time.Time `json:"timestamp"`
@@ -135,19 +139,22 @@ type headersBody struct {
 type Card struct {
 	Snapshot
 
-	Behind  int
-	Since   string
-	Differs bool   // fork: reachable, and its tip is not the majority tip
-	Level   string // ok, warn or bad: the dot, badge and border of the node
-	Status  string // what the badge says
+	Behind      int
+	Since       string
+	Differs     bool   // fork: reachable, and its tip is not the majority tip
+	PoolDiffers bool   // reachable, pool known, and its size is not the most common known size
+	Level       string // ok, warn or bad: the dot, badge and border of the node
+	Status      string // what the badge says
 }
 
 // View is what the Network screen renders: the verdict and a card per node, in NODES order.
 type View struct {
 	Assessment Assessment
 	Cards      []Card
-	Agree      int // reachable nodes on the majority tip
-	Reachable  int // reachable nodes
+	Agree      int  // reachable nodes on the majority tip
+	Reachable  int  // reachable nodes
+	Pool       int  // largest known pool among reachable nodes
+	PoolKnown  bool // at least one reachable node has a known pool
 }
 
 // Banner is the CSS class suffix and text of the verdict.
@@ -174,14 +181,36 @@ func (p *Poller) View() View {
 	}
 
 	majority, agree := majorityTip(snaps)
+	poolSize, known := majorityPool(snaps)
+
+	// The KPI is the largest pool, not the sum: gossip puts the same transaction in every pool.
+	var (
+		pool      int
+		poolKnown bool
+	)
+
+	for _, s := range snaps {
+		if s.Reachable && s.PoolKnown {
+			pool = max(pool, s.Pool)
+			poolKnown = true
+		}
+	}
 
 	for i := range cards {
 		c := &cards[i]
 		c.Differs = a.State == StateFork && c.Reachable && c.Tip != majority
+		c.PoolDiffers = known >= 2 && c.Reachable && c.PoolKnown && c.Pool != poolSize
 		c.Level, c.Status = nodeStatus(*c)
 	}
 
-	return View{Assessment: a, Cards: cards, Agree: agree, Reachable: len(snaps) - a.Unreachable}
+	return View{
+		Assessment: a,
+		Cards:      cards,
+		Agree:      agree,
+		Reachable:  len(snaps) - a.Unreachable,
+		Pool:       pool,
+		PoolKnown:  poolKnown,
+	}
 }
 
 // majorityTip is the tip most reachable nodes at the highest height report (the first in NODES
@@ -212,6 +241,28 @@ func majorityTip(snaps []Snapshot) (string, int) {
 	return best, bestN
 }
 
+// majorityPool is the most common pool size among reachable nodes with a known pool (the first
+// in NODES order on a tie) and how many such nodes there are.
+func majorityPool(snaps []Snapshot) (size, known int) {
+	counts := map[int]int{}
+	bestN := 0
+
+	for _, s := range snaps {
+		if !s.Reachable || !s.PoolKnown {
+			continue
+		}
+
+		known++
+		counts[s.Pool]++
+
+		if counts[s.Pool] > bestN {
+			size, bestN = s.Pool, counts[s.Pool]
+		}
+	}
+
+	return size, known
+}
+
 // nodeStatus is the level and badge text of a node: unreachable and different tip are bad, behind is warn.
 func nodeStatus(c Card) (level, status string) {
 	switch {
@@ -226,18 +277,20 @@ func nodeStatus(c Card) (level, status string) {
 	return "ok", "Up to date"
 }
 
-// poll reads one node: /health and /p2p/peers at once, then the tip header. A node whose /health
-// fails is unreachable and keeps its previous values; a failing peers or header read only blanks that field.
+// poll reads one node: /health, /p2p/peers and /mempool at once, then the tip header. A node whose /health
+// fails is unreachable and keeps its previous values; a failing peers, mempool or header read only blanks that field.
 func (p *Poller) poll(ctx context.Context, node Node, prev Snapshot) Snapshot {
 	var (
-		wg              sync.WaitGroup
-		health          healthBody
-		peers           peersBody
-		healthErr, pErr error
+		wg                    sync.WaitGroup
+		health                healthBody
+		peers                 peersBody
+		pool                  mempoolBody
+		healthErr, pErr, mErr error
 	)
 
 	wg.Go(func() { healthErr = p.get(ctx, node, Health(), &health) })
 	wg.Go(func() { pErr = p.get(ctx, node, Peers(), &peers) })
+	wg.Go(func() { mErr = p.get(ctx, node, Mempool(), &pool) })
 	wg.Wait()
 
 	prev.Reachable = false
@@ -253,6 +306,10 @@ func (p *Poller) poll(ctx context.Context, node Node, prev Snapshot) Snapshot {
 		for _, peer := range peers.Peers {
 			s.PeerAddrs = append(s.PeerAddrs, peer.Addr)
 		}
+	}
+
+	if mErr == nil {
+		s.Pool, s.PoolKnown = len(pool.Transactions), true
 	}
 
 	var headers headersBody

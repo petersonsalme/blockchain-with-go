@@ -12,9 +12,10 @@
 <dt>Height</dt><dd>the highest block among the reachable nodes.</dd>
 <dt>Agree</dt><dd>nodes on the most common tip, out of all configured nodes.</dd>
 <dt>Reachable</dt><dd>nodes that answered the last poll.</dd>
+<dt>Mempool</dt><dd>transactions waiting to be mined: the largest pool among the reachable nodes, not the sum, because gossip puts the same transaction in every pool. The matrix shows each node's pool.</dd>
 </dl>
 <dl>
-<dt>≠</dt><dd>this tip differs from the majority. It appears only when a fork is confirmed.</dd>
+<dt>≠</dt><dd>this tip differs from the majority (only when a fork is confirmed), or this mempool size differs from the most common one (usually for a tick or two while a transaction spreads).</dd>
 <dt>Behind by N</dt><dd>the node trails the highest one by N blocks and is catching up.</dd>
 <dt>Unreachable</dt><dd>the node did not answer; its last known height is kept.</dd>
 </dl>
@@ -44,10 +45,11 @@
 <div class="kpi"><span class="kpi-label">Height</span><span class="kpi-value">{{.Assessment.Height}}</span></div>
 <div class="kpi"><span class="kpi-label">Agree</span><span class="kpi-value">{{.Agree}}/{{.Assessment.Total}}</span></div>
 <div class="kpi"><span class="kpi-label">Reachable</span><span class="kpi-value">{{.Reachable}}/{{.Assessment.Total}}</span></div>
+<div class="kpi"><span class="kpi-label">Mempool</span><span class="kpi-value">{{if .PoolKnown}}{{.Pool}}{{else}}<span class="empty-value">—</span>{{end}}</span></div>
 </div>
 </div>
 <section class="section" aria-labelledby="cmp-title">
-<div class="section-head"><h2 class="section-title" id="cmp-title">Node comparison</h2><span class="section-meta">≠ marks a tip that differs from the majority</span></div>
+<div class="section-head"><h2 class="section-title" id="cmp-title">Node comparison</h2><span class="section-meta">≠ marks a tip or a mempool size that differs from the majority</span></div>
 <div class="matrix-wrap" role="region" aria-labelledby="cmp-title" tabindex="0">
 <table class="matrix">
 <thead><tr><td class="matrix-corner"></td>
@@ -78,6 +80,15 @@
 <tr><th scope="row">Peers</th>
 {{- range .Cards}}
 <td>{{if .Reachable}}{{.Peers}}{{else}}<span class="empty-value">—</span>{{end}}</td>
+{{- end}}
+</tr>
+<tr><th scope="row">Mempool</th>
+{{- range .Cards}}
+{{- if and .Reachable .PoolKnown}}
+<td{{if .PoolDiffers}} class="cell-diff"{{end}}><span class="cell">{{if .PoolDiffers}}<span class="cell-mark" aria-hidden="true">≠</span><span class="sr-only">differs: </span>{{end}}{{.Pool}}</span></td>
+{{- else}}
+<td><span class="empty-value">—</span></td>
+{{- end}}
 {{- end}}
 </tr>
 <tr><th scope="row">Last block</th>
