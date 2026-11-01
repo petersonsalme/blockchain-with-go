@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -27,6 +28,7 @@ type chainNode struct {
 	last   atomic.Value // time.Time
 	blocks atomic.Value // string: the /blocks body; unset → 404
 	pool   atomic.Value // string: JSON array for /mempool; unset → 404
+	hashes atomic.Value // map[int]string: hash by height below the tip; unset heights are "h<height>"
 }
 
 func newChainNode(t *testing.T, height int, tip string) *chainNode {
@@ -66,13 +68,26 @@ func newChainNode(t *testing.T, height int, tip string) *chainNode {
 				return
 			}
 
-			if r.URL.RawQuery != fmt.Sprintf("from=%d&limit=1", c.height.Load()) {
+			h := int(c.height.Load())
+			from := max(h-dashboard.LaneBlocks+1, 0)
+
+			if r.URL.RawQuery != fmt.Sprintf("from=%d&limit=%d", from, dashboard.LaneBlocks) {
 				http.Error(w, "bad query", http.StatusBadRequest)
 
 				return
 			}
 
-			_, _ = fmt.Fprintf(w, `{"blocks":[{"Timestamp":%q}],"from":0,"limit":1}`, c.last.Load().(time.Time).Format(time.RFC3339))
+			blocks := make([]map[string]any, 0, h-from+1)
+			for i := from; i <= h; i++ {
+				ts := t0.Add(-time.Hour)
+				if i == h {
+					ts = c.last.Load().(time.Time)
+				}
+
+				blocks = append(blocks, map[string]any{"Index": i, "Hash": c.hashAt(i), "Timestamp": ts})
+			}
+
+			_ = json.NewEncoder(w).Encode(map[string]any{"blocks": blocks, "from": from, "limit": dashboard.LaneBlocks})
 		case "/blocks":
 			body, set := c.blocks.Load().(string)
 			if !set {
@@ -97,6 +112,20 @@ func newChainNode(t *testing.T, height int, tip string) *chainNode {
 	})
 
 	return c
+}
+
+// hashAt is the hash the node reports at height i: the tip at its height, else the hashes
+// the test set, else "h<height>".
+func (c *chainNode) hashAt(i int) string {
+	if i == int(c.height.Load()) {
+		return c.tip.Load().(string)
+	}
+
+	if m, ok := c.hashes.Load().(map[int]string); ok && m[i] != "" {
+		return m[i]
+	}
+
+	return fmt.Sprintf("h%d", i)
 }
 
 func newPoller(t *testing.T, nodes ...*chainNode) *dashboard.Poller {
@@ -871,5 +900,109 @@ func TestMempoolShowsOnTheNodePageAndItsTab(t *testing.T) {
 
 	if strings.Contains(bare, `tab-count`) {
 		t.Errorf("node page with no pool known shows a Mempool count:\n%s", bare)
+	}
+}
+
+// requests counts the requests the node received whose method and target start with prefix.
+func (n *countingNode) requests(prefix string) int {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	count := 0
+
+	for _, s := range n.seen {
+		if strings.HasPrefix(s, prefix) {
+			count++
+		}
+	}
+
+	return count
+}
+
+func TestPollerReadsTheLaneWindowOnce(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	tall := newChainNode(t, 10, hex64)
+	short := newChainNode(t, 2, hex64)
+	p := newPoller(t, tall, short)
+	p.Tick(ctx)
+
+	if got := tall.requests("GET /headers?"); got != 1 {
+		t.Fatalf("node at 10 got %d header reads, want 1", got)
+	}
+
+	if got := tall.requests("GET /headers?from=3&limit=8"); got != 1 {
+		t.Errorf("node at 10 was not asked for from=3&limit=8")
+	}
+
+	if got := short.requests("GET /headers?from=0&limit=8"); got != 1 {
+		t.Errorf("node at 2 was not asked for from=0&limit=8")
+	}
+
+	if got := tall.hits.Load(); got != 4 {
+		t.Errorf("node at 10 got %d requests in one tick, want 4", got)
+	}
+
+	short.up.Store(false)
+	before := short.requests("GET /headers?")
+
+	p.Tick(ctx)
+
+	if got := short.requests("GET /headers?"); got != before {
+		t.Errorf("down node got %d header reads, want none", got-before)
+	}
+}
+
+func TestPollerKeepsHashesByHeight(t *testing.T) {
+	t.Parallel()
+
+	n := newChainNode(t, 10, hex64)
+	n.hashes.Store(map[int]string{7: "x7"})
+	p := newPoller(t, n)
+	p.Tick(context.Background())
+
+	c := p.View().Cards[0]
+	want := []dashboard.BlockRef{
+		{Height: 3, Hash: "h3"},
+		{Height: 4, Hash: "h4"},
+		{Height: 5, Hash: "h5"},
+		{Height: 6, Hash: "h6"},
+		{Height: 7, Hash: "x7"},
+		{Height: 8, Hash: "h8"},
+		{Height: 9, Hash: "h9"},
+		{Height: 10, Hash: hex64},
+	}
+
+	if !slices.Equal(c.Blocks, want) {
+		t.Errorf("blocks = %v, want %v", c.Blocks, want)
+	}
+
+	if c.Since != "12 s ago" {
+		t.Errorf("since = %q, want 12 s ago: the tip time is the block at height 10", c.Since)
+	}
+}
+
+func TestPollerUnreachableKeepsItsLastBlocks(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	n := newChainNode(t, 10, hex64)
+	p := newPoller(t, n)
+	p.Tick(ctx)
+
+	before := p.View().Cards[0].Blocks
+
+	n.up.Store(false)
+	n.height.Store(12)
+	p.Tick(ctx)
+
+	c := p.View().Cards[0]
+	if c.Reachable {
+		t.Fatal("node is reachable, want down")
+	}
+
+	if len(before) != 8 || !slices.Equal(c.Blocks, before) {
+		t.Errorf("blocks = %v, want the last read's %v", c.Blocks, before)
 	}
 }
