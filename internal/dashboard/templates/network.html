@@ -71,7 +71,7 @@
 <tr><th scope="row">Tip</th>
 {{- range .Cards}}
 {{- if .Seen}}
-<td{{if .Differs}} class="cell-diff"{{end}}><span class="cell">{{if .Differs}}<span class="cell-mark" aria-hidden="true">≠</span><span class="sr-only">differs: </span>{{end}}<a class="hash tip" href="/n/{{pe .Name}}/block/{{pe .Tip}}" title="{{.Tip}}"><span class="hash-start">{{hstart .Tip}}</span><span class="hash-end">{{hend .Tip}}</span></a></span></td>
+<td{{if .Differs}} class="cell-diff"{{end}}><span class="cell">{{if .Differs}}<span class="cell-mark" aria-hidden="true">≠</span><span class="sr-only">differs: </span>{{end}}<a class="hash" href="/n/{{pe .Name}}/block/{{pe .Tip}}" title="{{.Tip}}"><span class="hash-start">{{hstart .Tip}}</span><span class="hash-end">{{hend .Tip}}</span></a></span></td>
 {{- else}}
 <td><span class="empty-value">—</span></td>
 {{- end}}
