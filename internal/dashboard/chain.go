@@ -35,6 +35,12 @@ const maxQueryLen = 128
 // maxFeeReads bounds how many spent transactions the fee of one page reads.
 const maxFeeReads = 16
 
+// Messages of the Fee rate row when no rate is shown.
+const (
+	rateUnknownMsg     = "Fee rate unknown: the node did not report this transaction's size."
+	ratePendingOnlyMsg = "Fee rate is shown only while the transaction is pending: the node reports sizes for its pool only."
+)
+
 // The node's JSON, as far as the screens show it. Field names without tags match the node's Go
 // field names the way encoding/json always does.
 type (
@@ -111,6 +117,13 @@ type (
 		Height      int       `json:"height"`
 		Timestamp   time.Time `json:"timestamp"`
 	}
+
+	// nodeEntry is one item of GET /mempool entries: the fee and size of the transaction at the same index.
+	nodeEntry struct {
+		ID   string `json:"id"`
+		Fee  uint64 `json:"fee"`
+		Size int    `json:"size"`
+	}
 )
 
 // Screen data. Node is the name from the configuration, never from the URL or a node.
@@ -125,12 +138,19 @@ type (
 
 	peersView struct{ Nodes []peersNode }
 
+	// poolEntry is the fee and fee rate a mempool row shows.
+	poolEntry struct {
+		Fee  uint64
+		Rate string
+	}
+
 	// txItem is a transaction with the node name its links need. Pos is its 1-based place in the
 	// mempool selection order; 0 means none is shown.
 	txItem struct {
-		Node string
-		Tx   nodeTx
-		Pos  int
+		Node  string
+		Tx    nodeTx
+		Pos   int
+		Entry *poolEntry // fee and fee rate from the node's pool entry; nil shows neither
 	}
 
 	mempoolView struct {
@@ -178,6 +198,8 @@ type (
 		PoolSize  int
 		Fee       uint64
 		FeeMsg    string // why Fee is not shown; empty when it is
+		Rate      string // fee rate in base units per byte; empty when RateMsg says why
+		RateMsg   string
 	}
 
 	addressView struct {
@@ -409,18 +431,46 @@ func items(node string, txs []nodeTx) []txItem {
 	return out
 }
 
+// poolEntries pairs each pool transaction with its entry: same index, same id, positive size.
+// A length mismatch (an older node without entries) pairs none.
+func poolEntries(txs []nodeTx, entries []nodeEntry) []*poolEntry {
+	out := make([]*poolEntry, len(txs))
+	if len(entries) != len(txs) {
+		return out
+	}
+
+	for i, tx := range txs {
+		if entries[i].ID != tx.ID {
+			continue
+		}
+
+		rate, ok := feeRate(entries[i].Fee, entries[i].Size)
+		if !ok {
+			continue
+		}
+
+		out[i] = &poolEntry{Fee: entries[i].Fee, Rate: rate}
+	}
+
+	return out
+}
+
 func (s *server) loadMempool(r *http.Request, node Node) (any, *pageError) {
 	var body struct {
-		Transactions []nodeTx `json:"transactions"`
+		Transactions []nodeTx    `json:"transactions"`
+		Entries      []nodeEntry `json:"entries"`
 	}
 
 	if perr := s.read(r.Context(), node, Mempool(), &body); perr != nil {
 		return nil, perr
 	}
 
+	pairs := poolEntries(body.Transactions, body.Entries)
+
 	txs := items(node.Name, body.Transactions)
 	for i := range txs {
 		txs[i].Pos = i + 1
+		txs[i].Entry = pairs[i]
 	}
 
 	return mempoolView{Node: node.Name, Txs: txs}, nil
@@ -505,49 +555,67 @@ func (s *server) loadTx(r *http.Request, node Node) (any, *pageError) {
 		Height      int    `json:"height"`
 	}
 
-	if perr := s.read(r.Context(), node, Tx(id), &body); perr != nil {
-		if perr.Upstream != http.StatusNotFound {
-			return nil, perr
-		}
-
-		// Not in a block: a transaction the node's pool holds is pending, at its selection position.
-		var pool struct {
-			Transactions []nodeTx `json:"transactions"`
-		}
-
-		if p := s.read(r.Context(), node, Mempool(), &pool); p != nil {
-			return nil, p
-		}
-
-		for i, tx := range pool.Transactions {
-			if tx.ID == id {
-				fee, msg := s.txFee(r.Context(), node, tx, pool.Transactions)
-
-				return txView{
-					Node:     node.Name,
-					Item:     txItem{Node: node.Name, Tx: tx},
-					Pending:  true,
-					Position: i + 1,
-					PoolSize: len(pool.Transactions),
-					Fee:      fee,
-					FeeMsg:   msg,
-				}, nil
-			}
-		}
-
+	perr := s.read(r.Context(), node, Tx(id), &body)
+	if perr != nil && perr.Upstream != http.StatusNotFound {
 		return nil, perr
 	}
 
-	view := txView{Node: node.Name, Item: txItem{Node: node.Name, Tx: body.Transaction}, BlockHash: body.BlockHash, Height: body.Height}
-	view.Fee, view.FeeMsg = s.txFee(r.Context(), node, body.Transaction, nil)
+	if perr == nil {
+		view := txView{
+			Node:      node.Name,
+			Item:      txItem{Node: node.Name, Tx: body.Transaction},
+			BlockHash: body.BlockHash,
+			Height:    body.Height,
+			RateMsg:   ratePendingOnlyMsg,
+		}
+		view.Fee, view.FeeMsg = s.txFee(r.Context(), node, body.Transaction, nil)
 
-	var proof nodeProof
+		var proof nodeProof
+		if perr := s.read(r.Context(), node, TxProof(id), &proof); perr == nil {
+			view.Proof = &proof
+		}
 
-	if perr := s.read(r.Context(), node, TxProof(id), &proof); perr == nil {
-		view.Proof = &proof
+		return view, nil
 	}
 
-	return view, nil
+	// Not in a block: a transaction the node's pool holds is pending, at its selection position.
+	var pool struct {
+		Transactions []nodeTx    `json:"transactions"`
+		Entries      []nodeEntry `json:"entries"`
+	}
+
+	if p := s.read(r.Context(), node, Mempool(), &pool); p != nil {
+		return nil, p
+	}
+
+	pairs := poolEntries(pool.Transactions, pool.Entries)
+
+	for i, tx := range pool.Transactions {
+		if tx.ID != id {
+			continue
+		}
+
+		fee, msg := s.txFee(r.Context(), node, tx, pool.Transactions)
+
+		view := txView{
+			Node:     node.Name,
+			Item:     txItem{Node: node.Name, Tx: tx},
+			Pending:  true,
+			Position: i + 1,
+			PoolSize: len(pool.Transactions),
+			Fee:      fee,
+			FeeMsg:   msg,
+			RateMsg:  rateUnknownMsg,
+		}
+		if pairs[i] != nil {
+			view.Rate = pairs[i].Rate
+			view.RateMsg = ""
+		}
+
+		return view, nil
+	}
+
+	return nil, perr
 }
 
 // txFee returns the fee of tx, or a message saying why there is none. The fee is the outputs tx

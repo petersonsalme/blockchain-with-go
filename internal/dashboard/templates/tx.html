@@ -5,6 +5,7 @@
 <dt>Inputs</dt><dd>outputs of earlier transactions that this one spends (the UTXO model). A coinbase or genesis transaction has none.</dd>
 <dt>Outputs</dt><dd>new coins assigned to an address, shown in coins (1 coin = 10^8 base units; hover an amount for the exact count). An output stays unspent until a later transaction uses it, whole.</dd>
 <dt>Fee</dt><dd>inputs minus outputs; it goes to the miner.</dd>
+<dt>Fee rate</dt><dd>the fee divided by the size in bytes, in base units per byte, rounded down to two decimals. The node reports the size of pending transactions only, so a confirmed one shows no rate.</dd>
 <dt>Merkle proof</dt><dd>shows the transaction is in the block without listing the others: hash the leaf together with each sibling on the path (side = left or right) up to the root, which must equal the block's Merkle root. An empty path means it is the only transaction.</dd>
 </dl>
 </span></span></div></div>
@@ -13,6 +14,7 @@
 {{if .Pending}}<dt>Status</dt><dd>Pending: position {{.Position}} of {{.PoolSize}} in the <a href="/n/{{pe .Node}}/mempool">selection order</a></dd>{{else}}<dt>Block</dt><dd><a href="/n/{{pe .Node}}/block/{{.Height}}">{{.Height}}</a> <span class="muted">·</span> <span class="hash mono" title="{{.BlockHash}}">{{.BlockHash}}</span></dd>{{end}}
 <dt>Time</dt><dd>{{.Item.Tx.Timestamp.Format "2006-01-02T15:04:05Z07:00"}}</dd>
 {{if .FeeMsg}}<dt>Fee</dt><dd class="muted">{{.FeeMsg}}</dd>{{else}}<dt>Fee</dt><dd><span class="num" title="{{units .Fee}} base units">{{coins .Fee}}</span> coins</dd>{{end}}
+{{if .RateMsg}}<dt>Fee rate</dt><dd class="muted">{{.RateMsg}}</dd>{{else}}<dt>Fee rate</dt><dd>{{.Rate}} base units/byte</dd>{{end}}
 </dl>
 {{template "txbody" .Item}}
 {{if not .Pending}}<section class="section" aria-labelledby="merkle">

@@ -35,3 +35,33 @@ func TestBaseUnitsGroupsThousands(t *testing.T) {
 		}
 	}
 }
+
+func TestFeeRateFormatsTwoDecimalsRoundedDown(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		fee     uint64
+		size    int
+		wantStr string
+		wantOK  bool
+	}{
+		{4200, 300, "14.00", true},
+		{1000, 300, "3.33", true},
+		{1, 3, "0.33", true},
+		{2, 3, "0.66", true},
+		{1000, 3, "333.33", true},
+		{0, 250, "0.00", true},
+		{5, 1, "5.00", true},
+		{18446744073709551615, 1, "18,446,744,073,709,551,615.00", true},
+		{1234567, 1, "1,234,567.00", true},
+		{10, 0, "", false},
+		{10, -1, "", false},
+	}
+
+	for _, tc := range cases {
+		gotStr, gotOK := feeRate(tc.fee, tc.size)
+		if gotStr != tc.wantStr || gotOK != tc.wantOK {
+			t.Errorf("feeRate(%d, %d) = (%q, %t), want (%q, %t)", tc.fee, tc.size, gotStr, gotOK, tc.wantStr, tc.wantOK)
+		}
+	}
+}
