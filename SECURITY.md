@@ -14,7 +14,9 @@ Sync ([ADR-0019](docs/adr/0019-initial-sync-and-forks.md)) bans a peer that send
 
 ## Reverse proxy setup
 
-`compose.tls.yml` shows a node behind a TLS-terminating Caddy that publishes only read routes and keeps `/p2p/*`, writes and `/metrics` internal ([ADR-0024](docs/adr/0024-caddy-tls-reverse-proxy.md), [guide](docs/playground.md#running-behind-a-reverse-proxy-composetlsyml)). It adds encryption in transit to the exposed routes and nothing else: there is still no authentication, `node_id` is still spoofable, peers still use plain HTTP on the internal network, the certificate comes from a self-signed local CA, and the rate limiter keys on the connection address, so behind the proxy `RATE_LIMIT` is one cap shared by all public clients. It is an example, not audited and not for public deployment.
+`compose.tls.yml` shows a node behind a TLS-terminating Caddy that publishes only read routes and keeps `/p2p/*`, writes and `/metrics` internal ([ADR-0024](docs/adr/0024-caddy-tls-reverse-proxy.md), [guide](docs/playground.md#running-behind-a-reverse-proxy-composetlsyml)). It adds encryption in transit to the exposed routes and nothing else: there is still no authentication, `node_id` is still spoofable, peers still use plain HTTP on the internal network, the certificate comes from a self-signed local CA, and the rate limiter keys public clients on `X-Forwarded-For` only because node1 sets `TRUSTED_PROXIES` to Caddy's fixed address ([ADR-0025](docs/adr/0025-trusted-proxies-forwarded-for.md)). It is an example, not audited and not for public deployment.
+
+`TRUSTED_PROXIES` is a security setting: a listed address that does not overwrite `X-Forwarded-For` lets its clients choose their rate-limit bucket and bypass `RATE_LIMIT`; leave it empty when the node is not behind a proxy.
 
 ## Reporting a vulnerability
 
