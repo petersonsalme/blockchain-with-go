@@ -25,6 +25,17 @@ func coins(units uint64) string {
 // baseUnits formats an exact amount with thousands grouped, for the hover title.
 func baseUnits(units uint64) string { return group(units) }
 
+// feeRate formats fee / size in base units per byte, two decimals rounded down. The node orders the pool by this ratio; it reports fee and size, not the rate.
+func feeRate(fee uint64, size int) (string, bool) {
+	if size <= 0 {
+		return "", false
+	}
+
+	s := uint64(size)
+
+	return fmt.Sprintf("%s.%02d", group(fee/s), fee%s*100/s), true
+}
+
 func group(n uint64) string {
 	digits := strconv.FormatUint(n, 10)
 
