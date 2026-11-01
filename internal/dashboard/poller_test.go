@@ -26,6 +26,7 @@ type chainNode struct {
 	noHdrs atomic.Bool  // /headers answers an empty list
 	last   atomic.Value // time.Time
 	blocks atomic.Value // string: the /blocks body; unset → 404
+	pool   atomic.Value // string: JSON array for /mempool; unset → 404
 }
 
 func newChainNode(t *testing.T, height int, tip string) *chainNode {
@@ -81,6 +82,15 @@ func newChainNode(t *testing.T, height int, tip string) *chainNode {
 			}
 
 			_, _ = fmt.Fprint(w, body)
+		case "/mempool":
+			body, set := c.pool.Load().(string)
+			if !set {
+				http.NotFound(w, r)
+
+				return
+			}
+
+			_, _ = fmt.Fprintf(w, `{"transactions":%s}`, body)
 		default:
 			http.NotFound(w, r)
 		}
@@ -119,6 +129,63 @@ func TestPollerSnapshot(t *testing.T) {
 	c := cards[0]
 	if !c.Reachable || c.Height != 4 || c.Tip != hex64 || c.Peers != 2 || c.Since != "12 s ago" {
 		t.Errorf("card = %+v", c)
+	}
+}
+
+func TestPollerReadsThePoolSizeEachTick(t *testing.T) {
+	t.Parallel()
+
+	n := newChainNode(t, 4, hex64)
+	n.pool.Store(`[{},{}]`)
+	p := newPoller(t, n)
+	p.Tick(context.Background())
+
+	if c := p.View().Cards[0]; !c.PoolKnown || c.Pool != 2 {
+		t.Errorf("card = pool %d known %t, want 2 and true", c.Pool, c.PoolKnown)
+	}
+
+	n.pool.Store(`[{},{},{}]`)
+	p.Tick(context.Background())
+
+	if c := p.View().Cards[0]; c.Pool != 3 {
+		t.Errorf("pool = %d after the next tick, want 3", c.Pool)
+	}
+}
+
+func TestPollerBlanksOnlyThePoolWhenItsReadFails(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		pool string // "" leaves /mempool unset, so it answers 404
+	}{
+		{"not found", ""},
+		{"bad JSON", `"x"`},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			n := newChainNode(t, 4, hex64)
+			n.peers.Store(`["a:1"]`)
+
+			if tc.pool != "" {
+				n.pool.Store(tc.pool)
+			}
+
+			p := newPoller(t, n)
+			p.Tick(context.Background())
+
+			c := p.View().Cards[0]
+			if !c.Reachable || c.Height != 4 || c.Tip != hex64 || c.Peers != 1 || c.Since != "12 s ago" {
+				t.Errorf("card = %+v, want the other fields intact", c)
+			}
+
+			if c.PoolKnown || c.Pool != 0 {
+				t.Errorf("pool = %d known %t, want 0 and false", c.Pool, c.PoolKnown)
+			}
+		})
 	}
 }
 

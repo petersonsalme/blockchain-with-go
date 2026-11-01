@@ -124,6 +124,10 @@ type peersBody struct {
 	} `json:"peers"`
 }
 
+type mempoolBody struct {
+	Transactions []json.RawMessage `json:"transactions"`
+}
+
 type headersBody struct {
 	Blocks []struct {
 		Timestamp  time.Time `json:"timestamp"`
@@ -226,18 +230,20 @@ func nodeStatus(c Card) (level, status string) {
 	return "ok", "Up to date"
 }
 
-// poll reads one node: /health and /p2p/peers at once, then the tip header. A node whose /health
-// fails is unreachable and keeps its previous values; a failing peers or header read only blanks that field.
+// poll reads one node: /health, /p2p/peers and /mempool at once, then the tip header. A node whose /health
+// fails is unreachable and keeps its previous values; a failing peers, mempool or header read only blanks that field.
 func (p *Poller) poll(ctx context.Context, node Node, prev Snapshot) Snapshot {
 	var (
-		wg              sync.WaitGroup
-		health          healthBody
-		peers           peersBody
-		healthErr, pErr error
+		wg                    sync.WaitGroup
+		health                healthBody
+		peers                 peersBody
+		pool                  mempoolBody
+		healthErr, pErr, mErr error
 	)
 
 	wg.Go(func() { healthErr = p.get(ctx, node, Health(), &health) })
 	wg.Go(func() { pErr = p.get(ctx, node, Peers(), &peers) })
+	wg.Go(func() { mErr = p.get(ctx, node, Mempool(), &pool) })
 	wg.Wait()
 
 	prev.Reachable = false
@@ -253,6 +259,10 @@ func (p *Poller) poll(ctx context.Context, node Node, prev Snapshot) Snapshot {
 		for _, peer := range peers.Peers {
 			s.PeerAddrs = append(s.PeerAddrs, peer.Addr)
 		}
+	}
+
+	if mErr == nil {
+		s.Pool, s.PoolKnown = len(pool.Transactions), true
 	}
 
 	var headers headersBody

@@ -46,6 +46,8 @@ type Snapshot struct {
 	Tip       string
 	Peers     int
 	PeerAddrs []string
+	Pool      int  // transactions in the node's mempool; meaningful only when PoolKnown
+	PoolKnown bool // the last /mempool read of a reachable node succeeded
 	TipTime   time.Time
 }
 
