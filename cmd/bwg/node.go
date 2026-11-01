@@ -417,13 +417,19 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		return err
 	}
 
+	trusted, err := server.ParseTrustedProxies(os.Getenv(server.TrustedProxiesEnvVar))
+	if err != nil {
+		return fmt.Errorf("%s: %w", server.TrustedProxiesEnvVar, err)
+	}
+
 	srv, err := server.NewServer(svc, server.Config{
-		P2P:           peers,
-		Events:        events,
-		MiningTimeout: server.ParseMiningTimeout(os.Getenv(server.MiningTimeoutEnvVar)),
-		RateLimit:     server.ParseRateLimit(os.Getenv(server.RateLimitEnvVar)),
-		Logger:        logger,
-		Explorer:      explorer.Files(),
+		P2P:            peers,
+		Events:         events,
+		MiningTimeout:  server.ParseMiningTimeout(os.Getenv(server.MiningTimeoutEnvVar)),
+		RateLimit:      server.ParseRateLimit(os.Getenv(server.RateLimitEnvVar)),
+		TrustedProxies: trusted,
+		Logger:         logger,
+		Explorer:       explorer.Files(),
 	})
 	if err != nil {
 		return err

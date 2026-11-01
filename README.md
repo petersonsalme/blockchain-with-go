@@ -147,6 +147,7 @@ Design decisions live in [`docs/adr/`](docs/adr/0009-merkle-tree.md):
 | [0022](docs/adr/0022-prometheus-client-golang.md) | Prometheus metrics with client_golang (registry per server) and an observability compose profile; supersedes 0010 |
 | [0023](docs/adr/0023-network-dashboard.md) | Read-only network dashboard as `bwg dashboard` |
 | [0024](docs/adr/0024-caddy-tls-reverse-proxy.md) | Caddy as the TLS-terminating reverse proxy in `compose.tls.yml` (no module added) |
+| [0025](docs/adr/0025-trusted-proxies-forwarded-for.md) | Client address from `X-Forwarded-For` only behind `TRUSTED_PROXIES` (right to left, `net/netip`) |
 
 ## Configuration & Environment Variables
 
@@ -176,7 +177,8 @@ The application can be configured via environment variables (e.g., in a `.env` f
 | `MAX_OUTBOUND_PEERS` | Maximum outbound peers (positive integer; invalid values use the default) | `8` |
 | `PEER_INTERVAL` | Time between dialer rounds, as a Go duration. Empty, invalid or non-positive values use the default; peers not seen for 3 intervals expire | `30s` |
 | `MAX_BLOCK_BYTES` | Maximum JSON-serialized block size in bytes (positive integer; invalid values fall back to the default) | `1048576` |
-| `RATE_LIMIT` | Maximum requests per minute per client address as seen by the node (`RemoteAddr`); forwarded headers are ignored, so behind a proxy it is one shared limit (positive integer; empty, invalid, or non-positive disables rate limiting) | disabled (`0`) |
+| `RATE_LIMIT` | Maximum requests per minute per client address: `RemoteAddr`, or the rightmost untrusted `X-Forwarded-For` entry when the connection comes from `TRUSTED_PROXIES` (positive integer; empty, invalid, or non-positive disables rate limiting) | disabled (`0`) |
+| `TRUSTED_PROXIES` | Comma-separated CIDRs or IPs of reverse proxies whose `X-Forwarded-For` names the client for the rate limiter ([ADR-0025](docs/adr/0025-trusted-proxies-forwarded-for.md)); `Forwarded` and `X-Real-IP` are ignored. Invalid entries stop the node. List only proxies that overwrite or append the header; trusting anything else lets clients pick their own bucket | empty (header ignored) |
 | `NODE_URL` | Base URL of the node used by `bwg wallet` and `bwg miner` (`--node` overrides it) | `http://localhost:8080` |
 | `WALLET_KEYSTORE` | Keystore path used by `bwg wallet new` and `bwg wallet send` (`--keystore` overrides it) | `wallet.key` |
 | `WALLET_PASSWORD` | Password of the wallet keystore; required by `bwg wallet new` and `bwg wallet send`. There is no flag for it, so it stays out of the shell history | empty |

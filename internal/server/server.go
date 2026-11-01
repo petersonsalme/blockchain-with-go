@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
+	"slices"
 	"strconv"
 	"time"
 
@@ -71,6 +73,8 @@ type Config struct {
 	MiningTimeout time.Duration
 	// RateLimit is requests per minute per IP; non-positive means disabled.
 	RateLimit int
+	// TrustedProxies are the peers whose X-Forwarded-For names the client (ADR-0025); empty ignores the header.
+	TrustedProxies []netip.Prefix
 	// Logger receives one record per request; nil discards them.
 	Logger *slog.Logger
 	// Now returns the current time; nil means time.Now.
@@ -113,6 +117,7 @@ func NewServer(svc Chain, cfg Config) (*Server, error) {
 	var limiter *rateLimiter
 	if cfg.RateLimit > 0 {
 		limiter = newRateLimiter(cfg.RateLimit, cfg.Now)
+		limiter.trusted = slices.Clone(cfg.TrustedProxies)
 	}
 
 	logger := cfg.Logger
