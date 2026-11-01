@@ -6,7 +6,7 @@
 <div class="tx-list">
 {{- range .}}
 <article class="tx">
-<div class="tx-head">{{if .Pos}}#{{.Pos}} {{end}}{{if .Tx.ID}}<a class="hash" href="/n/{{pe .Node}}/tx/{{pe .Tx.ID}}" title="{{.Tx.ID}}"><span class="hash-start">{{hstart .Tx.ID}}</span><span class="hash-end">{{hend .Tx.ID}}</span></a>{{else}}<span class="mono">(no id)</span>{{end}}<span class="muted">{{.Tx.Timestamp.Format "2006-01-02T15:04:05Z07:00"}}</span></div>
+<div class="tx-head">{{if .Pos}}#{{.Pos}} {{end}}{{if .Tx.ID}}<a class="hash" href="/n/{{pe .Node}}/tx/{{pe .Tx.ID}}" title="{{.Tx.ID}}"><span class="hash-start">{{hstart .Tx.ID}}</span><span class="hash-end">{{hend .Tx.ID}}</span></a>{{else}}<span class="mono">(no id)</span>{{end}}<span class="muted">{{.Tx.Timestamp.Format "2006-01-02T15:04:05Z07:00"}}</span>{{with .Entry}}<span class="muted">fee <span class="num" title="{{units .Fee}} base units">{{coins .Fee}}</span> coins · {{.Rate}} base units/byte</span>{{end}}</div>
 {{template "txbody" .}}
 </article>
 {{- else}}

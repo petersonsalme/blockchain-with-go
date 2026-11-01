@@ -769,6 +769,85 @@ func TestMempoolRowsShowPosition(t *testing.T) {
 	}
 }
 
+func TestMempoolRowsShowFeeRateOnlyFromTheirEntry(t *testing.T) {
+	t.Parallel()
+
+	twoTxs := txJSON(txA, ownerAddr) + `,` + txJSON(txB, ownerAddr)
+
+	tests := []struct {
+		name       string
+		body       string
+		wants      []string
+		lacks      []string
+		checkOrder bool
+	}{
+		{
+			name:       "matched",
+			body:       `{"transactions":[` + twoTxs + `],"entries":[{"id":"` + txA + `","fee":4200,"size":300},{"id":"` + txB + `","fee":1000,"size":300}]}`,
+			wants:      []string{">0.000042<", `title="4,200 base units"`, "14.00 base units/byte", "3.33 base units/byte"},
+			checkOrder: true,
+		},
+		{
+			name:  "swapped ids",
+			body:  `{"transactions":[` + twoTxs + `],"entries":[{"id":"` + txB + `","fee":4200,"size":300},{"id":"` + txA + `","fee":1000,"size":300}]}`,
+			lacks: []string{"base units/byte"},
+		},
+		{
+			name:  "length mismatch",
+			body:  `{"transactions":[` + twoTxs + `],"entries":[{"id":"` + txA + `","fee":4200,"size":300}]}`,
+			lacks: []string{"base units/byte"},
+		},
+		{
+			name:  "no entries key",
+			body:  `{"transactions":[` + twoTxs + `]}`,
+			lacks: []string{"base units/byte"},
+		},
+		{
+			name:  "size 0 for txA only",
+			body:  `{"transactions":[` + twoTxs + `],"entries":[{"id":"` + txA + `","fee":4200,"size":0},{"id":"` + txB + `","fee":1000,"size":300}]}`,
+			wants: []string{"3.33 base units/byte"},
+			lacks: []string{"14."},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			n := routedNode(t, map[string]reply{
+				"/mempool": ok(tc.body),
+			})
+
+			rec := do(chainServer(t, n), http.MethodGet, "/n/node1/mempool")
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
+			}
+
+			body := rec.Body.String()
+			for _, want := range tc.wants {
+				if !strings.Contains(body, want) {
+					t.Errorf("lacks %q in body:\n%s", want, body)
+				}
+			}
+
+			for _, lack := range tc.lacks {
+				if strings.Contains(body, lack) {
+					t.Errorf("contains %q in body:\n%s", lack, body)
+				}
+			}
+
+			if tc.checkOrder {
+				i14 := strings.Index(body, "14.00 base units/byte")
+
+				i3 := strings.Index(body, "3.33 base units/byte")
+				if i14 < 0 || i3 < 0 || i14 >= i3 {
+					t.Errorf("expected 14.00 before 3.33: i14=%d, i3=%d", i14, i3)
+				}
+			}
+		})
+	}
+}
+
 // feeTxJSON is a transaction whose inputs and outputs are JSON fragments.
 func feeTxJSON(id, inputs, outputs string) string {
 	return `{"ID":"` + id + `","Inputs":[` + inputs + `],"Outputs":[` + outputs + `],"Timestamp":"2026-01-02T03:04:05Z"}`

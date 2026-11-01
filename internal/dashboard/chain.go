@@ -111,6 +111,13 @@ type (
 		Height      int       `json:"height"`
 		Timestamp   time.Time `json:"timestamp"`
 	}
+
+	// nodeEntry is one item of GET /mempool entries: the fee and size of the transaction at the same index.
+	nodeEntry struct {
+		ID   string `json:"id"`
+		Fee  uint64 `json:"fee"`
+		Size int    `json:"size"`
+	}
 )
 
 // Screen data. Node is the name from the configuration, never from the URL or a node.
@@ -125,12 +132,19 @@ type (
 
 	peersView struct{ Nodes []peersNode }
 
+	// poolEntry is the fee and fee rate a mempool row shows.
+	poolEntry struct {
+		Fee  uint64
+		Rate string
+	}
+
 	// txItem is a transaction with the node name its links need. Pos is its 1-based place in the
 	// mempool selection order; 0 means none is shown.
 	txItem struct {
-		Node string
-		Tx   nodeTx
-		Pos  int
+		Node  string
+		Tx    nodeTx
+		Pos   int
+		Entry *poolEntry // fee and fee rate from the node's pool entry; nil shows neither
 	}
 
 	mempoolView struct {
@@ -409,18 +423,46 @@ func items(node string, txs []nodeTx) []txItem {
 	return out
 }
 
+// poolEntries pairs each pool transaction with its entry: same index, same id, positive size.
+// A length mismatch (an older node without entries) pairs none.
+func poolEntries(txs []nodeTx, entries []nodeEntry) []*poolEntry {
+	out := make([]*poolEntry, len(txs))
+	if len(entries) != len(txs) {
+		return out
+	}
+
+	for i, tx := range txs {
+		if entries[i].ID != tx.ID {
+			continue
+		}
+
+		rate, ok := feeRate(entries[i].Fee, entries[i].Size)
+		if !ok {
+			continue
+		}
+
+		out[i] = &poolEntry{Fee: entries[i].Fee, Rate: rate}
+	}
+
+	return out
+}
+
 func (s *server) loadMempool(r *http.Request, node Node) (any, *pageError) {
 	var body struct {
-		Transactions []nodeTx `json:"transactions"`
+		Transactions []nodeTx    `json:"transactions"`
+		Entries      []nodeEntry `json:"entries"`
 	}
 
 	if perr := s.read(r.Context(), node, Mempool(), &body); perr != nil {
 		return nil, perr
 	}
 
+	pairs := poolEntries(body.Transactions, body.Entries)
+
 	txs := items(node.Name, body.Transactions)
 	for i := range txs {
 		txs[i].Pos = i + 1
+		txs[i].Entry = pairs[i]
 	}
 
 	return mempoolView{Node: node.Name, Txs: txs}, nil

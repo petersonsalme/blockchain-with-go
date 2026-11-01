@@ -4,6 +4,7 @@
 <dl>
 <dt>Order</dt><dd>highest fee rate per byte first. This is the order mining takes them, so a higher fee gets in sooner.</dd>
 <dt>Fee</dt><dd>the sum of the inputs minus the sum of the outputs; the miner collects it.</dd>
+<dt>Fee rate</dt><dd>the fee divided by the size of the transaction in bytes (the length of its JSON), in base units per byte, rounded down to two decimals. The node reports fee and size; the dashboard divides.</dd>
 <dt>Per node</dt><dd>every node keeps its own pool. Gossip spreads transactions, so the pools should match within moments.</dd>
 <dt>Leaving the pool</dt><dd>when a block includes a transaction it disappears from here and shows up in Blocks.</dd>
 </dl>
