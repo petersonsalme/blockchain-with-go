@@ -535,7 +535,7 @@ func TestNetworkPageExplainsHowToReadItOutsideTheRefreshedFragment(t *testing.T)
 	page := do(h, http.MethodGet, "/").Body.String()
 	for _, want := range []string{
 		`<button type="button" class="info-btn" aria-label="How to read this page" aria-describedby="network-help">`,
-		`id="network-help" role="tooltip"`, "Behind by N", "Unreachable",
+		`id="network-help" role="tooltip"`, "Behind by N", "Unreachable", "not the sum",
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("page lacks %q", want)
@@ -545,6 +545,48 @@ func TestNetworkPageExplainsHowToReadItOutsideTheRefreshedFragment(t *testing.T)
 	// htmx replaces the fragment every 2 s: a tooltip inside it would close under the pointer.
 	if frag := do(h, http.MethodGet, "/fragments/network").Body.String(); strings.Contains(frag, "network-help") {
 		t.Error("the help tooltip is inside the refreshed fragment")
+	}
+}
+
+func TestMempoolShowsInTheBandAndTheMatrix(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	a, b, c := newChainNode(t, 4, hex64), newChainNode(t, 4, hex64), newChainNode(t, 4, hex64)
+	a.pool.Store(`[{},{}]`)
+	b.pool.Store(`[{},{}]`)
+	c.pool.Store(`[{}]`)
+
+	p := newPoller(t, a, b, c)
+	p.Tick(ctx)
+
+	h := newTestServerWithPoller(t, p, a, b, c)
+
+	frag := do(h, http.MethodGet, "/fragments/network").Body.String()
+	for _, want := range []string{
+		`<span class="kpi-label">Mempool</span><span class="kpi-value">2</span>`,
+		`<th scope="row">Mempool</th>`,
+		`<td class="cell-diff"><span class="cell"><span class="cell-mark" aria-hidden="true">≠</span><span class="sr-only">differs: </span>1</span></td>`,
+	} {
+		if !strings.Contains(frag, want) {
+			t.Errorf("network fragment lacks %q:\n%s", want, frag)
+		}
+	}
+
+	solo := newChainNode(t, 2, "aa")
+	q := newPoller(t, solo)
+	q.Tick(ctx)
+
+	hq := newTestServerWithPoller(t, q, solo)
+
+	one := do(hq, http.MethodGet, "/fragments/network").Body.String()
+	if !strings.Contains(one, `<span class="kpi-label">Mempool</span><span class="kpi-value"><span class="empty-value">—</span></span>`) {
+		t.Errorf("network fragment with no pool known lacks the empty Mempool KPI:\n%s", one)
+	}
+
+	if strings.Contains(one, `cell-diff`) {
+		t.Errorf("a single node without a pool is marked as different:\n%s", one)
 	}
 }
 
