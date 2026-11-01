@@ -388,7 +388,7 @@ Screens (the top bar links them; the search box takes a height, a block or trans
 | Peers | `/peers` | connected and known peers of every node |
 | Metrics | `/metrics` | key figures per node and two charts, below |
 | Node | `/n/<node>/` | links to Mempool, Blocks and Peers of one node |
-| Mempool, Blocks | `/n/<node>/mempool`, `/n/<node>/blocks` | pending transactions by fee rate; the chain, 20 blocks per page |
+| Mempool, Blocks | `/n/<node>/mempool`, `/n/<node>/blocks` | pending transactions by fee rate, with fee and fee rate per row; the chain, 20 blocks per page |
 | Block, transaction, address, contract | `/n/<node>/block/<height or hash>`, `/tx/<id>`, `/address/<addr>`, `/contract/<id>` | detail views, with the Merkle proof of a transaction and the unspent outputs of an address |
 
 The pages work in light and dark (`prefers-color-scheme`), use no inline script or style and run under the same content policy as the node explorer.
@@ -431,7 +431,8 @@ For time series, retention and alerts use the `observability` profile (Prometheu
 - **Search**: case-insensitive, so `ABC...` and `abc...` find the same thing. The dashboard tries a height, then a transaction ID, then a block hash, then an address, and goes to the first one the node answers. A value the node does not have shows "Not found" (HTTP 404) on the search page, which stays open with the query in it.
 - **Transaction page** `/n/<node>/tx/<id>`: the fee is the sum of the inputs minus the sum of the outputs, in coins. A coinbase or genesis transaction has no fee, and the page says so; if a spent output cannot be read, the page says the fee is unknown instead of showing a wrong number.
 - **Pending transaction**: the transaction page shows its position in the selection order, for example `Pending: position 2 of 5`, linked to the mempool. The mempool lists `#1..#n` in that order, highest fee rate first, which is the order mining takes them.
-- **Not shown**: the fee rate, per transaction or on the mempool page (the node does not expose it yet); the total supply; and the richest addresses (they need data the node does not keep).
+- **Fee rate**: each mempool row shows its fee and its fee rate, the fee divided by the size of the transaction in bytes (the length of its JSON), in base units per byte, rounded down to two decimals. The node reports fee and size in the `entries` of `GET /mempool`; the dashboard divides. The page of a pending transaction shows the same rate; a confirmed one says the rate is shown only while pending. In the fee-rate walkthrough above, Bob's row comes first with the higher rate.
+- **Not shown**: the fee rate of a confirmed transaction (the node reports sizes for its pool only); the total supply; and the richest addresses (they need data the node does not keep).
 
 ### Walkthrough: stop node3
 
