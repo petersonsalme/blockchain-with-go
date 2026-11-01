@@ -19,6 +19,12 @@
 <dt>Behind by N</dt><dd>the node trails the highest one by N blocks and is catching up.</dd>
 <dt>Unreachable</dt><dd>the node did not answer; its last known height is kept.</dd>
 </dl>
+<dl>
+<dt>Chain per node</dt><dd>the last 8 heights up to the highest reachable node, one lane per node, so blocks at the same height line up.</dd>
+<dt>● tip, ▲ behind</dt><dd>the node's last block, at the top height or below it.</dd>
+<dt>⑂ fork</dt><dd>the block differs from the chain of the majority tip at that height. A node's own tip at the top height is marked only once the fork is confirmed; two nodes may just have mined at once.</dd>
+<dt>Dashed</dt><dd>a height the node does not have, or the last known blocks of a node that does not answer.</dd>
+</dl>
 <p>A hash is cut in the middle to fit: hover it for the full value, or open it to see the block.</p>
 </span>
 </span>
@@ -104,6 +110,24 @@
 </tbody>
 </table>
 </div>
+</section>
+<section class="section" aria-labelledby="lanes-title">
+<div class="section-head"><h2 class="section-title" id="lanes-title">Chain per node</h2>{{if .Lanes}}<span class="section-meta">heights {{.LaneFrom}} to {{.LaneTo}} · ⑂ marks a block off the majority chain</span>{{end}}</div>
+{{- if .Lanes}}
+<div class="lanes" role="region" aria-labelledby="lanes-title" tabindex="0"><div class="lanes-inner">
+{{- range $l := .Lanes}}
+<div class="lane{{if eq .Level "warn"}} lane--warn{{else if eq .Level "bad"}} lane--bad{{end}}"><div class="lane-name"><span class="dot dot--{{.Level}}" aria-hidden="true"></span><a href="/n/{{pe .Name}}/">{{.Name}}</a><span class="lane-meta">{{.Status}}</span></div>
+<ol class="chain">
+{{- range .Cells}}
+<li>{{if .Hash}}<a class="blk{{if .Kind}} blk--{{.Kind}}{{end}}" href="/n/{{pe $l.Name}}/block/{{pe .Hash}}" title="{{.Hash}}"><span class="blk-h">{{.Height}}</span><span class="blk-id">{{.Hash}}</span>{{if .Kind}}<span class="sr-only"> {{.Kind}}</span>{{end}}</a>{{else}}<span class="blk blk--missing"><span class="blk-h">{{.Height}}</span><span class="blk-id">—</span><span class="sr-only"> missing</span></span>{{end}}</li>
+{{- end}}
+</ol></div>
+{{- end}}
+</div></div>
+<ul class="lanes-legend"><li><span class="lg lg--tip" aria-hidden="true"></span>tip</li><li><span class="lg lg--behind" aria-hidden="true"></span>behind</li><li><span class="lg lg--fork" aria-hidden="true"></span>fork</li><li><span class="lg lg--missing" aria-hidden="true"></span>missing or stale</li></ul>
+{{- else}}
+<p class="empty-value">No node has answered yet.</p>
+{{- end}}
 </section>
 </section>
 {{- end}}

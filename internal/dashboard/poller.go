@@ -130,6 +130,8 @@ type mempoolBody struct {
 
 type headersBody struct {
 	Blocks []struct {
+		Index      int       `json:"index"` // the node sends "Index"; decoding is case-insensitive
+		Hash       string    `json:"hash"`  // the node sends "Hash"
 		Timestamp  time.Time `json:"timestamp"`
 		Difficulty uint64    `json:"difficulty"`
 	} `json:"blocks"`
@@ -151,10 +153,13 @@ type Card struct {
 type View struct {
 	Assessment Assessment
 	Cards      []Card
-	Agree      int  // reachable nodes on the majority tip
-	Reachable  int  // reachable nodes
-	Pool       int  // largest known pool among reachable nodes
-	PoolKnown  bool // at least one reachable node has a known pool
+	Agree      int    // reachable nodes on the majority tip
+	Reachable  int    // reachable nodes
+	Pool       int    // largest known pool among reachable nodes
+	PoolKnown  bool   // at least one reachable node has a known pool
+	Lanes      []Lane // chain per node, same heights in every lane
+	LaneFrom   int    // the heights of the lanes
+	LaneTo     int
 }
 
 // Banner is the CSS class suffix and text of the verdict.
@@ -203,6 +208,8 @@ func (p *Poller) View() View {
 		c.Level, c.Status = nodeStatus(*c)
 	}
 
+	lo, top, ls := lanes(cards, a.State, majority)
+
 	return View{
 		Assessment: a,
 		Cards:      cards,
@@ -210,6 +217,9 @@ func (p *Poller) View() View {
 		Reachable:  len(snaps) - a.Unreachable,
 		Pool:       pool,
 		PoolKnown:  poolKnown,
+		Lanes:      ls,
+		LaneFrom:   lo,
+		LaneTo:     top,
 	}
 }
 
@@ -277,7 +287,7 @@ func nodeStatus(c Card) (level, status string) {
 	return "ok", "Up to date"
 }
 
-// poll reads one node: /health, /p2p/peers and /mempool at once, then the tip header. A node whose /health
+// poll reads one node: /health, /p2p/peers and /mempool at once, then the last LaneBlocks headers (tip time and lane hashes). A node whose /health
 // fails is unreachable and keeps its previous values; a failing peers, mempool or header read only blanks that field.
 func (p *Poller) poll(ctx context.Context, node Node, prev Snapshot) Snapshot {
 	var (
@@ -314,9 +324,21 @@ func (p *Poller) poll(ctx context.Context, node Node, prev Snapshot) Snapshot {
 
 	var headers headersBody
 
-	err := p.get(ctx, node, Headers(health.Height, 1), &headers)
-	if err == nil && len(headers.Blocks) > 0 {
-		s.TipTime = headers.Blocks[0].Timestamp
+	from := max(health.Height-LaneBlocks+1, 0)
+
+	err := p.get(ctx, node, Headers(from, LaneBlocks), &headers)
+	if err == nil {
+		for _, b := range headers.Blocks {
+			if b.Index < from || b.Index > health.Height {
+				continue // mined or reorged between the two reads
+			}
+
+			s.Blocks = append(s.Blocks, BlockRef{Height: b.Index, Hash: b.Hash})
+
+			if b.Index == health.Height {
+				s.TipTime = b.Timestamp
+			}
+		}
 	}
 
 	return s

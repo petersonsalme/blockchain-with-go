@@ -49,6 +49,7 @@ type Snapshot struct {
 	Pool      int  // transactions in the node's mempool; meaningful only when PoolKnown
 	PoolKnown bool // the last /mempool read of a reachable node succeeded
 	TipTime   time.Time
+	Blocks    []BlockRef // the node's blocks from max(Height-LaneBlocks+1, 0) to Height, ascending, from its last /headers read
 }
 
 // Assessment is the verdict over a set of snapshots.

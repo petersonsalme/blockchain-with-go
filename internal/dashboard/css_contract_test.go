@@ -29,6 +29,7 @@ func classValues() map[string][]string {
 	return map[string][]string{
 		".Level":                   {"ok", "warn", "bad"},
 		"$level":                   {"ok", "warn", "bad"},
+		".Kind":                    {"tip", "behind", "fork", "missing", "stale"},
 		".Class":                   series,
 		".Assessment.State.String": states,
 	}
