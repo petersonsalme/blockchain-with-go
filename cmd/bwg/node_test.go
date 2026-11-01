@@ -20,6 +20,7 @@ import (
 
 	"github.com/petersonsalme/blockchain-with-go/internal/consensus/pow"
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
+	"github.com/petersonsalme/blockchain-with-go/internal/server"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/bolt"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/memory"
@@ -445,6 +446,25 @@ func TestRunFailsOnInvalidGenesisTime(t *testing.T) {
 	err := run(context.Background(), discardLogger())
 	if err == nil || !strings.Contains(err.Error(), genesisTimeEnvVar) {
 		t.Fatalf("run = %v, want error citing GENESIS_TIME", err)
+	}
+}
+
+func TestRunFailsOnInvalidTrustedProxies(t *testing.T) {
+	t.Setenv("PORT", freePort(t))
+	t.Setenv("POW_DIFFICULTY", "1")
+	t.Setenv(server.TrustedProxiesEnvVar, "not-a-cidr")
+
+	// Bounded so that a run which does not validate the variable stops serving instead of hanging.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := run(ctx, discardLogger())
+	if err == nil || !strings.Contains(err.Error(), server.TrustedProxiesEnvVar) {
+		t.Fatalf("run = %v, want error citing TRUSTED_PROXIES", err)
+	}
+
+	if !errors.Is(err, server.ErrInvalidTrustedProxy) {
+		t.Fatalf("run = %v, want error wrapping server.ErrInvalidTrustedProxy", err)
 	}
 }
 
