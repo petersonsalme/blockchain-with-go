@@ -20,9 +20,9 @@ services:
     environment:
       <<: *env
       P2P_LISTEN_ADDR: http://node1:8080
-      # The limiter keys on RemoteAddr: every public client reaches the node from caddy's address,
-      # so this is one global cap on public traffic, not a per-client limit (ADR-0024, ENG-259).
-      # The dashboard and node2 reach the node directly and keep their own buckets.
+      # TRUSTED_PROXIES names caddy only, so the limiter keys public clients on X-Forwarded-For (ADR-0025).
+      # The dashboard and node2 reach the node directly and keep their RemoteAddr buckets.
+      TRUSTED_PROXIES: 10.59.0.10/32
       RATE_LIMIT: "1200"
     volumes: ["node1-data:/data"]
     networks: [backend]
@@ -53,11 +53,17 @@ services:
       - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
-    networks: [backend, edge]
+    networks:
+      backend:
+        ipv4_address: 10.59.0.10
+      edge: {}
 
 networks:
   backend:
     internal: true
+    ipam:
+      config:
+        - subnet: 10.59.0.0/24
   edge:
 
 volumes:
