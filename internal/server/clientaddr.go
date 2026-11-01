@@ -3,7 +3,9 @@ package server
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
+	"slices"
 	"strings"
 )
 
@@ -46,4 +48,68 @@ func ParseTrustedProxies(raw string) ([]netip.Prefix, error) {
 	}
 
 	return prefixes, nil
+}
+
+// clientAddr returns the address the rate limiter keys on (ADR-0025). Forwarded addresses are
+// trusted only when the direct peer is inside a trusted prefix; the walk runs from the right and
+// stops at the first untrusted entry, so a client cannot forge its address from the left.
+func clientAddr(remoteAddr string, forwardedFor []string, trusted []netip.Prefix) string {
+	if len(trusted) == 0 {
+		return remoteAddr
+	}
+
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+
+	peer, err := netip.ParseAddr(host)
+	if err != nil || !isTrusted(peer, trusted) {
+		return remoteAddr
+	}
+
+	var entries []string
+
+	for _, value := range forwardedFor {
+		for field := range strings.SplitSeq(value, ",") {
+			if entry := strings.TrimSpace(field); entry != "" {
+				entries = append(entries, entry)
+			}
+		}
+	}
+
+	if len(entries) == 0 {
+		return remoteAddr
+	}
+
+	last := peer.WithZone("").Unmap()
+
+	for _, entry := range slices.Backward(entries) {
+		addr, err := netip.ParseAddr(entry)
+		if err != nil {
+			return last.String()
+		}
+
+		addr = addr.WithZone("").Unmap()
+		if !isTrusted(addr, trusted) {
+			return addr.String()
+		}
+
+		last = addr
+	}
+
+	return last.String()
+}
+
+// isTrusted reports whether addr, with IPv4-mapped IPv6 unmapped, lies inside one of the prefixes.
+func isTrusted(addr netip.Addr, trusted []netip.Prefix) bool {
+	addr = addr.WithZone("").Unmap()
+
+	for _, prefix := range trusted {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+
+	return false
 }

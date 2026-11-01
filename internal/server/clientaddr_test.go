@@ -55,3 +55,49 @@ var _ = Describe("ParseTrustedProxies", func() {
 		}
 	})
 })
+
+var _ = Describe("clientAddr", func() {
+	trusted := []netip.Prefix{netip.MustParsePrefix("10.59.0.0/24")}
+
+	It("ignores X-Forwarded-For when no proxy is trusted", func() {
+		Expect(clientAddr("10.59.0.10:4000", []string{"2.2.2.2"}, nil)).To(Equal("10.59.0.10:4000"))
+	})
+
+	It("ignores X-Forwarded-For from an untrusted peer", func() {
+		Expect(clientAddr("1.1.1.1:4000", []string{"2.2.2.2"}, trusted)).To(Equal("1.1.1.1:4000"))
+	})
+
+	It("returns remoteAddr when the header is absent", func() {
+		Expect(clientAddr("10.59.0.10:4000", nil, trusted)).To(Equal("10.59.0.10:4000"))
+		Expect(clientAddr("10.59.0.10:4000", []string{" "}, trusted)).To(Equal("10.59.0.10:4000"))
+	})
+
+	It("returns the rightmost untrusted entry", func() {
+		Expect(clientAddr("10.59.0.10:4000", []string{"6.6.6.6, 2.2.2.2"}, trusted)).To(Equal("2.2.2.2"))
+	})
+
+	It("skips trusted hops", func() {
+		Expect(clientAddr("10.59.0.10:4000", []string{"2.2.2.2, 10.59.0.11"}, trusted)).To(Equal("2.2.2.2"))
+	})
+
+	It("returns the leftmost entry when all are trusted", func() {
+		Expect(clientAddr("10.59.0.10:4000", []string{"10.59.0.3, 10.59.0.11"}, trusted)).To(Equal("10.59.0.3"))
+	})
+
+	It("stops at a malformed entry", func() {
+		Expect(clientAddr("10.59.0.10:4000", []string{"2.2.2.2, junk"}, trusted)).To(Equal("10.59.0.10"))
+		Expect(clientAddr("10.59.0.10:4000", []string{"junk, 10.59.0.11"}, trusted)).To(Equal("10.59.0.11"))
+	})
+
+	It("joins repeated header lines", func() {
+		Expect(clientAddr("10.59.0.10:4000", []string{"6.6.6.6", "2.2.2.2"}, trusted)).To(Equal("2.2.2.2"))
+	})
+
+	It("unmaps IPv4-mapped addresses", func() {
+		Expect(clientAddr("[::ffff:10.59.0.10]:4000", []string{"::ffff:2.2.2.2"}, trusted)).To(Equal("2.2.2.2"))
+	})
+
+	It("accepts a peer without a port", func() {
+		Expect(clientAddr("10.59.0.10", []string{"2.2.2.2"}, trusted)).To(Equal("2.2.2.2"))
+	})
+})
