@@ -4,6 +4,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"sync"
 	"time"
@@ -38,6 +39,7 @@ type rateLimiter struct {
 	now       func() time.Time
 	buckets   map[string]*ipBucket
 	lastSweep time.Time
+	trusted   []netip.Prefix
 }
 
 func newRateLimiter(rateLimit int, now func() time.Time) *rateLimiter {
@@ -105,7 +107,7 @@ func (l *rateLimiter) allow(remoteAddr string) (bool, int) {
 
 func (l *rateLimiter) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		allowed, retryAfter := l.allow(r.RemoteAddr)
+		allowed, retryAfter := l.allow(clientAddr(r.RemoteAddr, r.Header.Values("X-Forwarded-For"), l.trusted))
 		if !allowed {
 			respondRateLimited(w, retryAfter)
 			return

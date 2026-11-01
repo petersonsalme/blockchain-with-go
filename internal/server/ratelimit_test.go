@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -352,6 +353,40 @@ var _ = Describe("Rate Limiting", func() {
 			same := map[string]string{"X-Forwarded-For": "9.9.9.9", "Forwarded": "for=9.9.9.9", "X-Real-IP": "9.9.9.9"}
 			Expect(serve(wrapped, "10.0.0.1:1000", same)).To(Equal(http.StatusOK))
 			Expect(serve(wrapped, "10.0.0.2:1000", same)).To(Equal(http.StatusOK))
+		})
+
+		It("keeps one bucket per forwarded client behind a trusted proxy", func() {
+			srv, err := NewServer(dummyTipChain{}, Config{RateLimit: 1, TrustedProxies: []netip.Prefix{netip.MustParsePrefix("10.59.0.10/32")}})
+			Expect(err).NotTo(HaveOccurred())
+
+			handler := srv.Handler()
+			serve := func(remote string, headers map[string]string) int {
+				req := httptest.NewRequest(http.MethodGet, "/health", nil)
+
+				req.RemoteAddr = remote
+				for k, v := range headers {
+					req.Header.Set(k, v)
+				}
+
+				rec := httptest.NewRecorder()
+				handler.ServeHTTP(rec, req)
+
+				return rec.Code
+			}
+
+			// The trusted proxy's X-Forwarded-For names the client, so each forwarded client gets its own bucket
+			Expect(serve("10.59.0.10:40000", map[string]string{"X-Forwarded-For": "2.2.2.2"})).To(Equal(http.StatusOK))
+			Expect(serve("10.59.0.10:40001", map[string]string{"X-Forwarded-For": "3.3.3.3"})).To(Equal(http.StatusOK))
+			Expect(serve("10.59.0.10:40000", map[string]string{"X-Forwarded-For": "2.2.2.2"})).To(Equal(http.StatusTooManyRequests))
+
+			// An untrusted peer ignores X-Forwarded-For and keeps its own key
+			Expect(serve("1.1.1.1:5000", map[string]string{"X-Forwarded-For": "4.4.4.4"})).To(Equal(http.StatusOK))
+			Expect(serve("1.1.1.1:5001", map[string]string{"X-Forwarded-For": "5.5.5.5"})).To(Equal(http.StatusTooManyRequests))
+
+			// Only X-Forwarded-For counts: Forwarded and X-Real-IP do not move the key off 3.3.3.3, which is spent
+			Expect(serve("10.59.0.10:40002", map[string]string{
+				"Forwarded": "for=7.7.7.7", "X-Real-IP": "7.7.7.7", "X-Forwarded-For": "3.3.3.3",
+			})).To(Equal(http.StatusTooManyRequests))
 		})
 
 		It("handles RemoteAddr without a port correctly", func() {
