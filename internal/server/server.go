@@ -86,6 +86,8 @@ type Config struct {
 	Explorer fs.FS
 	// Events is the stream GET /events serves and gossip publishes to; nil makes the server its own.
 	Events *Events
+	// Consensus is what GET /consensus reports; nil makes the route answer 404 consensus_unknown.
+	Consensus *ConsensusInfo
 }
 
 // Server is the HTTP adapter over a Chain.
@@ -99,6 +101,7 @@ type Server struct {
 	events        *hub
 	p2p           Peers
 	explorer      fs.FS
+	consensus     *ConsensusInfo
 }
 
 // ErrNilService is returned by NewServer when svc is nil.
@@ -136,7 +139,7 @@ func NewServer(svc Chain, cfg Config) (*Server, error) {
 		events = NewEvents()
 	}
 
-	return &Server{chain: svc, miningTimeout: timeout, limiter: limiter, logger: logger, now: now, metrics: newMetrics(svc), events: events.hub, p2p: cfg.P2P, explorer: cfg.Explorer}, nil
+	return &Server{chain: svc, miningTimeout: timeout, limiter: limiter, logger: logger, now: now, metrics: newMetrics(svc), events: events.hub, p2p: cfg.P2P, explorer: cfg.Explorer, consensus: cfg.Consensus}, nil
 }
 
 // ParseMiningTimeout reads a MINING_TIMEOUT value: a Go duration or integer seconds.
@@ -189,6 +192,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/address/{addr}/txs", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/contracts/{id}", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/health", methodNotAllowed("GET, HEAD"))
+	mux.Handle("/consensus", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/metrics", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/events", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/p2p/hello", methodNotAllowed("POST"))
@@ -248,6 +252,7 @@ func (s *Server) routes() []route {
 		{"GET /address/{addr}/txs", s.handleGetAddressTxs},
 		{"GET /contracts/{id}", s.handleGetContract},
 		{"GET /health", s.handleHealth},
+		{"GET /consensus", s.handleConsensus},
 		{"GET /metrics", s.handleMetrics},
 		{"GET /events", s.handleEvents},
 		{"POST /p2p/hello", s.handleP2PHello},

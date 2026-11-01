@@ -17,6 +17,24 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for ConsensusResponseEngine.
+const (
+	Poa ConsensusResponseEngine = "poa"
+	Pow ConsensusResponseEngine = "pow"
+)
+
+// Valid indicates whether the value is a known member of the ConsensusResponseEngine enum.
+func (e ConsensusResponseEngine) Valid() bool {
+	switch e {
+	case Poa:
+		return true
+	case Pow:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ContractOpKind.
 const (
 	Call   ContractOpKind = "call"
@@ -140,6 +158,25 @@ type BlockGossipRequest struct {
 type BlocksResponse struct {
 	Blocks []Block `json:"Blocks"`
 }
+
+// ConsensusResponse defines model for consensusResponse.
+type ConsensusResponse struct {
+	ChainWork string                  `json:"chain_work"`
+	Engine    ConsensusResponseEngine `json:"engine"`
+	Height    int                     `json:"height"`
+	Poa       *struct {
+		Validators []string `json:"validators"`
+	} `json:"poa,omitempty"`
+	Pow *struct {
+		InitialDifficulty int `json:"initial_difficulty"`
+		RetargetInterval  int `json:"retarget_interval"`
+		TargetBlockTimeMs int `json:"target_block_time_ms"`
+	} `json:"pow,omitempty"`
+	Tip string `json:"tip"`
+}
+
+// ConsensusResponseEngine defines model for ConsensusResponse.Engine.
+type ConsensusResponseEngine string
 
 // ContractOp The optional `contract` of a transaction, accepted by `POST /tx` and covered by its hash and signatures (ADR-0014); mined transactions are served with the Go field names (`Contract`, `Kind`, `GasLimit`). A `deploy` carries `code` (lowercase hex, 1 to 1024 bytes) and no `target`; a `call` carries `target` (the contract ID) and no `code`.
 type ContractOp struct {
@@ -527,6 +564,11 @@ type ClientInterface interface {
 	// Corresponds with GET /blocks (the `GetBlocks` operationId).
 	GetBlocks(ctx context.Context, params *GetBlocksParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetConsensus Report the consensus engine, its parameters and the chain work
+	//
+	// Corresponds with GET /consensus (the `GetConsensus` operationId).
+	GetConsensus(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetContract Get the code and storage of a deployed contract
 	//
 	// The ID of a contract is the ID of the transaction that deployed it (ADR-0014). The state is the confirmed one; a deploy or call still in the mempool is not visible.
@@ -799,6 +841,21 @@ func (c *Client) GetBlock(ctx context.Context, ref string, reqEditors ...Request
 // Corresponds with GET /blocks (the `GetBlocks` operationId).
 func (c *Client) GetBlocks(ctx context.Context, params *GetBlocksParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetBlocksRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetConsensus Report the consensus engine, its parameters and the chain work
+//
+// Corresponds with GET /consensus (the `GetConsensus` operationId).
+func (c *Client) GetConsensus(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetConsensusRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -1461,6 +1518,33 @@ func NewGetBlocksRequest(server string, params *GetBlocksParams) (*http.Request,
 			rawQueryFragments = append(rawQueryFragments, encoded)
 		}
 		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetConsensusRequest constructs an http.Request for the GetConsensus method
+func NewGetConsensusRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/consensus")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
@@ -2136,6 +2220,13 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /blocks (the `GetBlocks` operationId).
 	GetBlocksWithResponse(ctx context.Context, params *GetBlocksParams, reqEditors ...RequestEditorFn) (*GetBlocksResponse, error)
 
+	// GetConsensusWithResponse Report the consensus engine, its parameters and the chain work
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /consensus (the `GetConsensus` operationId).
+	GetConsensusWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetConsensusResponse, error)
+
 	// GetContractWithResponse Get the code and storage of a deployed contract
 	//
 	// The ID of a contract is the ID of the transaction that deployed it (ADR-0014). The state is the confirmed one; a deploy or call still in the mempool is not visible.
@@ -2777,6 +2868,75 @@ func (r GetBlocksResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetBlocksResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// GetConsensusResponse429Headers the declared response headers of an HTTP 429 response for GetConsensus
+type GetConsensusResponse429Headers struct {
+	RetryAfter int
+}
+
+type GetConsensusResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ConsensusResponse
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *ErrorResponse
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *RateLimited
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *ErrorResponse
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *GetConsensusResponse429Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetConsensusResponse) GetJSON200() *ConsensusResponse {
+	return r.JSON200
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetConsensusResponse) GetJSON404() *ErrorResponse {
+	return r.JSON404
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r GetConsensusResponse) GetJSON429() *RateLimited {
+	return r.JSON429
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r GetConsensusResponse) GetJSON503() *ErrorResponse {
+	return r.JSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r GetConsensusResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetConsensusResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetConsensusResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetConsensusResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -4078,6 +4238,19 @@ func (c *ClientWithResponses) GetBlocksWithResponse(ctx context.Context, params 
 	return ParseGetBlocksResponse(rsp)
 }
 
+// GetConsensusWithResponse Report the consensus engine, its parameters and the chain work
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /consensus (the `GetConsensus` operationId).
+func (c *ClientWithResponses) GetConsensusWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetConsensusResponse, error) {
+	rsp, err := c.GetConsensus(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetConsensusResponse(rsp)
+}
+
 // GetContractWithResponse Get the code and storage of a deployed contract
 //
 // The ID of a contract is the ID of the transaction that deployed it (ADR-0014). The state is the confirmed one; a deploy or call still in the mempool is not visible.
@@ -4788,6 +4961,66 @@ func ParseGetBlocksResponse(rsp *http.Response) (*GetBlocksResponse, error) {
 	switch {
 	case rsp.StatusCode == 429:
 		var headers GetBlocksResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseGetConsensusResponse parses an HTTP response from a GetConsensusWithResponse call
+func ParseGetConsensusResponse(rsp *http.Response) (*GetConsensusResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetConsensusResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ConsensusResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest RateLimited
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers GetConsensusResponse429Headers
 		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
 			var value int
 			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {

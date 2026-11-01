@@ -262,6 +262,19 @@ func contractCases() []contractCase {
 		{method: "GET", route: "/health", status: 429, serve: limited("/health"), warmup: 1},
 		{method: "GET", route: "/health", status: 503, serve: brokenAt("/health")},
 
+		{method: "GET", route: "/consensus", status: 200, serve: func() (http.Handler, string, string) {
+			h, _ := realServer(Config{Consensus: &ConsensusInfo{Engine: "pow", Difficulty: 1, RetargetInterval: 10, TargetBlockTime: 10 * time.Second}})
+			return h, "/consensus", ""
+		}},
+		{method: "GET", route: "/consensus", status: 404, serve: plain("/consensus")},
+		{method: "GET", route: "/consensus", status: 429, serve: limited("/consensus"), warmup: 1},
+		{method: "GET", route: "/consensus", status: 503, serve: func() (http.Handler, string, string) {
+			srv, err := NewServer(brokenChain{}, Config{Consensus: &ConsensusInfo{Engine: "pow"}})
+			Expect(err).NotTo(HaveOccurred())
+
+			return srv.Handler(), "/consensus", ""
+		}},
+
 		{method: "GET", route: "/metrics", status: 200, serve: plain("/metrics")},
 		{method: "GET", route: "/metrics", status: 429, serve: limited("/metrics"), warmup: 1},
 
