@@ -20,15 +20,16 @@ var t0 = time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 type chainNode struct {
 	*countingNode
 
-	height atomic.Int64
-	tip    atomic.Value // string
-	peers  atomic.Value // string: JSON array of addresses
-	up     atomic.Bool
-	noHdrs atomic.Bool  // /headers answers an empty list
-	last   atomic.Value // time.Time
-	blocks atomic.Value // string: the /blocks body; unset → 404
-	pool   atomic.Value // string: JSON array for /mempool; unset → 404
-	hashes atomic.Value // map[int]string: hash by height below the tip; unset heights are "h<height>"
+	height    atomic.Int64
+	tip       atomic.Value // string
+	peers     atomic.Value // string: JSON array of addresses
+	up        atomic.Bool
+	noHdrs    atomic.Bool  // /headers answers an empty list
+	extraHdrs atomic.Bool  // /headers also answers the blocks at from-1 and height+1
+	last      atomic.Value // time.Time
+	blocks    atomic.Value // string: the /blocks body; unset → 404
+	pool      atomic.Value // string: JSON array for /mempool; unset → 404
+	hashes    atomic.Value // map[int]string: hash by height below the tip; unset heights are "h<height>"
 }
 
 func newChainNode(t *testing.T, height int, tip string) *chainNode {
@@ -77,8 +78,13 @@ func newChainNode(t *testing.T, height int, tip string) *chainNode {
 				return
 			}
 
-			blocks := make([]map[string]any, 0, h-from+1)
-			for i := from; i <= h; i++ {
+			lo, hi := from, h
+			if c.extraHdrs.Load() {
+				lo, hi = from-1, h+1 // blocks outside the asked window, as if mined or reorged between the reads
+			}
+
+			blocks := make([]map[string]any, 0, hi-lo+1)
+			for i := lo; i <= hi; i++ {
 				ts := t0.Add(-time.Hour)
 				if i == h {
 					ts = c.last.Load().(time.Time)
@@ -1106,6 +1112,35 @@ func TestPollerKeepsHashesByHeight(t *testing.T) {
 		{Height: 5, Hash: "h5"},
 		{Height: 6, Hash: "h6"},
 		{Height: 7, Hash: "x7"},
+		{Height: 8, Hash: "h8"},
+		{Height: 9, Hash: "h9"},
+		{Height: 10, Hash: hex64},
+	}
+
+	if !slices.Equal(c.Blocks, want) {
+		t.Errorf("blocks = %v, want %v", c.Blocks, want)
+	}
+
+	if c.Since != "12 s ago" {
+		t.Errorf("since = %q, want 12 s ago: the tip time is the block at height 10", c.Since)
+	}
+}
+
+func TestPollerDropsHeadersOutsideTheWindow(t *testing.T) {
+	t.Parallel()
+
+	n := newChainNode(t, 10, hex64)
+	n.extraHdrs.Store(true)
+	p := newPoller(t, n)
+	p.Tick(context.Background())
+
+	c := p.View().Cards[0]
+	want := []dashboard.BlockRef{
+		{Height: 3, Hash: "h3"},
+		{Height: 4, Hash: "h4"},
+		{Height: 5, Hash: "h5"},
+		{Height: 6, Hash: "h6"},
+		{Height: 7, Hash: "h7"},
 		{Height: 8, Hash: "h8"},
 		{Height: 9, Hash: "h9"},
 		{Height: 10, Hash: hex64},
