@@ -73,6 +73,7 @@ func TestFetcherAllowlistedRequests(t *testing.T) {
 		{dashboard.Peers(), "/p2p/peers"},
 		{dashboard.Mempool(), "/mempool"},
 		{dashboard.Metrics(), "/metrics"},
+		{dashboard.Consensus(), "/consensus"},
 		{dashboard.Blocks(5, 100), "/blocks?from=5&limit=100"},
 		{dashboard.Headers(0, 1), "/headers?from=0&limit=1"},
 		{dashboard.Block("7"), "/block/7"},

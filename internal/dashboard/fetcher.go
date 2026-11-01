@@ -40,6 +40,7 @@ const (
 	routeContract
 	routeBalance
 	routeAddressTxs
+	routeConsensus
 )
 
 // Request is one allowlisted read of a node. Build it with the constructors below; the zero
@@ -60,6 +61,9 @@ func Mempool() Request { return Request{route: routeMempool} }
 
 // Metrics reads GET /metrics.
 func Metrics() Request { return Request{route: routeMetrics} }
+
+// Consensus reads GET /consensus (ADR-0026): engine, parameters and chain work of the node.
+func Consensus() Request { return Request{route: routeConsensus} }
 
 // Blocks reads GET /blocks?from=&limit=.
 func Blocks(from, limit int) Request {
@@ -103,6 +107,8 @@ func (r Request) target() (string, string, error) {
 		return "/mempool", "", nil
 	case routeMetrics:
 		return "/metrics", "", nil
+	case routeConsensus:
+		return "/consensus", "", nil
 	case routeBlocks, routeHeaders:
 		return r.page()
 	case routeBlock:
