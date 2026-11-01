@@ -296,6 +296,28 @@ func TestViewMarksAPoolThatDiffersFromTheMajority(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("down nodes do not form the majority", func(t *testing.T) {
+		t.Parallel()
+
+		a, b, c := newChainNode(t, 4, hex64), newChainNode(t, 4, hex64), newChainNode(t, 4, hex64)
+		a.pool.Store(`[{},{},{},{},{}]`)
+		b.pool.Store(`[{},{},{},{},{}]`)
+		c.pool.Store(`[{},{}]`)
+
+		p := newPoller(t, a, b, c)
+		p.Tick(ctx)
+
+		a.up.Store(false)
+		b.up.Store(false)
+		p.Tick(ctx)
+
+		for i, card := range p.View().Cards {
+			if card.PoolDiffers {
+				t.Errorf("card %d marked, want none", i+1)
+			}
+		}
+	})
 }
 
 func TestPollerForkNeedsThreeConsecutiveTicks(t *testing.T) {
