@@ -384,7 +384,7 @@ Screens (the top bar links them; the search box takes a height, a block or trans
 
 | Screen | Path | What it shows |
 |---|---|---|
-| Network | `/` | the banner with Height, Agree and Reachable, and a comparison matrix with one column per node (status, height, tip, peers, last block, peer addresses; a tip that differs from the majority is marked ≠). The sidebar lists the nodes with their state on every screen. The poller reads the nodes every 2 s; opening the page never reads a node |
+| Network | `/` | the banner with Height, Agree and Reachable, and a comparison matrix with one column per node (status, height, tip, peers, last block, peer addresses; a tip that differs from the majority is marked ≠). Below the matrix, **Chain per node** lines up the last 8 blocks of every node by height (see below). The sidebar lists the nodes with their state on every screen. The poller reads the nodes every 2 s; opening the page never reads a node |
 | Peers | `/peers` | connected and known peers of every node |
 | Metrics | `/metrics` | key figures per node and two charts, below |
 | Node | `/n/<node>/` | links to Mempool, Blocks and Peers of one node |
@@ -402,6 +402,20 @@ The pages work in light and dark (`prefers-color-scheme`), use no inline script 
 | `Fork: nodes report different tips at height H` | the same height with different tips on three consecutive polls (a single poll is only a block in flight) |
 | `No node reachable` | no node answered `/health` |
 | `... · N of M unreachable` | added to any of the first three when some nodes did not answer; an unreachable node keeps its last known height in the matrix |
+
+### Chain per node
+
+One lane per node, in the order of `NODES`, over the same heights: the last 8 up to the highest reachable node, so a block sits under the blocks of the other nodes at the same height. Each block shows its height and the start of its hash and opens the block page of that node.
+
+| Mark | Meaning |
+|---|---|
+| `●` green border | the node's tip, at the top height |
+| `▲` amber border | the node's tip, below the top height: the node is behind |
+| `⑂` red | the block differs from the chain of the majority tip at that height. A node's own tip at the top height turns red only once the banner says Fork; before that, two nodes may just have mined at once |
+| dashed, empty | a height the node does not have yet |
+| dashed, grey | the last known blocks of a node that does not answer |
+
+In the walkthrough below, after `dc stop node3` node3's lane keeps its blocks up to 10, dashed, and shows the new heights as empty while the others move on.
 
 ### Metrics screen
 
