@@ -823,6 +823,18 @@ func TestMempoolShowsOnTheNodePageAndItsTab(t *testing.T) {
 		}
 	}
 
+	n.up.Store(false)
+	p.Tick(ctx)
+
+	down := do(h, http.MethodGet, "/n/node1/").Body.String()
+	if !strings.Contains(down, `<span class="stat-label">Mempool</span><span class="stat-value"><span class="empty-value">—</span>`) {
+		t.Errorf("down node page lacks the empty Mempool stat:\n%s", down)
+	}
+
+	if strings.Contains(down, `tab-count`) {
+		t.Errorf("down node page shows a Mempool tab count:\n%s", down)
+	}
+
 	quiet := newChainNode(t, 4, hex64)
 	q := newPoller(t, quiet)
 	q.Tick(ctx)
