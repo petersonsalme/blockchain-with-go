@@ -679,8 +679,13 @@ $ curl http://localhost:8080/mempool
 
 **Success Response (`200 OK`):**
 ```json
-{"transactions": [{"ID": "...", "Inputs": [...], "Outputs": [...], "Timestamp": "..."}]}
+{
+  "transactions": [{"ID": "...", "Inputs": [...], "Outputs": [...], "Timestamp": "..."}],
+  "entries": [{"id": "...", "fee": 120, "size": 412}]
+}
 ```
+
+`entries[i]` describes `transactions[i]` (same length and order): `fee` is the fee and `size` the size in bytes the pool orders by. There is no fee rate field; compute `fee / size` to display one. An empty pool returns `{"transactions": [], "entries": []}`.
 
 ### POST /mine
 Mine a new block from the mempool. The request has no body. The node takes the transactions with the highest fee rate per byte that fit in `MAX_BLOCK_BYTES`, in that order. An empty pool mines an empty block.

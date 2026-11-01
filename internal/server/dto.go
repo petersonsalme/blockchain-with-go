@@ -41,6 +41,15 @@ type healthResponse struct {
 // mempoolResponse is the body of GET /mempool: the pool in selection order.
 type mempoolResponse struct {
 	Transactions []domain.Transaction `json:"transactions"`
+	Entries      []mempoolEntry       `json:"entries"`
+}
+
+// mempoolEntry describes the transaction at the same index of mempoolResponse.Transactions:
+// the fee the pool was given and the size it orders by.
+type mempoolEntry struct {
+	ID   string `json:"id"`
+	Fee  uint64 `json:"fee"`
+	Size int    `json:"size"`
 }
 
 // submitResponse is the body of POST /tx.

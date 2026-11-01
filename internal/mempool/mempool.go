@@ -22,17 +22,19 @@ var (
 	ErrFull      = errors.New("mempool: pool is full and the fee rate is too low")
 )
 
-type entry struct {
-	tx   domain.Transaction
-	fee  uint64
-	size int
+// Entry is a pooled transaction with the fee Add received and the size rank
+// and Select use.
+type Entry struct {
+	Tx   domain.Transaction
+	Fee  uint64
+	Size int
 }
 
 // Pool is a bounded set of non-conflicting transactions, safe for concurrent use.
 type Pool struct {
 	mu      sync.Mutex
 	maxTxs  int
-	ordered []entry // best first, see rank
+	ordered []Entry // best first, see rank
 	byID    map[string]struct{}
 	spent   map[domain.OutPoint]string // outpoint -> ID of the pool transaction spending it
 }
@@ -60,17 +62,17 @@ func Size(tx domain.Transaction) int {
 // rank orders a and b: negative when a ranks ahead of b. Higher fee per byte
 // comes first, compared as fee_a*size_b against fee_b*size_a in 128 bits
 // (no division, no floats); equal rates fall back to the lower ID.
-func rank(a, b entry) int {
-	ahi, alo := bits.Mul64(a.fee, uint64(b.size))
-	bhi, blo := bits.Mul64(b.fee, uint64(a.size))
+func rank(a, b Entry) int {
+	ahi, alo := bits.Mul64(a.Fee, uint64(b.Size))
+	bhi, blo := bits.Mul64(b.Fee, uint64(a.Size))
 
-	return cmp.Or(cmp.Compare(bhi, ahi), cmp.Compare(blo, alo), cmp.Compare(a.tx.ID, b.tx.ID))
+	return cmp.Or(cmp.Compare(bhi, ahi), cmp.Compare(blo, alo), cmp.Compare(a.Tx.ID, b.Tx.ID))
 }
 
 // Add admits tx with its precomputed fee (sum(in) - sum(out)). Signatures and
 // UTXO existence are the caller's concern. The pool is unchanged on error.
 func (p *Pool) Add(tx domain.Transaction, fee uint64) error {
-	e := entry{tx: tx, fee: fee, size: Size(tx)}
+	e := Entry{Tx: tx, Fee: fee, Size: Size(tx)}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -113,15 +115,24 @@ func (p *Pool) Select(budget int) []domain.Transaction {
 	var out []domain.Transaction
 
 	for _, e := range p.ordered {
-		if e.size > budget {
+		if e.Size > budget {
 			continue
 		}
 
-		budget -= e.size
-		out = append(out, e.tx)
+		budget -= e.Size
+		out = append(out, e.Tx)
 	}
 
 	return out
+}
+
+// Entries returns a copy of the pool in the order of Select, with the fee and
+// size of each transaction, taken under one lock.
+func (p *Pool) Entries() []Entry {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	return slices.Clone(p.ordered)
 }
 
 // Remove drops the transactions with the given IDs; unknown IDs are ignored.
@@ -134,8 +145,8 @@ func (p *Pool) Remove(ids ...string) {
 		drop[id] = struct{}{}
 	}
 
-	p.removeWhere(func(e entry) bool {
-		_, ok := drop[e.tx.ID]
+	p.removeWhere(func(e Entry) bool {
+		_, ok := drop[e.Tx.ID]
 		return ok
 	})
 }
@@ -151,12 +162,12 @@ func (p *Pool) Prune(b *domain.Block, view domain.UTXOView) {
 		mined[tx.ID] = struct{}{}
 	}
 
-	p.removeWhere(func(e entry) bool {
-		if _, ok := mined[e.tx.ID]; ok {
+	p.removeWhere(func(e Entry) bool {
+		if _, ok := mined[e.Tx.ID]; ok {
 			return true
 		}
 
-		for _, in := range e.tx.Inputs {
+		for _, in := range e.Tx.Inputs {
 			if _, ok := view.Lookup(domain.OutPoint{TxID: in.PrevTxID, Index: in.OutIndex}); !ok {
 				return true
 			}
@@ -185,7 +196,7 @@ func (p *Pool) Len() int {
 }
 
 // removeWhere deletes every entry matching drop. The caller holds p.mu.
-func (p *Pool) removeWhere(drop func(entry) bool) {
+func (p *Pool) removeWhere(drop func(Entry) bool) {
 	kept := p.ordered[:0]
 	for _, e := range p.ordered {
 		if drop(e) {
@@ -205,10 +216,10 @@ func (p *Pool) removeAt(i int) {
 	p.ordered = slices.Delete(p.ordered, i, i+1)
 }
 
-func (p *Pool) forget(e entry) {
-	delete(p.byID, e.tx.ID)
+func (p *Pool) forget(e Entry) {
+	delete(p.byID, e.Tx.ID)
 
-	for _, in := range e.tx.Inputs {
+	for _, in := range e.Tx.Inputs {
 		delete(p.spent, domain.OutPoint{TxID: in.PrevTxID, Index: in.OutIndex})
 	}
 }

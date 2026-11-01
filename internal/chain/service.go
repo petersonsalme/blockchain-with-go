@@ -456,6 +456,12 @@ func (s *Service) Pending() []domain.Transaction {
 	return s.pool.Select(math.MaxInt)
 }
 
+// PendingEntries returns the pool in selection order with the fee and size of
+// each transaction, from one snapshot.
+func (s *Service) PendingEntries() []mempool.Entry {
+	return s.pool.Entries()
+}
+
 // MinePending mines a block with the pool transactions of highest fee per byte
 // that fit domain.MaxBlockBytes, in selection order, and an empty block when
 // the pool is empty. Transactions that went stale since Submit are dropped

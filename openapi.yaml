@@ -1060,12 +1060,31 @@ components:
           type: string
     mempoolResponse:
       type: object
-      required: [transactions]
+      required: [transactions, entries]
       properties:
         transactions:
           type: array
           items:
             $ref: "#/components/schemas/transaction"
+        entries:
+          type: array
+          description: Fee and size of the pool, one item per transaction, same length and order as `transactions`. Clients compute fee/size for display.
+          items:
+            $ref: "#/components/schemas/mempoolEntry"
+    mempoolEntry:
+      type: object
+      required: [id, fee, size]
+      properties:
+        id:
+          type: string
+          description: ID of the transaction at the same index of `transactions`.
+        fee:
+          type: integer
+          format: uint64
+          description: sum(inputs) - sum(outputs), the fee the pool orders by.
+        size:
+          type: integer
+          description: Size of the transaction in bytes, the length of its JSON.
     hello:
       type: object
       required: [version, node_id, genesis_hash, height, tip_hash, listen_addr]

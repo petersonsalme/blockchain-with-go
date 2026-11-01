@@ -23,7 +23,7 @@ import (
 )
 
 func (brokenChain) Submit(domain.Transaction) error { return errors.New("write failed") }
-func (brokenChain) Pending() []domain.Transaction   { return nil }
+func (brokenChain) PendingEntries() []mempool.Entry { return nil }
 func (brokenChain) MinePending(context.Context) (*domain.Block, error) {
 	return nil, errors.New("unused")
 }
@@ -99,6 +99,8 @@ var _ = Describe("Mempool routes", func() {
 		var body mempoolResponse
 		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 		Expect(body.Transactions).To(BeEmpty())
+		Expect(rec.Body.String()).To(ContainSubstring(`"entries": []`))
+		Expect(body.Entries).To(BeEmpty())
 	})
 
 	It("GET /mempool answers an empty array, not null, when the chain pool is nil", func() {
@@ -110,6 +112,7 @@ var _ = Describe("Mempool routes", func() {
 
 		Expect(rec.Code).To(Equal(http.StatusOK))
 		Expect(rec.Body.String()).To(ContainSubstring(`"transactions": []`))
+		Expect(rec.Body.String()).To(ContainSubstring(`"entries": []`))
 	})
 
 	It("GET /mempool lists the pool in selection order", func() {
@@ -122,6 +125,16 @@ var _ = Describe("Mempool routes", func() {
 		var body mempoolResponse
 		Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 		Expect(txIDs(body.Transactions)).To(Equal([]string{fee90, fee50, fee10}))
+
+		Expect(body.Entries).To(HaveLen(3))
+
+		for i, fee := range []uint64{90, 50, 10} {
+			Expect(body.Entries[i]).To(Equal(mempoolEntry{
+				ID:   body.Transactions[i].ID,
+				Fee:  fee,
+				Size: mempool.Size(body.Transactions[i]),
+			}))
+		}
 	})
 
 	It("POST /mine mines the pool in selection order and empties it", func() {
