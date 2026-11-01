@@ -101,6 +101,18 @@ func TestLanesWindow(t *testing.T) {
 			wantKinds: map[int][]string{2: {"stale", "stale", "stale", "stale", "stale", "stale", "missing", "missing"}},
 		},
 		{
+			name: "unreachable node above",
+			cards: []Card{
+				laneCard("n1", false, 12, "a12", chain("a", 5, 12)),
+				laneCard("n2", true, 10, "a10", chain("a", 3, 10)),
+			},
+			majority:  "a10",
+			lo:        3,
+			top:       10,
+			lanes:     2,
+			wantKinds: map[int][]string{0: {"missing", "missing", "stale", "stale", "stale", "stale", "stale", "stale"}, 1: {"", "", "", "", "", "", "", "tip"}},
+		},
+		{
 			name: "all down",
 			cards: []Card{
 				laneCard("n1", false, 9, "a9", chain("a", 2, 9)),

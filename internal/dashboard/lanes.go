@@ -31,10 +31,13 @@ func lanes(cards []Card, state State, majority string) (lo, top int, out []Lane)
 	seen, reachable := false, false
 
 	for _, c := range cards {
-		switch {
-		case c.Reachable && (!reachable || c.Height > top):
+		if c.Reachable && (!reachable || c.Height > top) {
 			top, reachable, seen = c.Height, true, true
-		case c.Seen && !reachable && (!seen || c.Height > top):
+
+			continue
+		}
+
+		if c.Seen && !reachable && (!seen || c.Height > top) {
 			top, seen = c.Height, true
 		}
 	}
@@ -78,16 +81,23 @@ func lanes(cards []Card, state State, majority string) (lo, top int, out []Lane)
 func cellKind(c Card, h int, hash, ref string, top int, state State) string {
 	atTop := h == c.Height && c.Height == top
 
-	switch {
-	case hash == "":
+	if hash == "" {
 		return "missing"
-	case !c.Reachable:
+	}
+
+	if !c.Reachable {
 		return "stale"
-	case ref != "" && ref != hash && (!atTop || state == StateFork):
+	}
+
+	if ref != "" && ref != hash && (!atTop || state == StateFork) {
 		return "fork"
-	case atTop:
+	}
+
+	if atTop {
 		return "tip"
-	case h == c.Height:
+	}
+
+	if h == c.Height {
 		return "behind"
 	}
 
