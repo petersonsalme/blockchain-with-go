@@ -245,6 +245,7 @@ func TestViewMarksAPoolThatDiffersFromTheMajority(t *testing.T) {
 		{"majority of two against one", []string{`[{},{}]`, `[{},{}]`, `[{}]`}, []bool{false, false, true}},
 		{"tie goes to the first node", []string{`[{}]`, `[{},{}]`}, []bool{false, true}},
 		{"one known pool is not a majority", []string{`[{}]`, ""}, []bool{false, false}},
+		{"a node with no known pool is never marked", []string{`[{}]`, `[{}]`, ""}, []bool{false, false, false}},
 	}
 
 	for _, tc := range tests {
