@@ -1,8 +1,11 @@
 package dashboard
 
 import (
+	"context"
 	"math/big"
+	"net/http"
 	"slices"
+	"sync"
 )
 
 // ConsensusBlocks is how many recent headers the Consensus screen lists per node.
@@ -152,4 +155,72 @@ func buildConsensusView(nodes []consensusNode) consensusView {
 	view.Same = first >= 0 && !differs
 
 	return view
+}
+
+// consensusScreen serves the Consensus screen: every node's /consensus and recent headers, read
+// concurrently, as a full page or, when fragment, as the bare template for htmx.
+func (s *server) consensusScreen(fragment bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		nodes := make([]consensusNode, len(s.nodes))
+
+		var wg sync.WaitGroup
+
+		ctx := r.Context()
+
+		for i, node := range s.nodes {
+			wg.Go(func() { nodes[i] = s.consensusOf(ctx, node) })
+		}
+
+		wg.Wait()
+
+		view := buildConsensusView(nodes)
+		s.show(w, place{Page: "consensus", Crumb: "Consensus"}, "consensus", view, fragment)
+	}
+}
+
+// consensusOf reads one node's configuration and its last ConsensusBlocks headers. A node without
+// /consensus (older than ADR-0026) shows its error and nothing else.
+func (s *server) consensusOf(ctx context.Context, node Node) consensusNode {
+	out := consensusNode{Name: node.Name}
+
+	perr := s.read(ctx, node, Consensus(), &out.Info)
+	if perr != nil {
+		out.Info = consensusBody{}
+
+		if perr.Status == http.StatusNotFound {
+			out.Err = "node has no /consensus route (older than ADR-0026)"
+		} else {
+			out.Err = perr.Message
+		}
+
+		return out
+	}
+
+	var hb struct {
+		Blocks []struct {
+			Index      int
+			Hash       string
+			Difficulty int
+			Validator  string
+		} `json:"blocks"`
+	}
+
+	perr = s.read(ctx, node, Headers(recentFrom(out.Info.Height), ConsensusBlocks), &hb)
+	if perr != nil {
+		out.BlocksErr = perr.Message
+
+		return out
+	}
+
+	for _, b := range slices.Backward(hb.Blocks) {
+		out.Blocks = append(out.Blocks, consensusBlock{
+			Height:     b.Index,
+			Hash:       b.Hash,
+			Difficulty: b.Difficulty,
+			Work:       blockWork(b.Difficulty),
+			Validator:  b.Validator,
+		})
+	}
+
+	return out
 }
