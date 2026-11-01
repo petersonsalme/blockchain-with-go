@@ -60,7 +60,7 @@
 <ul class="tabs">
 <li><a class="tab" href="/n/{{pe .Current}}/"{{if eq .Page "node"}} aria-current="page"{{end}}>Overview</a></li>
 <li><a class="tab" href="/n/{{pe .Current}}/blocks"{{if eq .Page "blocks"}} aria-current="page"{{end}}>Blocks</a></li>
-<li><a class="tab" href="/n/{{pe .Current}}/mempool"{{if eq .Page "mempool"}} aria-current="page"{{end}}>Mempool</a></li>
+<li><a class="tab" href="/n/{{pe .Current}}/mempool"{{if eq .Page "mempool"}} aria-current="page"{{end}}>Mempool{{range .Cards}}{{if and (eq .Name $.Current) .Reachable .PoolKnown}}<span class="tab-count">{{.Pool}}</span>{{end}}{{end}}</a></li>
 <li><a class="tab" href="/peers">Peers</a></li>
 </ul>
 </nav>

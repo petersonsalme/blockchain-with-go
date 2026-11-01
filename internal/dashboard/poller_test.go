@@ -799,3 +799,42 @@ func TestDefaultIntervalIsTwoSeconds(t *testing.T) {
 		t.Errorf("DefaultInterval = %v, want 2s", dashboard.DefaultInterval)
 	}
 }
+
+func TestMempoolShowsOnTheNodePageAndItsTab(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	n := newChainNode(t, 4, hex64)
+	n.pool.Store(`[{},{},{}]`)
+
+	p := newPoller(t, n)
+	p.Tick(ctx)
+
+	h := newTestServerWithPoller(t, p, n)
+
+	page := do(h, http.MethodGet, "/n/node1/").Body.String()
+	for _, want := range []string{
+		`<span class="stat-label">Mempool</span><span class="stat-value">3</span>`,
+		`>Mempool<span class="tab-count">3</span></a>`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("node page lacks %q:\n%s", want, page)
+		}
+	}
+
+	quiet := newChainNode(t, 4, hex64)
+	q := newPoller(t, quiet)
+	q.Tick(ctx)
+
+	hq := newTestServerWithPoller(t, q, quiet)
+
+	bare := do(hq, http.MethodGet, "/n/node1/").Body.String()
+	if !strings.Contains(bare, `<span class="stat-label">Mempool</span><span class="stat-value"><span class="empty-value">—</span>`) {
+		t.Errorf("node page with no pool known lacks the empty Mempool stat:\n%s", bare)
+	}
+
+	if strings.Contains(bare, `tab-count`) {
+		t.Errorf("node page with no pool known shows a Mempool count:\n%s", bare)
+	}
+}
