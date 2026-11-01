@@ -139,19 +139,22 @@ type headersBody struct {
 type Card struct {
 	Snapshot
 
-	Behind  int
-	Since   string
-	Differs bool   // fork: reachable, and its tip is not the majority tip
-	Level   string // ok, warn or bad: the dot, badge and border of the node
-	Status  string // what the badge says
+	Behind      int
+	Since       string
+	Differs     bool   // fork: reachable, and its tip is not the majority tip
+	PoolDiffers bool   // reachable, pool known, and its size is not the most common known size
+	Level       string // ok, warn or bad: the dot, badge and border of the node
+	Status      string // what the badge says
 }
 
 // View is what the Network screen renders: the verdict and a card per node, in NODES order.
 type View struct {
 	Assessment Assessment
 	Cards      []Card
-	Agree      int // reachable nodes on the majority tip
-	Reachable  int // reachable nodes
+	Agree      int  // reachable nodes on the majority tip
+	Reachable  int  // reachable nodes
+	Pool       int  // largest known pool among reachable nodes
+	PoolKnown  bool // at least one reachable node has a known pool
 }
 
 // Banner is the CSS class suffix and text of the verdict.
@@ -178,14 +181,36 @@ func (p *Poller) View() View {
 	}
 
 	majority, agree := majorityTip(snaps)
+	poolSize, known := majorityPool(snaps)
+
+	// The KPI is the largest pool, not the sum: gossip puts the same transaction in every pool.
+	var (
+		pool      int
+		poolKnown bool
+	)
+
+	for _, s := range snaps {
+		if s.Reachable && s.PoolKnown {
+			pool = max(pool, s.Pool)
+			poolKnown = true
+		}
+	}
 
 	for i := range cards {
 		c := &cards[i]
 		c.Differs = a.State == StateFork && c.Reachable && c.Tip != majority
+		c.PoolDiffers = known >= 2 && c.Reachable && c.PoolKnown && c.Pool != poolSize
 		c.Level, c.Status = nodeStatus(*c)
 	}
 
-	return View{Assessment: a, Cards: cards, Agree: agree, Reachable: len(snaps) - a.Unreachable}
+	return View{
+		Assessment: a,
+		Cards:      cards,
+		Agree:      agree,
+		Reachable:  len(snaps) - a.Unreachable,
+		Pool:       pool,
+		PoolKnown:  poolKnown,
+	}
 }
 
 // majorityTip is the tip most reachable nodes at the highest height report (the first in NODES
@@ -214,6 +239,28 @@ func majorityTip(snaps []Snapshot) (string, int) {
 	}
 
 	return best, bestN
+}
+
+// majorityPool is the most common pool size among reachable nodes with a known pool (the first
+// in NODES order on a tie) and how many such nodes there are.
+func majorityPool(snaps []Snapshot) (size, known int) {
+	counts := map[int]int{}
+	bestN := 0
+
+	for _, s := range snaps {
+		if !s.Reachable || !s.PoolKnown {
+			continue
+		}
+
+		known++
+		counts[s.Pool]++
+
+		if counts[s.Pool] > bestN {
+			size, bestN = s.Pool, counts[s.Pool]
+		}
+	}
+
+	return size, known
 }
 
 // nodeStatus is the level and badge text of a node: unreachable and different tip are bad, behind is warn.

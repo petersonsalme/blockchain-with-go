@@ -189,6 +189,115 @@ func TestPollerBlanksOnlyThePoolWhenItsReadFails(t *testing.T) {
 	}
 }
 
+func TestViewMempoolKPIIsTheLargestReachablePool(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	a, b, c := newChainNode(t, 4, hex64), newChainNode(t, 4, hex64), newChainNode(t, 4, hex64)
+	a.pool.Store(`[{}]`)
+	b.pool.Store(`[{},{},{}]`)
+	c.pool.Store(`[{},{}]`)
+
+	p := newPoller(t, a, b, c)
+	p.Tick(ctx)
+
+	if v := p.View(); v.Pool != 3 || !v.PoolKnown {
+		t.Errorf("KPI = %d known %t, want 3 and true", v.Pool, v.PoolKnown)
+	}
+
+	// The largest node goes down: its last pool no longer counts.
+	b.up.Store(false)
+	p.Tick(ctx)
+
+	if v := p.View(); v.Pool != 2 || !v.PoolKnown {
+		t.Errorf("KPI with the largest node down = %d known %t, want 2 and true", v.Pool, v.PoolKnown)
+	}
+
+	none1, none2 := newChainNode(t, 4, hex64), newChainNode(t, 4, hex64)
+	q := newPoller(t, none1, none2)
+	q.Tick(ctx)
+
+	if v := q.View(); v.PoolKnown || v.Pool != 0 {
+		t.Errorf("KPI with no pool known = %d known %t, want 0 and false", v.Pool, v.PoolKnown)
+	}
+}
+
+func TestViewMarksAPoolThatDiffersFromTheMajority(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	marked := func(v dashboard.View) []bool {
+		out := make([]bool, len(v.Cards))
+		for i, c := range v.Cards {
+			out[i] = c.PoolDiffers
+		}
+
+		return out
+	}
+
+	tests := []struct {
+		name  string
+		pools []string // "" leaves /mempool unset
+		want  []bool
+	}{
+		{"majority of two against one", []string{`[{},{}]`, `[{},{}]`, `[{}]`}, []bool{false, false, true}},
+		{"tie goes to the first node", []string{`[{}]`, `[{},{}]`}, []bool{false, true}},
+		{"one known pool is not a majority", []string{`[{}]`, ""}, []bool{false, false}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var nodes []*chainNode
+
+			for _, pool := range tc.pools {
+				n := newChainNode(t, 4, hex64)
+				if pool != "" {
+					n.pool.Store(pool)
+				}
+
+				nodes = append(nodes, n)
+			}
+
+			p := newPoller(t, nodes...)
+			p.Tick(ctx)
+
+			got := marked(p.View())
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("PoolDiffers = %v, want %v", got, tc.want)
+
+					break
+				}
+			}
+		})
+	}
+
+	t.Run("an unreachable node is never marked", func(t *testing.T) {
+		t.Parallel()
+
+		a, b, c := newChainNode(t, 4, hex64), newChainNode(t, 4, hex64), newChainNode(t, 4, hex64)
+		a.pool.Store(`[{},{}]`)
+		b.pool.Store(`[{},{}]`)
+		c.pool.Store(`[{},{},{},{},{}]`)
+
+		p := newPoller(t, a, b, c)
+		p.Tick(ctx)
+
+		c.up.Store(false)
+		p.Tick(ctx)
+
+		for i, card := range p.View().Cards {
+			if card.PoolDiffers {
+				t.Errorf("card %d marked, want none", i+1)
+			}
+		}
+	})
+}
+
 func TestPollerForkNeedsThreeConsecutiveTicks(t *testing.T) {
 	t.Parallel()
 
