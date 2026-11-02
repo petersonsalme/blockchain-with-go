@@ -193,6 +193,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/contracts/{id}", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/health", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/consensus", methodNotAllowed("GET, HEAD"))
+	mux.Handle("/supply", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/metrics", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/events", methodNotAllowed("GET, HEAD"))
 	mux.Handle("/p2p/hello", methodNotAllowed("POST"))
@@ -253,6 +254,7 @@ func (s *Server) routes() []route {
 		{"GET /contracts/{id}", s.handleGetContract},
 		{"GET /health", s.handleHealth},
 		{"GET /consensus", s.handleConsensus},
+		{"GET /supply", s.handleSupply},
 		{"GET /metrics", s.handleMetrics},
 		{"GET /events", s.handleEvents},
 		{"POST /p2p/hello", s.handleP2PHello},

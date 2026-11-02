@@ -41,6 +41,7 @@ const (
 	routeBalance
 	routeAddressTxs
 	routeConsensus
+	routeSupply
 )
 
 // Request is one allowlisted read of a node. Build it with the constructors below; the zero
@@ -64,6 +65,9 @@ func Metrics() Request { return Request{route: routeMetrics} }
 
 // Consensus reads GET /consensus (ADR-0026): engine, parameters and chain work of the node.
 func Consensus() Request { return Request{route: routeConsensus} }
+
+// Supply reads GET /supply (ADR-0027): the base units the subsidy schedule issued up to the tip.
+func Supply() Request { return Request{route: routeSupply} }
 
 // Blocks reads GET /blocks?from=&limit=.
 func Blocks(from, limit int) Request {
@@ -109,6 +113,8 @@ func (r Request) target() (string, string, error) {
 		return "/metrics", "", nil
 	case routeConsensus:
 		return "/consensus", "", nil
+	case routeSupply:
+		return "/supply", "", nil
 	case routeBlocks, routeHeaders:
 		return r.page()
 	case routeBlock:
