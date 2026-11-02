@@ -381,6 +381,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/errorResponse"
+  /supply:
+    get:
+      operationId: getSupply
+      summary: Report the base units the subsidy schedule issued up to the tip
+      responses:
+        "200":
+          description: The tip height and the sum of the block subsidies from height 1 to it (ADR-0027).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/supplyResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          description: The chain cannot be read (`unhealthy`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
   /metrics:
     get:
       operationId: getMetrics
@@ -1014,6 +1033,20 @@ components:
               type: array
               items:
                 type: string
+    supplyResponse:
+      type: object
+      required: [height, issued, initial_subsidy, halving_interval]
+      properties:
+        height:
+          type: integer
+        issued:
+          type: string
+          pattern: "^[0-9]+$"
+        initial_subsidy:
+          type: string
+          pattern: "^[0-9]+$"
+        halving_interval:
+          type: integer
     txResponse:
       type: object
       required: [transaction, block_hash, height]

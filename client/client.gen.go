@@ -333,6 +333,14 @@ type SubmitResponse struct {
 	Id string `json:"id"`
 }
 
+// SupplyResponse defines model for supplyResponse.
+type SupplyResponse struct {
+	HalvingInterval int    `json:"halving_interval"`
+	Height          int    `json:"height"`
+	InitialSubsidy  string `json:"initial_subsidy"`
+	Issued          string `json:"issued"`
+}
+
 // Transaction defines model for transaction.
 type Transaction struct {
 	// ID Optional in requests (the node fills it in); when present it must equal the calculated hash.
@@ -710,6 +718,11 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /p2p/tx (the `P2pTx` operationId).
 	P2pTx(ctx context.Context, body P2pTxJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetSupply Report the base units the subsidy schedule issued up to the tip
+	//
+	// Corresponds with GET /supply (the `GetSupply` operationId).
+	GetSupply(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// SubmitTxWithBody Admit one signed transaction into the mempool
 	//
@@ -1176,6 +1189,21 @@ func (c *Client) P2pTxWithBody(ctx context.Context, contentType string, body io.
 // Corresponds with POST /p2p/tx (the `P2pTx` operationId).
 func (c *Client) P2pTx(ctx context.Context, body P2pTxJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewP2pTxRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetSupply Report the base units the subsidy schedule issued up to the tip
+//
+// Corresponds with GET /supply (the `GetSupply` operationId).
+func (c *Client) GetSupply(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetSupplyRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -2017,6 +2045,33 @@ func NewP2pTxRequestWithBody(server string, contentType string, body io.Reader) 
 	return req, nil
 }
 
+// NewGetSupplyRequest constructs an http.Request for the GetSupply method
+func NewGetSupplyRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/supply")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewSubmitTxRequest calls the generic SubmitTx builder with application/json body
 func NewSubmitTxRequest(server string, body SubmitTxJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -2384,6 +2439,13 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /p2p/tx (the `P2pTx` operationId).
 	P2pTxWithResponse(ctx context.Context, body P2pTxJSONRequestBody, reqEditors ...RequestEditorFn) (*P2pTxResponse, error)
+
+	// GetSupplyWithResponse Report the base units the subsidy schedule issued up to the tip
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /supply (the `GetSupply` operationId).
+	GetSupplyWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetSupplyResponse, error)
 
 	// SubmitTxWithBodyWithResponse Admit one signed transaction into the mempool
 	//
@@ -3903,6 +3965,68 @@ func (r P2pTxResponse) ContentType() string {
 	return ""
 }
 
+// GetSupplyResponse429Headers the declared response headers of an HTTP 429 response for GetSupply
+type GetSupplyResponse429Headers struct {
+	RetryAfter int
+}
+
+type GetSupplyResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *SupplyResponse
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *RateLimited
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *ErrorResponse
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *GetSupplyResponse429Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetSupplyResponse) GetJSON200() *SupplyResponse {
+	return r.JSON200
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r GetSupplyResponse) GetJSON429() *RateLimited {
+	return r.JSON429
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r GetSupplyResponse) GetJSON503() *ErrorResponse {
+	return r.JSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r GetSupplyResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetSupplyResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetSupplyResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetSupplyResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // SubmitTxResponse429Headers the declared response headers of an HTTP 429 response for SubmitTx
 type SubmitTxResponse429Headers struct {
 	RetryAfter int
@@ -4514,6 +4638,19 @@ func (c *ClientWithResponses) P2pTxWithResponse(ctx context.Context, body P2pTxJ
 		return nil, err
 	}
 	return ParseP2pTxResponse(rsp)
+}
+
+// GetSupplyWithResponse Report the base units the subsidy schedule issued up to the tip
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /supply (the `GetSupply` operationId).
+func (c *ClientWithResponses) GetSupplyWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetSupplyResponse, error) {
+	rsp, err := c.GetSupply(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetSupplyResponse(rsp)
 }
 
 // SubmitTxWithBodyWithResponse Admit one signed transaction into the mempool
@@ -5867,6 +6004,59 @@ func ParseP2pTxResponse(rsp *http.Response) (*P2pTxResponse, error) {
 	switch {
 	case rsp.StatusCode == 429:
 		var headers P2pTxResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseGetSupplyResponse parses an HTTP response from a GetSupplyWithResponse call
+func ParseGetSupplyResponse(rsp *http.Response) (*GetSupplyResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetSupplyResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SupplyResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest RateLimited
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers GetSupplyResponse429Headers
 		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
 			var value int
 			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {

@@ -275,6 +275,10 @@ func contractCases() []contractCase {
 			return srv.Handler(), "/consensus", ""
 		}},
 
+		{method: "GET", route: "/supply", status: 200, serve: plain("/supply")},
+		{method: "GET", route: "/supply", status: 429, serve: limited("/supply"), warmup: 1},
+		{method: "GET", route: "/supply", status: 503, serve: brokenAt("/supply")},
+
 		{method: "GET", route: "/metrics", status: 200, serve: plain("/metrics")},
 		{method: "GET", route: "/metrics", status: 429, serve: limited("/metrics"), warmup: 1},
 

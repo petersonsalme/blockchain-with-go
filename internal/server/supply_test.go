@@ -1,12 +1,137 @@
 package server
 
 import (
+	"encoding/json"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"testing"
 
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 )
+
+type tipChain struct {
+	brokenChain
+
+	tip *domain.Block
+}
+
+func (c tipChain) Tip() (*domain.Block, error) {
+	return c.tip, nil
+}
+
+func TestSupplyHandler(t *testing.T) {
+	tests := []struct {
+		height int
+		want   supplyResponse
+	}{
+		{
+			height: 0,
+			want: supplyResponse{
+				Height:          0,
+				Issued:          "0",
+				InitialSubsidy:  "5000000000",
+				HalvingInterval: 210000,
+			},
+		},
+		{
+			height: 1,
+			want: supplyResponse{
+				Height:          1,
+				Issued:          "5000000000",
+				InitialSubsidy:  "5000000000",
+				HalvingInterval: 210000,
+			},
+		},
+		{
+			height: 210000,
+			want: supplyResponse{
+				Height:          210000,
+				Issued:          "1049997500000000",
+				InitialSubsidy:  "5000000000",
+				HalvingInterval: 210000,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(strconv.Itoa(tc.height), func(t *testing.T) {
+			chain := tipChain{tip: &domain.Block{Index: tc.height, Hash: "h"}}
+
+			srv, err := NewServer(chain, Config{})
+			if err != nil {
+				t.Fatalf("NewServer: %v", err)
+			}
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/supply", nil)
+			rec := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected status 200, got %d", rec.Code)
+			}
+
+			var got supplyResponse
+
+			err = json.Unmarshal(rec.Body.Bytes(), &got)
+			if err != nil {
+				t.Fatalf("unmarshal supplyResponse: %v", err)
+			}
+
+			if got != tc.want {
+				t.Fatalf("got %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSupplyUnhealthy(t *testing.T) {
+	srv, err := NewServer(brokenChain{}, Config{})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/supply", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status 503, got %d", rec.Code)
+	}
+
+	var errResp errorResponse
+
+	err = json.Unmarshal(rec.Body.Bytes(), &errResp)
+	if err != nil {
+		t.Fatalf("unmarshal errorResponse: %v", err)
+	}
+
+	if errResp.Code != unhealthyCode {
+		t.Errorf("expected code %q, got %q", unhealthyCode, errResp.Code)
+	}
+}
+
+func TestSupplyMethodNotAllowed(t *testing.T) {
+	chain := tipChain{tip: &domain.Block{Index: 0, Hash: "h"}}
+
+	srv, err := NewServer(chain, Config{})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/supply", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected status 405, got %d", rec.Code)
+	}
+
+	if allow := rec.Header().Get("Allow"); allow != "GET, HEAD" {
+		t.Errorf("expected Allow header 'GET, HEAD', got %q", allow)
+	}
+}
 
 func TestScheduledIssuance(t *testing.T) {
 	tests := []struct {
