@@ -149,6 +149,7 @@ Design decisions live in [`docs/adr/`](docs/adr/0009-merkle-tree.md):
 | [0024](docs/adr/0024-caddy-tls-reverse-proxy.md) | Caddy as the TLS-terminating reverse proxy in `compose.tls.yml` (no module added) |
 | [0025](docs/adr/0025-trusted-proxies-forwarded-for.md) | Client address from `X-Forwarded-For` only behind `TRUSTED_PROXIES` (right to left, `net/netip`) |
 | [0026](docs/adr/0026-consensus-status-route.md) | Read-only consensus status route `GET /consensus` |
+| [0027](docs/adr/0027-supply-route.md) | Read-only supply route `GET /supply` |
 
 ## Configuration & Environment Variables
 
@@ -511,6 +512,10 @@ None of these reads waits for a `POST /` that is mining.
 ### GET /consensus
 
 engine, parameters and accumulated chain work (ADR-0026).
+
+### GET /supply
+
+`200` `{"height": 12, "issued": "60000000000", "initial_subsidy": "5000000000", "halving_interval": 210000}`: `issued` is the sum of the block subsidies from height 1 to the tip, as a decimal string ([ADR-0027](docs/adr/0027-supply-route.md)). It is the most the coinbase rule (ADR-0015) can have issued: the genesis allocations are not included, blocks mined without `MINER_ADDRESS` issue nothing and a coinbase may claim less. `503` `unhealthy` when the chain cannot be read.
 
 ### GET /events
 
