@@ -96,3 +96,19 @@ Everything else (HTTP handlers and DTOs, logging, docs, README, CLI, build files
    - Write by hand what the project exists to teach (consensus, UTXO, validation, mempool, gossip semantics, sync and reorg, persisted schema). Add a market tool around that core (observability, dashboards, TLS, indexing, UI, tooling) only when it meets the criteria of [ADR-0021](docs/adr/0021-professional-grade-study-reference.md); the ADR that adopts it lists the modules it adds to `go.mod`.
    - Commit messages following Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`).
    - Replies to the user in Brazilian Portuguese; code and commits in English.
+
+## Recipes
+
+### Add a read-only `GET` route to the node
+
+Copy the closest existing route end to end (`GET /supply`, ADR-0027, commit `b60f561`; or `GET /consensus`, ADR-0026) instead of exploring. The touch points, in the order to do them:
+
+1. `internal/server/<route>.go` and `<route>_test.go`: the handler and its DTO; the test uses the neighbouring helpers (`plain`, `limited`, `brokenAt` in `contract_test.go`). Test first.
+2. `internal/server/server.go`: two lines, the route table entry (`{"GET /<route>", s.handle<Route>}`) and the 405 fallback (`mux.Handle("/<route>", methodNotAllowed("GET, HEAD"))`) next to the other fallbacks.
+3. `openapi.yaml`: the path block and the response schema, after the closest route's block.
+4. `go generate ./client/...`: regenerates `client/client.gen.go` (never edit by hand; CI fails on a diff).
+5. `internal/server/contract_test.go`: three rows for the route, `200` (`plain`), `429` (`limited`, `warmup: 1`) and `503` (`brokenAt`).
+6. `internal/dashboard/fetcher.go` and `fetcher_test.go`, only if the dashboard reads the route: the `route<Name>` constant, the request constructor and the path in the switch (the dashboard allowlist).
+7. `README.md`: a `### GET /<route>` section next to the others and the row in the ADR table; `docs/adr/NNNN-<route>.md` with the next free number.
+
+`proxy/Caddyfile` exposes an explicit path allowlist for the node (`@exposed`); `/consensus` and `/supply` are deliberately not in it. Touch it only when the ADR says the route must be public through the TLS proxy (then also `scripts/tls-smoke.sh`). Working gate: `scripts/gate-diff.sh --dependents` (a route change reaches `client` and `internal/server`); the full gate once, at the end.
