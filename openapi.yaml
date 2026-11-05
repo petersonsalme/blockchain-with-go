@@ -400,6 +400,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/errorResponse"
+  /halving:
+    get:
+      operationId: getHalving
+      summary: Report the tip subsidy and the next subsidy halving height
+      responses:
+        "200":
+          description: The tip height, its subsidy (ADR-0015) and the next height at which the subsidy halves.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/halvingResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          description: The chain cannot be read (`unhealthy`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/errorResponse"
   /metrics:
     get:
       operationId: getMetrics
@@ -1046,6 +1065,19 @@ components:
           type: string
           pattern: "^[0-9]+$"
         halving_interval:
+          type: integer
+    halvingResponse:
+      type: object
+      required: [height, current_subsidy, next_halving_height, blocks_until_halving]
+      properties:
+        height:
+          type: integer
+        current_subsidy:
+          type: string
+          pattern: "^[0-9]+$"
+        next_halving_height:
+          type: integer
+        blocks_until_halving:
           type: integer
     txResponse:
       type: object

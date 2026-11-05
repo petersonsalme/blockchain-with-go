@@ -216,6 +216,14 @@ type GossipResponse struct {
 // GossipResponseStatus defines model for GossipResponse.Status.
 type GossipResponseStatus string
 
+// HalvingResponse defines model for halvingResponse.
+type HalvingResponse struct {
+	BlocksUntilHalving int    `json:"blocks_until_halving"`
+	CurrentSubsidy     string `json:"current_subsidy"`
+	Height             int    `json:"height"`
+	NextHalvingHeight  int    `json:"next_halving_height"`
+}
+
 // HealthResponse defines model for healthResponse.
 type HealthResponse struct {
 	Height int    `json:"height"`
@@ -591,6 +599,11 @@ type ClientInterface interface {
 	// Corresponds with GET /events (the `GetEvents` operationId).
 	GetEvents(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetHalving Report the tip subsidy and the next subsidy halving height
+	//
+	// Corresponds with GET /halving (the `GetHalving` operationId).
+	GetHalving(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetHeaders Page through the chain headers
 	//
 	// Corresponds with GET /headers (the `GetHeaders` operationId).
@@ -903,6 +916,21 @@ func (c *Client) GetContract(ctx context.Context, id string, reqEditors ...Reque
 // Corresponds with GET /events (the `GetEvents` operationId).
 func (c *Client) GetEvents(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetEventsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetHalving Report the tip subsidy and the next subsidy halving height
+//
+// Corresponds with GET /halving (the `GetHalving` operationId).
+func (c *Client) GetHalving(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetHalvingRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -1644,6 +1672,33 @@ func NewGetEventsRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewGetHalvingRequest constructs an http.Request for the GetHalving method
+func NewGetHalvingRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/halving")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetHeadersRequest constructs an http.Request for the GetHeaders method
 func NewGetHeadersRequest(server string, params *GetHeadersParams) (*http.Request, error) {
 	var err error
@@ -2299,6 +2354,13 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /events (the `GetEvents` operationId).
 	GetEventsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetEventsResponse, error)
+
+	// GetHalvingWithResponse Report the tip subsidy and the next subsidy halving height
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /halving (the `GetHalving` operationId).
+	GetHalvingWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetHalvingResponse, error)
 
 	// GetHeadersWithResponse Page through the chain headers
 	//
@@ -3116,6 +3178,68 @@ func (r GetEventsResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetEventsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// GetHalvingResponse429Headers the declared response headers of an HTTP 429 response for GetHalving
+type GetHalvingResponse429Headers struct {
+	RetryAfter int
+}
+
+type GetHalvingResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *HalvingResponse
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *RateLimited
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *ErrorResponse
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *GetHalvingResponse429Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetHalvingResponse) GetJSON200() *HalvingResponse {
+	return r.JSON200
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r GetHalvingResponse) GetJSON429() *RateLimited {
+	return r.JSON429
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r GetHalvingResponse) GetJSON503() *ErrorResponse {
+	return r.JSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r GetHalvingResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetHalvingResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetHalvingResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetHalvingResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -4405,6 +4529,19 @@ func (c *ClientWithResponses) GetEventsWithResponse(ctx context.Context, reqEdit
 	return ParseGetEventsResponse(rsp)
 }
 
+// GetHalvingWithResponse Report the tip subsidy and the next subsidy halving height
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /halving (the `GetHalving` operationId).
+func (c *ClientWithResponses) GetHalvingWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetHalvingResponse, error) {
+	rsp, err := c.GetHalving(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetHalvingResponse(rsp)
+}
+
 // GetHeadersWithResponse Page through the chain headers
 //
 // Returns a wrapper object for the known response body format(s).
@@ -5257,6 +5394,59 @@ func ParseGetEventsResponse(rsp *http.Response) (*GetEventsResponse, error) {
 	switch {
 	case rsp.StatusCode == 429:
 		var headers GetEventsResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseGetHalvingResponse parses an HTTP response from a GetHalvingWithResponse call
+func ParseGetHalvingResponse(rsp *http.Response) (*GetHalvingResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetHalvingResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest HalvingResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest RateLimited
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers GetHalvingResponse429Headers
 		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
 			var value int
 			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "integer", Format: ""}); err != nil {
