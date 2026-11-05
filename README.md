@@ -517,6 +517,10 @@ engine, parameters and accumulated chain work (ADR-0026).
 
 `200` `{"height": 12, "issued": "60000000000", "initial_subsidy": "5000000000", "halving_interval": 210000}`: `issued` is the sum of the block subsidies from height 1 to the tip, as a decimal string ([ADR-0027](docs/adr/0027-supply-route.md)). It is the most the coinbase rule (ADR-0015) can have issued: the genesis allocations are not included, blocks mined without `MINER_ADDRESS` issue nothing and a coinbase may claim less. `503` `unhealthy` when the chain cannot be read.
 
+### GET /halving
+
+`200` `{"height": 12, "current_subsidy": "5000000000", "next_halving_height": 210000, "blocks_until_halving": 209988}`: `current_subsidy` is `Subsidy(height)` at the tip, as a decimal string, and `next_halving_height` is the first height of the next halving era ([ADR-0015](docs/adr/0015-coinbase-and-halving.md)). At a halving height the halving has already happened, so `blocks_until_halving` is between 1 and 210,000, never 0. `503` `unhealthy` when the chain cannot be read.
+
 ### GET /events
 
 Server-sent events (`Content-Type: text/event-stream`), no polling. The node sends `event: block` after each block it appends and `event: tx` after each transaction it admits, whatever the source: its own mining (`POST /` or `POST /mine`), `POST /tx`, a peer's block or transaction through gossip (`POST /p2p/block` or `/p2p/tx` answered `accepted`; a `known` answer or a rejection sends nothing), sync extension (one event per block) and reorg (one event per block of the new branch, oldest first, after the switch). `data:` is the same compact one-line JSON as the `201`/`202` body of a local request. There is no `reorg` event: after a reorg a `block` event can carry an `Index` that is not above the last one seen, so compare `Index` and `PrevHash`. Transactions put back in the pool after a reorg send no `tx` event. The block is already readable at `GET /block/{hash}` when its event arrives.
