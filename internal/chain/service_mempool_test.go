@@ -5,7 +5,6 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"math"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -351,7 +350,7 @@ var _ = Describe("Service mempool", func() {
 			},
 		}
 		for name, mk := range engines {
-			It("seals a block within MAX_BLOCK_BYTES for any pool content with "+name, func() {
+			It("seals a block within the fit limit for any pool content with "+name, func() {
 				c := mk()
 				base, bf := funded(memory.New(), c)
 				empty, err := minePending(base)
@@ -365,9 +364,10 @@ var _ = Describe("Service mempool", func() {
 
 				for k := range 19 {
 					limit := emptySize + 8 + k*txSize/3
-					GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(limit))
 
 					psvc, pf := funded(memory.New(), c)
+					psvc.SetFitLimit(limit)
+
 					for i, out := range []uint64{9, 8, 7, 6, 5} {
 						Expect(psvc.Submit(spend(pf.owner, pf.ops[i], out))).To(Succeed())
 					}
@@ -376,7 +376,7 @@ var _ = Describe("Service mempool", func() {
 
 					blk, err := minePending(psvc)
 					Expect(err).NotTo(HaveOccurred(), "limit %d", limit)
-					Expect(domain.ValidateSize(blk, domain.MaxBlockBytes())).To(Succeed(), "limit %d", limit)
+					Expect(domain.ValidateSize(blk, limit)).To(Succeed(), "limit %d", limit)
 
 					var want []string
 
@@ -420,7 +420,7 @@ var _ = Describe("Service mempool", func() {
 
 					return n
 				}
-				GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(widest(pending[:count])+slack))
+				svc.SetFitLimit(widest(pending[:count]) + slack)
 
 				blk, err := minePending(svc)
 				Expect(err).NotTo(HaveOccurred())
@@ -476,7 +476,7 @@ var _ = Describe("Service mempool", func() {
 			Expect(svc.Submit(best)).To(Succeed())
 			Expect(svc.Submit(cheap)).To(Succeed())
 			Expect(ids(svc.Pending())).To(Equal([]string{best.ID, cheap.ID}))
-			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(empty+mempool.Size(best)))
+			svc.SetFitLimit(empty + mempool.Size(best))
 
 			blk, err := minePending(svc)
 			Expect(err).NotTo(HaveOccurred())
@@ -522,27 +522,30 @@ var _ = Describe("Service mempool", func() {
 			}
 
 			Expect(ids(svc.Pending())).To(Equal([]string{best.ID, mid.ID, last.ID}))
-			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(empty+2*mempool.Size(best)+1))
+			svc.SetFitLimit(empty + 2*mempool.Size(best) + 1)
 
 			blk, err := minePending(svc)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(ids(blk.Transactions)).To(Equal([]string{best.ID, last.ID}))
 		})
 
-		It("fails instead of looping when even an empty block is too large", func() {
-			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "10")
+		It("ends with an empty block instead of looping when even an empty block exceeds the budget", func() {
+			svc.SetFitLimit(10)
 			Expect(svc.Submit(spendOp(0, 9))).To(Succeed())
 
-			done := make(chan error, 1)
+			type result struct {
+				blk *domain.Block
+				err error
+			}
 
-			go func() { _, err := svc.MinePending(context.Background()); done <- err }()
+			done := make(chan result, 1)
 
-			var err error
-			Eventually(done, 2*time.Second).Should(Receive(&err))
+			go func() { blk, err := svc.MinePending(context.Background()); done <- result{blk, err} }()
 
-			var verr *domain.ValidationError
-			Expect(errors.As(err, &verr)).To(BeTrue())
-			Expect(verr.Code).To(Equal(domain.CodeBlockTooLarge))
+			var res result
+			Eventually(done, 2*time.Second).Should(Receive(&res))
+			Expect(res.err).NotTo(HaveOccurred())
+			Expect(res.blk.Transactions).To(BeEmpty())
 			Expect(svc.Pending()).To(HaveLen(1))
 		})
 	})

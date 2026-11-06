@@ -429,7 +429,7 @@ func linkHash(prev *domain.Block) string {
 
 // fetchBodies returns the blocks for headers, checked against them.
 func (n *Node) fetchBodies(ctx context.Context, addr string, headers []*domain.Block) ([]*domain.Block, error) {
-	bodies, err := n.get(ctx, addr, "blocks", headers[0].Index, len(headers), len(headers)*2*domain.MaxBlockBytes())
+	bodies, err := n.get(ctx, addr, "blocks", headers[0].Index, len(headers), len(headers)*2*domain.MaxBlockBytes)
 	if err != nil {
 		return nil, err
 	}

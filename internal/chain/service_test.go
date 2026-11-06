@@ -484,9 +484,12 @@ var _ = Describe("Service", func() {
 		})
 
 		It("propagates a ValidationError from the size pre-check", func() {
-			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "100")
-
-			svc, f := funded(repo, eng)
+			// A valid transaction larger than the 1 MiB limit is impractical to build, so the
+			// generator returns the error GenerateBlockWithContext gives (covered in chain_test.go).
+			tooLarge := &domain.ValidationError{Code: domain.CodeBlockTooLarge, Message: "block too large"}
+			svc, f := funded(repo, eng, WithGenerator(func(context.Context, consensus.Consensus, []*domain.Block, []domain.Transaction) (*domain.Block, error) {
+				return nil, tooLarge
+			}))
 			_, err := svc.Mine(context.Background(), f.tx())
 
 			var ve *domain.ValidationError

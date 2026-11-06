@@ -637,7 +637,7 @@ type ClientInterface interface {
 
 	// MinePending Mine a block from the mempool
 	//
-	// Takes the pool transactions of highest fee per byte that fit `MAX_BLOCK_BYTES`, in selection order (fee rate descending, then ID); an empty pool mines an empty block. Same timeout and errors as `POST /`.
+	// Takes the pool transactions of highest fee per byte that fit `MaxBlockBytes` (1 MiB, a consensus constant, ADR-0032), in selection order (fee rate descending, then ID); an empty pool mines an empty block. Same timeout and errors as `POST /`.
 	//
 	// Corresponds with POST /mine (the `MinePending` operationId).
 	MinePending(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -1017,7 +1017,7 @@ func (c *Client) GetMetrics(ctx context.Context, reqEditors ...RequestEditorFn) 
 
 // MinePending Mine a block from the mempool
 //
-// Takes the pool transactions of highest fee per byte that fit `MAX_BLOCK_BYTES`, in selection order (fee rate descending, then ID); an empty pool mines an empty block. Same timeout and errors as `POST /`.
+// Takes the pool transactions of highest fee per byte that fit `MaxBlockBytes` (1 MiB, a consensus constant, ADR-0032), in selection order (fee rate descending, then ID); an empty pool mines an empty block. Same timeout and errors as `POST /`.
 //
 // Corresponds with POST /mine (the `MinePending` operationId).
 func (c *Client) MinePending(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -2354,7 +2354,7 @@ type ClientWithResponsesInterface interface {
 
 	// MinePendingWithResponse Mine a block from the mempool
 	//
-	// Takes the pool transactions of highest fee per byte that fit `MAX_BLOCK_BYTES`, in selection order (fee rate descending, then ID); an empty pool mines an empty block. Same timeout and errors as `POST /`.
+	// Takes the pool transactions of highest fee per byte that fit `MaxBlockBytes` (1 MiB, a consensus constant, ADR-0032), in selection order (fee rate descending, then ID); an empty pool mines an empty block. Same timeout and errors as `POST /`.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -4494,7 +4494,7 @@ func (c *ClientWithResponses) GetMetricsWithResponse(ctx context.Context, reqEdi
 
 // MinePendingWithResponse Mine a block from the mempool
 //
-// Takes the pool transactions of highest fee per byte that fit `MAX_BLOCK_BYTES`, in selection order (fee rate descending, then ID); an empty pool mines an empty block. Same timeout and errors as `POST /`.
+// Takes the pool transactions of highest fee per byte that fit `MaxBlockBytes` (1 MiB, a consensus constant, ADR-0032), in selection order (fee rate descending, then ID); an empty pool mines an empty block. Same timeout and errors as `POST /`.
 //
 // Returns a wrapper object for the known response body format(s).
 //

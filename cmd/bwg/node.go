@@ -409,8 +409,28 @@ func openRepository(dataDir string, p storage.Pruning) (storage.IndexedRepositor
 	return repo, repo.Close, nil
 }
 
+// maxBlockBytesEnvVar is the removed block size variable (ADR-0032).
+const maxBlockBytesEnvVar = "MAX_BLOCK_BYTES"
+
+// refuseRemovedEnv stops the node when MAX_BLOCK_BYTES is set to a non-blank
+// value: the block size limit is a consensus constant now, and an operator who
+// relied on the variable must learn it no longer applies.
+func refuseRemovedEnv() error {
+	if strings.TrimSpace(os.Getenv(maxBlockBytesEnvVar)) != "" {
+		return fmt.Errorf("%s is no longer supported: the block size limit is the %d-byte consensus constant domain.MaxBlockBytes (ADR-0032); unset the variable",
+			maxBlockBytesEnvVar, domain.MaxBlockBytes)
+	}
+
+	return nil
+}
+
 // run wires repository, consensus, service and server, then serves until ctx is done.
 func run(ctx context.Context, logger *slog.Logger) error {
+	err := refuseRemovedEnv()
+	if err != nil {
+		return err
+	}
+
 	pruning, err := parsePruning()
 	if err != nil {
 		return err

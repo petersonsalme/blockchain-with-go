@@ -539,9 +539,16 @@ var _ = Describe("Server", func() {
 			return rec
 		}
 
-		It("returns 422 block_too_large when transactions exceed the limit", func() {
-			// a signed transaction is ~450 bytes: stay under the 2x request body limit
-			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "300")
+		It("returns 422 block_too_large when the generator rejects the candidate size", func() {
+			// A valid transaction above the 1 MiB limit is impractical to build, so the
+			// generator returns the error GenerateBlockWithContext gives for it.
+			withGenerator(func(context.Context, consensus.Consensus, []*domain.Block, []domain.Transaction) (*domain.Block, error) {
+				return nil, &domain.ValidationError{
+					Code:    domain.CodeBlockTooLarge,
+					Message: "block too large",
+					Details: map[string]any{"size": domain.MaxBlockBytes + 1, "max": domain.MaxBlockBytes},
+				}
+			})
 
 			rec := post(funds.payload())
 
@@ -552,7 +559,7 @@ var _ = Describe("Server", func() {
 			Expect(body).To(HaveKey("error"))
 			Expect(body["code"]).To(Equal("block_too_large"))
 			Expect(body["details"]).To(HaveKey("size"))
-			Expect(body["details"]).To(HaveKeyWithValue("max", BeNumerically("==", 300)))
+			Expect(body["details"]).To(HaveKeyWithValue("max", BeNumerically("==", domain.MaxBlockBytes)))
 			Expect(chainLen()).To(Equal(1))
 		})
 
@@ -596,9 +603,7 @@ var _ = Describe("Server", func() {
 		})
 
 		It("returns 413 request_too_large for a giant body", func() {
-			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "100")
-
-			rec := post(`{"Transactions":[{"ID":"` + strings.Repeat("a", 1000) + `"}]}`)
+			rec := post(`{"Transactions":[{"ID":"` + strings.Repeat("a", 2*domain.MaxBlockBytes) + `"}]}`)
 
 			Expect(rec.Code).To(Equal(http.StatusRequestEntityTooLarge))
 
@@ -606,12 +611,10 @@ var _ = Describe("Server", func() {
 			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 			Expect(body["code"]).To(Equal("request_too_large"))
 			Expect(body["error"]).To(Equal("request body exceeds the maximum size"))
-			Expect(body["details"]).To(HaveKeyWithValue("max", BeNumerically("==", 200)))
+			Expect(body["details"]).To(HaveKeyWithValue("max", BeNumerically("==", 2*domain.MaxBlockBytes)))
 		})
 
 		It("returns 413 request_too_large for a giant body with rate limiting enabled and unexhausted", func() {
-			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "100")
-
 			repo := memory.New()
 			engine := pow.NewProofOfWorkFromEnv()
 			svc, err := funds.service(repo, engine)
@@ -619,7 +622,7 @@ var _ = Describe("Server", func() {
 			s, err := NewServer(svc, Config{RateLimit: 10})
 			Expect(err).NotTo(HaveOccurred())
 
-			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"Transactions":[{"ID":"`+strings.Repeat("a", 1000)+`"}]}`))
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"Transactions":[{"ID":"`+strings.Repeat("a", 2*domain.MaxBlockBytes)+`"}]}`))
 			rec := httptest.NewRecorder()
 			s.Handler().ServeHTTP(rec, req)
 
@@ -629,7 +632,19 @@ var _ = Describe("Server", func() {
 			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
 			Expect(body["code"]).To(Equal("request_too_large"))
 			Expect(body["error"]).To(Equal("request body exceeds the maximum size"))
-			Expect(body["details"]).To(HaveKeyWithValue("max", BeNumerically("==", 200)))
+			Expect(body["details"]).To(HaveKeyWithValue("max", BeNumerically("==", 2*domain.MaxBlockBytes)))
+		})
+
+		It("does not return 413 for a body between one and two times MaxBlockBytes", func() {
+			rec := post(`{"Transactions":[{"ID":"` + strings.Repeat("a", domain.MaxBlockBytes+1000) + `"}]}`)
+
+			Expect(rec.Code).NotTo(Equal(http.StatusRequestEntityTooLarge))
+		})
+
+		It("ignores MAX_BLOCK_BYTES in the environment (ADR-0032)", func() {
+			GinkgoT().Setenv("MAX_BLOCK_BYTES", "100")
+
+			Expect(post(funds.payload()).Code).To(Equal(http.StatusCreated))
 		})
 
 		It("still returns 201 on the happy path", func() {

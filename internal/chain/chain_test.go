@@ -3,7 +3,6 @@ package chain_test
 import (
 	"context"
 	"errors"
-	"strconv"
 	"strings"
 	"time"
 
@@ -58,9 +57,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 		})
 
 		It("should return nil when generation fails due to size limit", func() {
-			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "50")
-
-			result := GenerateBlock(pow, []*domain.Block{oldBlock}, sampleTxs)
+			result := GenerateBlock(pow, []*domain.Block{oldBlock}, paddedTxs(domain.MaxBlockBytes))
 			Expect(result).To(BeNil())
 		})
 
@@ -127,8 +124,6 @@ var _ = Describe("Blockchain", Ordered, func() {
 
 	Describe("GenerateBlockWithContext size limit", func() {
 		It("returns a ValidationError without mining when the candidate is too large", func() {
-			GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, "50")
-
 			slowPoW := powpkg.NewProofOfWork(60)
 
 			parent := genesisBlock()
@@ -142,7 +137,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 			go func() {
 				defer close(done)
 
-				block, err = GenerateBlockWithContext(context.Background(), slowPoW, []*domain.Block{parent}, []domain.Transaction{{Outputs: []domain.TxOut{{Amount: 1, Address: "b"}}}})
+				block, err = GenerateBlockWithContext(context.Background(), slowPoW, []*domain.Block{parent}, paddedTxs(domain.MaxBlockBytes))
 			}()
 
 			Eventually(done, time.Second).Should(BeClosed())
@@ -179,12 +174,16 @@ var _ = Describe("Blockchain", Ordered, func() {
 					continue
 				}
 
-				exactSize, err := candidate.Size()
+				baseSize, err := candidate.Size()
 				Expect(err).NotTo(HaveOccurred())
 
-				// 1) Exactly 1 byte below required size: must reject candidate without mining
-				GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(exactSize-1))
+				// The limit is the constant, so pad the address until the candidate is
+				// exactly MaxBlockBytes (exact) or one byte more (over).
+				exactSize := domain.MaxBlockBytes
+				exactTxs := paddedTxs(exactSize - baseSize + len("bob"))
+				overTxs := paddedTxs(exactSize + 1 - baseSize + len("bob"))
 
+				// 1) Exactly 1 byte below required size: must reject candidate without mining
 				miningAttempted := false
 
 				var capturedBlock domain.Block
@@ -196,7 +195,7 @@ var _ = Describe("Blockchain", Ordered, func() {
 					return nil
 				}
 
-				block, err := GenerateBlockWithContext(context.Background(), spyConsensus, []*domain.Block{parent}, txs)
+				block, err := GenerateBlockWithContext(context.Background(), spyConsensus, []*domain.Block{parent}, overTxs)
 
 				if miningAttempted {
 					// Check if timestamp in GenerateBlockWithContext had trailing zero (shorter JSON length)
@@ -213,21 +212,19 @@ var _ = Describe("Blockchain", Ordered, func() {
 				var ve *domain.ValidationError
 				Expect(errors.As(err, &ve)).To(BeTrue())
 
-				// If estimate size is smaller than exactSize, timestamp had trailing zeroes: retry
-				if ve.Details["size"].(int) < exactSize {
+				// If estimate size is smaller than exactSize+1, timestamp had trailing zeroes: retry
+				if ve.Details["size"].(int) < exactSize+1 {
 					time.Sleep(50 * time.Microsecond)
 					continue
 				}
 
-				// If estimate size is greater than exactSize, mutant produced > 64 chars: must fail
-				Expect(ve.Details["size"].(int)).To(Equal(exactSize))
+				// If estimate size is greater than exactSize+1, mutant produced > 64 chars: must fail
+				Expect(ve.Details["size"].(int)).To(Equal(exactSize + 1))
 				Expect(ve.Code).To(Equal(domain.CodeBlockTooLarge))
 
 				// 2) Exact size: must accept candidate and invoke consensus seal
-				GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(exactSize))
-
 				miningAttempted = false
-				block, err = GenerateBlockWithContext(context.Background(), spyConsensus, []*domain.Block{parent}, txs)
+				block, err = GenerateBlockWithContext(context.Background(), spyConsensus, []*domain.Block{parent}, exactTxs)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(block).NotTo(BeNil())
 				Expect(miningAttempted).To(BeTrue())
@@ -274,4 +271,10 @@ func timestampJSONLen(t time.Time) int {
 
 func genesisBlock() *domain.Block {
 	return &domain.Block{Timestamp: time.Now(), Transactions: []domain.Transaction{}}
+}
+
+// paddedTxs returns one transaction whose output address is n characters long,
+// so a block carrying it is about n bytes larger than an empty one.
+func paddedTxs(n int) []domain.Transaction {
+	return []domain.Transaction{{Outputs: []domain.TxOut{{Amount: 1, Address: strings.Repeat("b", n)}}}}
 }

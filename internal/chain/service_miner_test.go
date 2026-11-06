@@ -3,7 +3,6 @@ package chain_test
 import (
 	"context"
 	"math"
-	"strconv"
 	"strings"
 	"time"
 
@@ -139,7 +138,7 @@ var _ = Describe("Service with a miner address", func() {
 				Expect(tip.Index).To(Equal(0))
 			})
 
-			It("seals within MAX_BLOCK_BYTES counting the coinbase", func() {
+			It("seals within the fit limit counting the coinbase", func() {
 				c := engineCases[0].new()
 				base, _ := funded(be.open(), c, WithMinerAddress(miner.Address()))
 				empty, err := minePending(base)
@@ -153,9 +152,10 @@ var _ = Describe("Service with a miner address", func() {
 
 				for k := range 19 {
 					limit := emptySize + 100 + k*txSize/3
-					GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(limit))
 
 					psvc, pf := funded(be.open(), c, WithMinerAddress(miner.Address()))
+					psvc.SetFitLimit(limit)
+
 					for i, out := range []uint64{9, 8, 7, 6, 5} {
 						Expect(psvc.Submit(spend(pf.owner, pf.ops[i], out))).To(Succeed())
 					}
@@ -163,7 +163,7 @@ var _ = Describe("Service with a miner address", func() {
 					blk, err := minePending(psvc)
 
 					Expect(err).NotTo(HaveOccurred(), "limit %d", limit)
-					Expect(domain.ValidateSize(blk, domain.MaxBlockBytes())).To(Succeed(), "limit %d", limit)
+					Expect(domain.ValidateSize(blk, limit)).To(Succeed(), "limit %d", limit)
 					included = max(included, len(blk.Transactions)-1)
 				}
 
@@ -191,7 +191,7 @@ var _ = Describe("Service with a miner address", func() {
 					}
 					widest, err := b.Size()
 					Expect(err).NotTo(HaveOccurred())
-					GinkgoT().Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(widest+slack))
+					svc.SetFitLimit(widest + slack)
 
 					blk, err := minePending(svc)
 
@@ -205,7 +205,7 @@ var _ = Describe("Service with a miner address", func() {
 						Expect(ids(blk.Transactions[1:])).To(Equal(ids(pending[:count])))
 					}
 
-					Expect(domain.ValidateSize(blk, domain.MaxBlockBytes())).To(Succeed())
+					Expect(domain.ValidateSize(blk, widest+slack)).To(Succeed())
 				},
 				Entry("two transactions, exact", 2, 0),
 				Entry("one transaction, exact", 1, 0),
