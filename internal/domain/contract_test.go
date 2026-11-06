@@ -135,11 +135,26 @@ var _ = Describe("ContractOp", func() {
 			op.Code = hex.EncodeToString(make([]byte, domain.MaxContractCodeBytes))
 			Expect(domain.ValidateContractOp(op)).To(Succeed())
 		})
-		It("puts no limit on the number of args (ENG-261 F1)", func() {
-			// No ADR-0014 limit on len(Args); only MAX_BLOCK_BYTES bounds it (ENG-261 F1).
-			op := validCall()
-			op.Args = make([]uint64, 10000)
-			Expect(domain.ValidateContractOp(op)).To(Succeed())
+		It("pins MaxContractArgs at 256", func() {
+			Expect(domain.MaxContractArgs).To(Equal(256))
+		})
+		It("accepts exactly MaxContractArgs args", func() {
+			deploy := validDeploy()
+			deploy.Args = make([]uint64, domain.MaxContractArgs)
+			Expect(domain.ValidateContractOp(deploy)).To(Succeed())
+
+			call := validCall()
+			call.Args = make([]uint64, domain.MaxContractArgs)
+			Expect(domain.ValidateContractOp(call)).To(Succeed())
+		})
+		It("accepts nil and empty args", func() {
+			callNil := validCall()
+			callNil.Args = nil
+			Expect(domain.ValidateContractOp(callNil)).To(Succeed())
+
+			callEmpty := validCall()
+			callEmpty.Args = []uint64{}
+			Expect(domain.ValidateContractOp(callEmpty)).To(Succeed())
 		})
 
 		DescribeTable("rejects",
@@ -160,6 +175,9 @@ var _ = Describe("ContractOp", func() {
 			}, validDeploy),
 			Entry("deploy with zero gas", func(op *domain.ContractOp) { op.GasLimit = 0 }, validDeploy),
 			Entry("deploy with gas above MaxContractGas", func(op *domain.ContractOp) { op.GasLimit = domain.MaxContractGas + 1 }, validDeploy),
+			Entry("deploy with MaxContractArgs+1 args", func(op *domain.ContractOp) {
+				op.Args = make([]uint64, domain.MaxContractArgs+1)
+			}, validDeploy),
 			Entry("call with code", func(op *domain.ContractOp) { op.Code = "01" }, validCall),
 			Entry("call without target", func(op *domain.ContractOp) { op.Target = "" }, validCall),
 			Entry("call with short target", func(op *domain.ContractOp) { op.Target = target[:62] }, validCall),
@@ -168,6 +186,9 @@ var _ = Describe("ContractOp", func() {
 			Entry("call with non-hex target", func(op *domain.ContractOp) { op.Target = strings.Repeat("zz", 32) }, validCall),
 			Entry("call with zero gas", func(op *domain.ContractOp) { op.GasLimit = 0 }, validCall),
 			Entry("call with gas above MaxContractGas", func(op *domain.ContractOp) { op.GasLimit = domain.MaxContractGas + 1 }, validCall),
+			Entry("call with MaxContractArgs+1 args", func(op *domain.ContractOp) {
+				op.Args = make([]uint64, domain.MaxContractArgs+1)
+			}, validCall),
 		)
 	})
 

@@ -5,12 +5,14 @@ import (
 	"errors"
 )
 
-// Limits of the contract VM (ADR-0014).
+// Limits of the contract VM (ADR-0014, ADR-0033).
 const (
 	// MaxContractCodeBytes is the longest contract bytecode accepted.
 	MaxContractCodeBytes = 1024
 	// MaxContractGas is the largest gas limit a contract execution may ask for.
 	MaxContractGas = 100000
+	// MaxContractArgs is the most arguments a contract operation may carry (ADR-0033).
+	MaxContractArgs = 256
 )
 
 // Contract operation kinds.
@@ -40,6 +42,10 @@ func ValidateContractOp(op *ContractOp) error {
 	}
 
 	if op.GasLimit == 0 || op.GasLimit > MaxContractGas {
+		return ErrInvalidContractOp
+	}
+
+	if len(op.Args) > MaxContractArgs {
 		return ErrInvalidContractOp
 	}
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"maps"
 	"reflect"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -169,6 +170,9 @@ var _ = Describe("contract state", func() {
 			},
 			Entry("invalid contract op", func() (vm.State, *domain.Block) {
 				return vm.State{}, blockOf(contractTx(&domain.ContractOp{Kind: "x", GasLimit: 1}))
+			}, domain.ErrInvalidContractOp),
+			Entry("call with more than MaxContractArgs args", func() (vm.State, *domain.Block) {
+				return vm.State{}, blockOf(callTx(strings.Repeat("ab", 32), 10, make([]uint64, domain.MaxContractArgs+1)...))
 			}, domain.ErrInvalidContractOp),
 			Entry("invalid code", func() (vm.State, *domain.Block) {
 				return vm.State{}, blockOf(deployTx([]byte{0xEE}))
