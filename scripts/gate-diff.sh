@@ -3,7 +3,7 @@
 # Usage: scripts/gate-diff.sh [--base REF] [--dependents] [--mutation] [--list]
 #   --base REF     compare against REF (default: origin/master); committed, staged, unstaged and untracked files count
 #   --dependents   also test the packages that import a changed package (use it when a shared package changes)
-#   --mutation     also run gremlins on the diff (root, no package path), capped at 6G of memory when systemd-run exists
+#   --mutation     also run scripts/check-mutation.sh on the diff (gremlins at the root, no package path), capped at 6G of memory when systemd-run exists
 #   --list         print the packages and stop
 # This is the loop gate for implementers. It does NOT replace the full gate (go test -race ./... with the
 # coverage floor, govulncheck, build): run those once, at the end (AGENTS.md, "CI quality gates").
@@ -74,23 +74,11 @@ echo "--- golangci-lint run"
 run golangci-lint run $pkgs || fail=1
 
 if [ "$mutation" = 1 ]; then
-  echo "--- gremlins --diff $mb (zero LIVED or NOT COVERED on changed lines)"
-  g=(go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --timeout-coefficient 20 -E 'storagetest|consensustest' --diff "$mb")
-  out="$(mktemp)"
+  echo "--- scripts/check-mutation.sh $base (zero LIVED, NOT COVERED or TIMED OUT on changed lines)"
   if command -v systemd-run >/dev/null 2>&1; then
-    systemd-run --user --scope --quiet -p MemoryMax=6G mise exec -- "${g[@]}" >"$out" 2>&1 || fail=1
+    systemd-run --user --scope --quiet -p MemoryMax=6G scripts/check-mutation.sh "$base" || fail=1
   else
-    run "${g[@]}" >"$out" 2>&1 || fail=1
-  fi
-  # SKIPPED lines are every mutant outside the diff (thousands); keep the rest.
-  grep -v '^ *SKIPPED ' "$out" || true
-  killed="$(sed -n 's/^Killed: \([0-9]*\), Lived: \([0-9]*\), Not covered: \([0-9]*\).*/\1 \2 \3/p' "$out")"
-  rm -f "$out"
-  if [ -z "$killed" ]; then echo "gate-diff: could not read the gremlins summary"; fail=1
-  else
-    set -- $killed
-    if [ "$2" != 0 ] || [ "$3" != 0 ]; then echo "gate-diff: $2 LIVED and $3 NOT COVERED mutants on the changed lines"; fail=1; fi
-    if [ "$1" = 0 ] && [ "$2" = 0 ] && [ "$3" = 0 ]; then echo "gate-diff: no mutant on the changed lines (only comments or non-mutable code?)"; fi
+    scripts/check-mutation.sh "$base" || fail=1
   fi
 fi
 
