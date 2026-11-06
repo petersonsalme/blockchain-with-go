@@ -477,7 +477,7 @@ var _ = Describe("Service", func() {
 
 			var ve *domain.ValidationError
 			Expect(errors.As(err, &ve)).To(BeTrue())
-			Expect(ve.Code).To(Equal("timestamp_before_parent"))
+			Expect(ve.Code).To(Equal("timestamp_not_after_median_time_past"))
 
 			all, _ := repo.All()
 			Expect(all).To(HaveLen(1))

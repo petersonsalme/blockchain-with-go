@@ -553,7 +553,7 @@ func (s *Service) ReplaceChain(ctx context.Context, candidate []*domain.Block) (
 			return nil, err
 		}
 
-		err = domain.ValidateBlockRules(b, history[len(history)-1], now)
+		err = domain.ValidateBlockRules(b, history, now)
 		if err != nil {
 			return nil, err
 		}
@@ -643,7 +643,7 @@ func (s *Service) AcceptBlock(ctx context.Context, b *domain.Block) error {
 		return err
 	}
 
-	err = domain.ValidateBlockRules(b, tip, time.Now())
+	err = domain.ValidateBlockRules(b, history, time.Now())
 	if err != nil {
 		return err
 	}
@@ -1039,7 +1039,7 @@ func (s *Service) mineLocked(ctx context.Context, txs []domain.Transaction) (*do
 	}
 
 	if block != nil {
-		err := domain.ValidateBlockRules(block, prev, time.Now())
+		err := domain.ValidateBlockRules(block, history, time.Now())
 		if err != nil {
 			return nil, err
 		}

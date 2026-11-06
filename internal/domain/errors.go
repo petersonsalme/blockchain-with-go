@@ -4,10 +4,10 @@ import "fmt"
 
 // Validation error codes.
 const (
-	CodeBlockTooLarge              = "block_too_large"
-	CodeTimestampBeforeParent      = "timestamp_before_parent"
-	CodeTimestampTooFarInTheFuture = "timestamp_too_far_in_future"
-	CodeMerkleRootMismatch         = "merkle_root_mismatch"
+	CodeBlockTooLarge                   = "block_too_large"
+	CodeTimestampNotAfterMedianTimePast = "timestamp_not_after_median_time_past"
+	CodeTimestampTooFarInTheFuture      = "timestamp_too_far_in_future"
+	CodeMerkleRootMismatch              = "merkle_root_mismatch"
 )
 
 // Transaction error codes.

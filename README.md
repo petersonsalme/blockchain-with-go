@@ -846,7 +846,7 @@ Returns the confirmed state of a deployed contract:
 | `408 Request Timeout` | Client disconnected or cancelled request during mining | `{"error": "mining cancelled"}` |
 | `422 Unprocessable Entity` | Generated block failed chain validation | `{"error": "invalid block could not be added"}` |
 | `422 Unprocessable Entity` | Block exceeds `MaxBlockBytes`, 1 MiB (checked before mining) | `{"error": "...", "code": "block_too_large", "details": {"size": 1048577, "max": 1048576}}` |
-| `422 Unprocessable Entity` | Block timestamp earlier than its parent or more than 2h in the future | `{"error": "...", "code": "timestamp_before_parent" \| "timestamp_too_far_in_future", "details": {...}}` |
+| `422 Unprocessable Entity` | Block timestamp not later than the median time past of the last 11 blocks or more than 2h in the future | `{"error": "...", "code": "timestamp_not_after_median_time_past" \| "timestamp_too_far_in_future", "details": {...}}` |
 | `409 Conflict` | Another writer appended a block between reading the chain tip and appending (block no longer extends the tip) | `{"error": "...", "code": "chain_conflict"}` |
 | `413 Request Entity Too Large` | `POST /` body larger than 2× `MaxBlockBytes` (2 MiB) | `{"error": "...", "code": "request_too_large", "details": {"max": 2097152}}` |
 | `429 Too Many Requests` | Request rate limit exceeded for client IP; the `Retry-After` header gives the whole seconds until the next token | `{"error": "rate limit exceeded", "code": "rate_limited"}` |

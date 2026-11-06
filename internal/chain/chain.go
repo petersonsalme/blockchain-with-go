@@ -20,7 +20,13 @@ func GenerateBlockWithContext(ctx context.Context, c consensus.Consensus, histor
 	var newBlock domain.Block
 
 	newBlock.Index = oldBlock.Index + 1
+	// An honest miner whose clock is behind the median still produces a valid block (ADR-0034).
 	newBlock.Timestamp = time.Now()
+
+	if median := domain.MedianTimePast(history).Add(time.Nanosecond); newBlock.Timestamp.Before(median) {
+		newBlock.Timestamp = median
+	}
+
 	newBlock.Transactions = txs
 	newBlock.MerkleRoot = domain.MerkleRoot(txs)
 	newBlock.PrevHash = oldBlock.Hash

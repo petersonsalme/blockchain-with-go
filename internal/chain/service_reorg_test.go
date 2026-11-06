@@ -461,7 +461,7 @@ var _ = Describe("Service.ReplaceChain", func() {
 
 										return b
 									})
-								}, mismatch(string(domain.CodeTimestampBeforeParent))},
+								}, mismatch(string(domain.CodeTimestampNotAfterMedianTimePast))},
 							}
 						}
 
