@@ -18,7 +18,7 @@ func TestSnapshotHashVector(t *testing.T) {
 		{TxID: z, Index: 2}: {Amount: 1_000_000_000_000, Address: "carol"},
 		{TxID: a, Index: 0}: {Amount: 5, Address: "alice"},
 	}
-	// Computed independently (Python hashlib/struct) from the encoding of ADR-0014.
+	// Computed independently (Python hashlib/struct) from the encoding of ADR-0031.
 	const want = "f73dabb44cb341674ab26d26c2ae41b97aa2e9a60b64a44d90e43b389da963c8"
 	if got := storage.SnapshotHash(blockHash, set); got != want {
 		t.Fatalf("SnapshotHash = %s, want %s", got, want)

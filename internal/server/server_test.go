@@ -156,7 +156,7 @@ func (brokenChain) Mine(context.Context, []domain.Transaction) (*domain.Block, e
 	return nil, errors.New("unused")
 }
 
-// prunedChain answers every block lookup as pruned (ADR-0014).
+// prunedChain answers every block lookup as pruned (ADR-0031).
 type prunedChain struct{ brokenChain }
 
 func (prunedChain) BlockByHeight(int) (*domain.Block, error)  { return nil, storage.ErrPruned }

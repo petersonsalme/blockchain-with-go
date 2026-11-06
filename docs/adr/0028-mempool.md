@@ -1,6 +1,6 @@
-# ADR-0012: In-memory mempool with fee-rate selection
+# ADR-0028: In-memory mempool with fee-rate selection
 
-Status: Accepted
+Status: Accepted. Renumbered from ADR-0012 on 2026-11-06 (duplicate number).
 
 ## Context
 

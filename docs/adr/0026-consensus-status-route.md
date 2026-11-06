@@ -3,7 +3,7 @@
 Status: Accepted (extends ADR-0023)
 
 ## Context
-The dashboard (ADR-0023) has no consensus screen. The engine (`CONSENSUS`) and its parameters (`POW_DIFFICULTY`, `POW_RETARGET_INTERVAL`, `TARGET_BLOCK_TIME`, `POA_VALIDATORS`) exist only as environment configuration, so nobody can see over HTTP whether the nodes of a network are configured the same. The reorg rule (ADR-0010, ENG-26) compares accumulated work, which no route reports. Options: (A) a new route `GET /consensus`; (B) more fields in `/health`. B is cheaper for the dashboard (the poller already reads `/health`) but turns a liveness probe that Docker, the e2e test and the poller call every 2 s into an O(height) read, and mixes configuration with liveness.
+The dashboard (ADR-0023) has no consensus screen. The engine (`CONSENSUS`) and its parameters (`POW_DIFFICULTY`, `POW_RETARGET_INTERVAL`, `TARGET_BLOCK_TIME`, `POA_VALIDATORS`) exist only as environment configuration, so nobody can see over HTTP whether the nodes of a network are configured the same. The reorg rule (ADR-0029, ENG-26) compares accumulated work, which no route reports. Options: (A) a new route `GET /consensus`; (B) more fields in `/health`. B is cheaper for the dashboard (the poller already reads `/health`) but turns a liveness probe that Docker, the e2e test and the poller call every 2 s into an O(height) read, and mixes configuration with liveness.
 
 ## Decision
 - A: `GET /consensus` (and `HEAD`) answers `{engine, height, tip, chain_work, pow?: {initial_difficulty, retarget_interval, target_block_time_ms}, poa?: {validators}}`. Exactly one of `pow` and `poa` is present. `chain_work` is a decimal string (2^Difficulty sums overflow int64).

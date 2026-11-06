@@ -1,5 +1,5 @@
 // Package mempool holds admitted transactions that are not yet in a block and
-// hands them out ordered by fee rate (ADR-0012).
+// hands them out ordered by fee rate (ADR-0028).
 package mempool
 
 import (

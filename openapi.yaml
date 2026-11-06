@@ -169,7 +169,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "410":
-          description: The block body was pruned; only its header is kept (`block_pruned`, ADR-0014).
+          description: The block body was pruned; only its header is kept (`block_pruned`, ADR-0031).
           content:
             application/json:
               schema:
@@ -474,7 +474,7 @@ paths:
     post:
       operationId: submitTx
       summary: Admit one signed transaction into the mempool
-      description: Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
+      description: Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0028). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
       requestBody:
         required: true
         content:

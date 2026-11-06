@@ -1,6 +1,6 @@
-# ADR-0013: Rate limiter evicts idle buckets at most once per refill window
+# ADR-0030: Rate limiter evicts idle buckets at most once per refill window
 
-Status: Accepted
+Status: Accepted. Renumbered from ADR-0013 on 2026-11-06 (duplicate number).
 
 ## Context
 

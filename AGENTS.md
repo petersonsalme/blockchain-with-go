@@ -29,7 +29,7 @@ blockchain-with-go/
 │   ├── dashboard/     # Read-only network dashboard for `bwg dashboard` (ADR-0023): allowlisted node reads, html/template pages, embedded htmx; imports only the standard library
 │   ├── domain/        # Domain models (Block, Transaction, rules) — no internal dependencies
 │   ├── explorer/      # Embedded static files of the read-only web explorer served at /explorer/ (Files() fs.FS)
-│   ├── mempool/       # mempool.Pool: admitted transactions, fee-rate selection (ADR-0012); depends only on domain
+│   ├── mempool/       # mempool.Pool: admitted transactions, fee-rate selection (ADR-0028); depends only on domain
 │   ├── p2p/           # Hello, handshake checks, peer book, persisted peer addresses, the dialer loop (ADR-0013) and block/tx gossip: inv/want, seen-set, relay worker (ADR-0018); depends only on domain
 │   ├── server/        # HTTP adapter: server.Server (DI), handlers, DTOs, error mapping and the per-Server Prometheus registry (ADR-0022)
 │   ├── storage/       # BlockRepository port

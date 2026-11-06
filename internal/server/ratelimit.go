@@ -14,7 +14,7 @@ import (
 const RateLimitEnvVar = "RATE_LIMIT"
 
 // sweepInterval bounds how often allow scans the buckets for eviction: every
-// bucket refills from empty to full in one minute, whatever the rate (ADR-0013).
+// bucket refills from empty to full in one minute, whatever the rate (ADR-0030).
 const sweepInterval = time.Minute
 
 // ParseRateLimit reads a RATE_LIMIT value: positive integer requests per minute.
