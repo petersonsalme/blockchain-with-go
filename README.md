@@ -20,11 +20,17 @@
 A simple blockchain implementation in Go, created as an exercise to demonstrate core blockchain concepts.
 
 ## Features Implemented
-- **Block & Transaction Structure**: Blocks containing index, timestamp, transaction list (`Transactions`), current hash, previous hash, nonce, and difficulty. Each transaction has `ID`, `Inputs` (spent outputs with key and signature), `Outputs` (amount and address) and `Timestamp`.
-- **Cryptographic Hashing**: Uses SHA-256 to ensure data integrity across all block attributes (including nonce, difficulty, and the Merkle root of all transactions). Transaction content hashing is deterministic and independent of transaction ID, signature, and public key.
-- **Proof of Work & Context-Aware Mining**: Nonce search satisfying leading-zero-bit difficulty, supporting graceful context cancellation and mining timeouts.
-- **Chain Validation**: Validates new blocks by checking index sequentiality, cryptographic linkage (`PrevHash`), SHA-256 hash integrity, and Proof of Work against each block's recorded difficulty.
-- **HTTP API**: A RESTful API to view the blockchain, append new blocks with transactions, and report structured errors with appropriate HTTP status codes.
+- **Block & Transaction Structure**: Blocks hold index, timestamp, transactions, Merkle root, hash, previous hash, nonce and difficulty, plus validator and signature under Proof of Authority. Each transaction has `ID`, `Inputs` (spent outputs with key and signature), `Outputs` (amount and address), `Timestamp` and an optional contract operation.
+- **Cryptographic Hashing**: SHA-256 over every header field, including nonce, difficulty and the Merkle root of the transactions. Transaction content hashing is deterministic and independent of transaction ID, signature and public key.
+- **Pluggable Consensus**: Proof of Work with leading-zero-bit difficulty, retargeting, parallel and cancellable mining, or Proof of Authority with a fixed Ed25519 validator set (`CONSENSUS=poa`, [ADR-0005](docs/adr/0005-poa-block-seal.md)).
+- **Chain Validation and Reorg**: Index, linkage, hash, consensus, block rules, UTXO rules and input signatures are checked before a block is stored; a branch with strictly more accumulated work replaces the local one atomically ([ADR-0010](docs/adr/0010-reorg-by-cumulative-work.md)).
+- **UTXO, Coinbase and Halving**: Value lives in unspent outputs; the miner's coinbase pays the halving subsidy plus fees ([ADR-0001](docs/adr/0001-utxo-model.md), [ADR-0015](docs/adr/0015-coinbase-and-halving.md)).
+- **Mempool**: `POST /tx` admits signed transactions to a pool and `POST /mine` mines them ordered by fee rate ([ADR-0012](docs/adr/0012-mempool.md)).
+- **Contract VM**: A stack-machine interpreter with gas runs contract deploys and calls carried by transactions; `GET /contracts/{id}` reads a contract's state ([ADR-0014](docs/adr/0014-contract-vm.md)).
+- **Merkle Inclusion Proofs**: `GET /tx/{id}/proof` proves that a mined transaction is in its block, against the `MerkleRoot` of the header ([ADR-0009](docs/adr/0009-merkle-tree.md)).
+- **Peer-to-Peer over HTTP**: Handshake and persisted peer book ([ADR-0013](docs/adr/0013-p2p-over-http.md)), block and transaction gossip ([ADR-0018](docs/adr/0018-block-and-tx-gossip.md)), and initial sync and fork resolution with peer bans ([ADR-0019](docs/adr/0019-initial-sync-and-forks.md)).
+- **Persistence**: In-memory or bbolt storage with persisted indexes, UTXO snapshots and pruning ([ADR-0004](docs/adr/0004-disk-storage.md), [ADR-0014](docs/adr/0014-snapshots-and-pruning.md)).
+- **HTTP API and Tooling**: A REST API described by `openapi.yaml` with a generated Go client, server-sent events, Prometheus metrics, a web explorer, a read-only network dashboard and the `bwg` CLI with an HD wallet.
 
 ## Consensus Mechanism
 Block validation checks cryptographic linkage, index sequentiality, Proof of Work against the block's recorded difficulty, and transaction data integrity.
@@ -34,8 +40,8 @@ Block validation checks cryptographic linkage, index sequentiality, Proof of Wor
 
 - Every candidate block from the fork on is checked before anything is written: consensus, block rules, UTXO rules and input signatures, against the UTXO state of the candidate branch itself. The first failure is returned and the chain and the UTXO set stay as they were.
 - The swap is one atomic `ReplaceFrom` on the repository, then one `Apply` of the net UTXO difference. If that `Apply` fails the service stops accepting writes (`ErrStateDiverged`), like `Mine`.
-- The returned `Reorg` lists the fork height, the disconnected and connected blocks and `Orphaned`, the transactions of the dropped blocks that the new blocks do not hold, in chain order. They are not put back in the mempool or revalidated yet.
-- It shares the write turn with `Mine`. There is no peer transport yet, so forks come only from a caller handing in a candidate.
+- The returned `Reorg` lists the fork height, the disconnected and connected blocks and `Orphaned`, the transactions of the dropped blocks that the new blocks do not hold, in chain order. After a switch made by sync, the node resubmits them to the mempool, which drops the ones it refuses (already mined on the new branch, or now invalid).
+- It shares the write turn with `Mine`. Forks arrive from peers: the sync of every dialer round fetches a better branch's headers and bodies and hands it to `ReplaceChain` (see [Sync and ban](#sync-and-ban) and [ADR-0019](docs/adr/0019-initial-sync-and-forks.md)).
 
 ## Transaction Model (UTXO)
 Value lives in unspent transaction outputs (UTXOs). A transaction spends existing outputs and creates new ones:
@@ -55,7 +61,7 @@ type Transaction struct {
 - **ID**: SHA-256 over the canonical JSON of the inputs (`prev_txid`, `out_index`, without key or signature), the outputs and the UTC timestamp. A non-empty `ID` must match `CalculateHash()`.
 - **Signature per input**: every input is signed with Ed25519 (`domain.SignInput`) over the raw 32-byte digest of `CalculateHash()`, so one signature commits to all inputs and outputs. `PublicKey` is 64 lowercase hex characters (non-weak key), `Signature` is 128.
 - **Double spend**: an output can be spent once; spending it twice, in one block or across blocks, is rejected (`double_spend`, `input_missing_or_spent`).
-- **TransactionsHash**: SHA-256 over each transaction's hash and its input signatures, binding them to the block header.
+- **MerkleRoot**: the root of a Merkle tree whose leaves are each transaction's hash and its input signatures, binding them to the block header (item 4 of the trade-offs below; `GET /tx/{id}/proof` proves that one transaction is in a block).
 - **Genesis**: the genesis block of an empty chain carries one transaction without inputs that creates the outputs listed in `GENESIS_ALLOCATIONS`; besides the coinbase below, it is the only source of coins.
 - **Coinbase**: with `MINER_ADDRESS` set, every block the node mines starts with one transaction without inputs that pays `Subsidy(height) + fees` to that address. `domain.InitialSubsidy` is 5,000,000,000 base units and halves every `domain.HalvingInterval` (210,000) blocks; both are consensus constants, not configuration (ADR-0015). Validation accepts a coinbase only at position 0 of a non-genesis block, paying at most `Subsidy(height)` plus the fees of the block (`coinbase_too_large`). Without `MINER_ADDRESS` blocks carry no coinbase.
 
@@ -119,7 +125,7 @@ fmt.Println(w.Address())
    - **Difficulty Retargeting**: Each block records its difficulty in `b.Difficulty` (included in the SHA-256 hash), and validation requires it to equal the difficulty the rule expects for that position in the chain, then checks the proof of work against it. The child of genesis uses `POW_DIFFICULTY`; every `POW_RETARGET_INTERVAL` blocks the difficulty moves by one towards `TARGET_BLOCK_TIME` (up when the window took less than half the target, down when it took more than twice), within `1..32`; other blocks inherit the parent's difficulty. `Seal` and `Verify` receive the chain history for this ([ADR-0008](docs/adr/0008-difficulty-retargeting.md)). Miners still choose block timestamps within the ENG-18 bounds, so time-warp attacks are not prevented.
    - **Parallel Mining**: `Seal` searches the nonce space with `MINING_WORKERS` goroutines (worker `i` tries the nonces `i, i+w, i+2w, …` on its own copy of the block). The first valid nonce cancels the others, and `Seal` returns only after all workers stopped. Any nonce that solves the difficulty is valid, so the nonce found may differ between runs when there is more than one worker; validation is unchanged.
    - **Context Cancellation & Timeouts**: Mining supports cooperative cancellation via `context.Context` (`consensus.MineWithContext`, `GenerateBlockWithContext`). The HTTP handler applies a configurable mining timeout via `MINING_TIMEOUT` (defaulting to 10 seconds; keep it at least 5 × `TARGET_BLOCK_TIME`, so that block times inside the retarget band rarely hit it) and aborts immediately if the client disconnects or cancels the request, preventing request processing from blocking indefinitely.
-4. **Transaction List Payload**: Each block header carries `MerkleRoot`, the root of a Merkle tree over its transactions, and the block hash covers the root instead of the transaction list. A leaf is `SHA-256(0x00 || tx hash || per-input public key and signature)`, an inner node is `SHA-256(0x01 || left || right)`, and an odd node without a pair moves up a level unchanged (RFC 6962), so `[a,b,c]` and `[a,b,c,c]` have different roots. A block with zero transactions has the root `SHA-256("")`. `Mine` rejects a block whose root does not match its transactions with the code `merkle_root_mismatch` ([ADR-0009](docs/adr/0009-merkle-tree.md)). Inclusion proofs over HTTP are a separate story of ENG-20.
+4. **Transaction List Payload**: Each block header carries `MerkleRoot`, the root of a Merkle tree over its transactions, and the block hash covers the root instead of the transaction list. A leaf is `SHA-256(0x00 || tx hash || per-input public key and signature)`, an inner node is `SHA-256(0x01 || left || right)`, and an odd node without a pair moves up a level unchanged (RFC 6962), so `[a,b,c]` and `[a,b,c,c]` have different roots. A block with zero transactions has the root `SHA-256("")`. `Mine` rejects a block whose root does not match its transactions with the code `merkle_root_mismatch` ([ADR-0009](docs/adr/0009-merkle-tree.md)). `GET /tx/{id}/proof` returns the inclusion proof of a mined transaction against this root (see its section under API Calls).
 
 ## Architecture Decision Records
 
@@ -190,19 +196,29 @@ The application can be configured via environment variables (e.g., in a `.env` f
 ```
 blockchain-with-go/
 ├── cmd/
-│   └── node/          # Node binary entrypoint (main.go)
+│   └── bwg/           # The only binary (cobra): node, wallet, miner, dashboard
 ├── internal/
-│   ├── chain/         # Chain service (genesis, mining, validation) and block generation
+│   ├── chain/         # chain.Service: genesis, mining, validation, reorg (ReplaceChain)
+│   ├── consensus/     # Consensus port and errors
+│   │   ├── consensustest/ # Shared acceptance suite for Consensus adapters
+│   │   ├── poa/       # Proof of Authority adapter (fixed Ed25519 validator set)
+│   │   └── pow/       # Proof of Work adapter
+│   ├── dashboard/     # Read-only network dashboard served by `bwg dashboard`
+│   ├── domain/        # Domain entities and rules (Block, Transaction, UTXO, Merkle tree)
+│   ├── explorer/      # Embedded static files of the web explorer (/explorer/)
+│   ├── mempool/       # Transaction pool with fee-rate selection
+│   ├── p2p/           # Handshake, peer book, dialer, gossip and sync
+│   ├── server/        # HTTP REST API: handlers, DTOs, error mapping, metrics
 │   ├── storage/       # BlockRepository port
 │   │   ├── bolt/      # bbolt disk adapter
-│   │   └── memory/    # In-memory adapter (sync.RWMutex)
-│   ├── consensus/     # Consensus port interface and errors
-│   │   └── pow/       # Proof of Work implementation
-│   ├── domain/        # Domain entities (Block, Transaction, rules)
-│   └── server/        # HTTP REST API server, handlers and DTOs
-├── client/            # Go client generated from openapi.yaml (do not edit)
+│   │   ├── memory/    # In-memory adapter (sync.RWMutex)
+│   │   └── storagetest/ # Shared contract suite for storage adapters
+│   └── vm/            # Contract VM: stack-machine interpreter with gas
 ├── pkg/
-│   └── wallet/        # Cryptographic wallet (Ed25519), addresses, and keystore
+│   └── wallet/        # Ed25519 keys, addresses, keystore and HD derivation
+├── client/            # Go client generated from openapi.yaml (do not edit)
+├── e2e/               # Three-node docker compose test (build tag e2e)
+├── docs/              # ADRs (docs/adr/) and the playground guide
 ├── openapi.yaml       # HTTP API contract (OpenAPI 3.0.3)
 ├── go.mod             # Go module definition
 └── README.md          # Project documentation
