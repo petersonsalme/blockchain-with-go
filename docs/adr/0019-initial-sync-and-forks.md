@@ -4,7 +4,7 @@ Status: Accepted (ENG-32)
 
 ## Context
 
-ADR-0013 connects nodes and ADR-0018 gossips blocks, but a block is accepted only when it extends the local tip. A new node (genesis only), a node that was offline, or a node on another branch never catches up: gossip ignores what it cannot append, and nothing calls `chain.Service.ReplaceChain` (ADR-0010) with a peer's chain. ENG-32 asks for headers first, then bodies in batches from the best peer; fork detection with a switch to the branch with more work; and tolerance of slow or malicious peers (timeout, simple ban). Constraints: `internal/p2p` depends on `internal/domain` and the standard library only (ADR-0013); peer requests are HTTP + JSON inside the OpenAPI contract (ADR-0007); a peer's height and tip hash are in its hello and refreshed every dialer round.
+ADR-0013 connects nodes and ADR-0018 gossips blocks, but a block is accepted only when it extends the local tip. A new node (genesis only), a node that was offline, or a node on another branch never catches up: gossip ignores what it cannot append, and nothing calls `chain.Service.ReplaceChain` (ADR-0029) with a peer's chain. ENG-32 asks for headers first, then bodies in batches from the best peer; fork detection with a switch to the branch with more work; and tolerance of slow or malicious peers (timeout, simple ban). Constraints: `internal/p2p` depends on `internal/domain` and the standard library only (ADR-0013); peer requests are HTTP + JSON inside the OpenAPI contract (ADR-0007); a peer's height and tip hash are in its hello and refreshed every dialer round.
 
 ## Options
 
@@ -37,8 +37,8 @@ Recommendation: option 1 + A. It is headers-first with one new read-only route, 
 - A new node reaches the network tip in at most one dialer round plus the download time; a fork shallower than 1000 blocks costs two header requests before any body.
 - Headers are not checked by the consensus before the bodies arrive (`internal/p2p` cannot import it); a peer that claims fake work costs at most the bodies of the claimed branch, then a ban.
 - A peer whose branch has more work but a lower height is never tried (accepted limitation, shared with height-ordered peer selection).
-- Pruned peers (ADR-0014) cannot serve bodies below their pruned height; the node tries the next peer.
+- Pruned peers (ADR-0031) cannot serve bodies below their pruned height; the node tries the next peer.
 - A ban is keyed by `NodeID` and address and forgotten on restart; a hostile peer can return with a new id from another address.
-- The pool is not revalidated after a reorg beyond the resubmission of orphaned transactions (as in ADR-0010).
+- The pool is not revalidated after a reorg beyond the resubmission of orphaned transactions (as in ADR-0029).
 - Gossip is unchanged: a block that does not extend the tip is still dropped and is picked up by the next round's sync.
 

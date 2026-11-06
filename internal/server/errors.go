@@ -33,7 +33,7 @@ const invalidBlockRefCode = "invalid_block_ref"
 // blockNotFoundCode is the error code for a block outside the chain.
 const blockNotFoundCode = "block_not_found"
 
-// blockPrunedCode is the error code for a GET /block/{ref} whose body was pruned (ADR-0014).
+// blockPrunedCode is the error code for a GET /block/{ref} whose body was pruned (ADR-0031).
 const blockPrunedCode = "block_pruned"
 
 // unhealthyCode is the error code returned by GET /health when the chain cannot be read.

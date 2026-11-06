@@ -123,7 +123,7 @@ fmt.Println(w.Address())
 
 ## Architecture Decision Records
 
-Design decisions live in [`docs/adr/`](docs/adr/0009-merkle-tree.md):
+Design decisions live in [`docs/adr/`](docs/adr/):
 
 | ADR | Decision |
 |---|---|
@@ -137,11 +137,15 @@ Design decisions live in [`docs/adr/`](docs/adr/0009-merkle-tree.md):
 | [0008](docs/adr/0008-difficulty-retargeting.md) | Difficulty retargeting; the `Consensus` port receives the block history |
 | [0009](docs/adr/0009-merkle-tree.md) | Transaction Merkle tree in the block header (RFC 6962 odd-node rule) |
 | [0010](docs/adr/0010-prometheus-metrics.md) | Prometheus metrics written by hand, no client library (superseded by 0022) |
+| [0011](docs/adr/0011-persisted-indexes.md) | Persisted indexes: UTXO set, address → transactions and txid → height |
 | [0012](docs/adr/0012-difficulty-bits.md) | Proof-of-work difficulty counts leading zero bits; defaults realigned with `MINING_TIMEOUT` |
-| [0014](docs/adr/0014-snapshots-and-pruning.md) | UTXO snapshots every N blocks, pruning of old bodies to headers, and boot from a snapshot file |
+| [0013](docs/adr/0013-p2p-over-http.md) | Peer-to-peer handshake and peer discovery over HTTP |
+| [0014](docs/adr/0014-contract-vm.md) | Stack-machine contract VM; contract operations ride on UTXO transactions |
 | [0015](docs/adr/0015-coinbase-and-halving.md) | Coinbase reward capped at `Subsidy(height) + fees`, with halving every 210,000 blocks |
 | [0016](docs/adr/0016-bwg-cli-composition-root.md) | One `bwg` binary is the composition root; `bwg node` replaces `cmd/node` |
 | [0017](docs/adr/0017-hd-wallet-slip10.md) | HD wallet: BIP-39 mnemonics with SLIP-0010 ed25519 derivation (hardened only) |
+| [0018](docs/adr/0018-block-and-tx-gossip.md) | Block and transaction gossip over HTTP |
+| [0019](docs/adr/0019-initial-sync-and-forks.md) | Initial block download and fork resolution over HTTP |
 | [0020](docs/adr/0020-genesis-time.md) | Deterministic genesis time from `GENESIS_TIME` |
 | [0021](docs/adr/0021-professional-grade-study-reference.md) | Professional-grade study reference: hand-written chain core, market tools around it, never for real value |
 | [0022](docs/adr/0022-prometheus-client-golang.md) | Prometheus metrics with client_golang (registry per server) and an observability compose profile; supersedes 0010 |
@@ -150,6 +154,10 @@ Design decisions live in [`docs/adr/`](docs/adr/0009-merkle-tree.md):
 | [0025](docs/adr/0025-trusted-proxies-forwarded-for.md) | Client address from `X-Forwarded-For` only behind `TRUSTED_PROXIES` (right to left, `net/netip`) |
 | [0026](docs/adr/0026-consensus-status-route.md) | Read-only consensus status route `GET /consensus` |
 | [0027](docs/adr/0027-supply-route.md) | Read-only supply route `GET /supply` |
+| [0028](docs/adr/0028-mempool.md) | In-memory mempool with fee-rate selection |
+| [0029](docs/adr/0029-reorg-by-cumulative-work.md) | Reorg by cumulative work with an atomic `ReplaceFrom` |
+| [0030](docs/adr/0030-rate-limiter-sweep-interval.md) | Rate limiter evicts idle buckets at most once per refill window |
+| [0031](docs/adr/0031-snapshots-and-pruning.md) | UTXO snapshots every N blocks, pruning of old bodies to headers, and boot from a snapshot file |
 
 ## Configuration & Environment Variables
 
@@ -264,7 +272,7 @@ reindexed: tip height 42
 
 ### Snapshots and pruning
 
-Every `SNAPSHOT_INTERVAL` blocks the node stores a snapshot of the UTXO set together with a SHA-256 hash over the block hash and the sorted unspent outputs ([ADR-0014](docs/adr/0014-snapshots-and-pruning.md)). With `PRUNE_KEEP_BLOCKS` above `0`, block bodies below the snapshot are replaced by their headers (the hash and Merkle root stay verifiable), so `chain.db` holds the headers, the UTXO set and only the recent bodies. A pruned node follows reorgs only down to the pruned height. `GET /block/{ref}` for a pruned block returns `410` `block_pruned`, `GET /` and `GET /blocks` list pruned blocks with `"Transactions": []`, and a transaction of a pruned block returns `404` `tx_not_found`.
+Every `SNAPSHOT_INTERVAL` blocks the node stores a snapshot of the UTXO set together with a SHA-256 hash over the block hash and the sorted unspent outputs ([ADR-0031](docs/adr/0031-snapshots-and-pruning.md)). With `PRUNE_KEEP_BLOCKS` above `0`, block bodies below the snapshot are replaced by their headers (the hash and Merkle root stay verifiable), so `chain.db` holds the headers, the UTXO set and only the recent bodies. A pruned node follows reorgs only down to the pruned height. `GET /block/{ref}` for a pruned block returns `410` `block_pruned`, `GET /` and `GET /blocks` list pruned blocks with `"Transactions": []`, and a transaction of a pruned block returns `404` `tx_not_found`.
 
 A full node can export its stored snapshot, and a new node can start from it instead of replaying the whole chain:
 

@@ -1,6 +1,6 @@
-# ADR-0014: UTXO snapshots, body pruning and boot from a snapshot
+# ADR-0031: UTXO snapshots, body pruning and boot from a snapshot
 
-Status: Accepted (board, 2026-10-24, ENG-29) — option B. Final number is taken at merge (ADR-0013 is the rate limiter; ENG-30 may also add one).
+Status: Accepted (board, 2026-10-24, ENG-29) — option B. Renumbered from ADR-0014 on 2026-11-06 (duplicate number).
 
 ## Context
 - After ADR-0011 (ENG-28) bbolt holds `blocks`, `hashes`, `utxos`, `undo` (height → delta), `txs`, `addrtx` and `meta.indexedTip`, all written in one transaction by `Commit`/`Reorg`. Nothing is ever deleted: `blocks` and `undo` grow with the chain.

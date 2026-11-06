@@ -726,7 +726,7 @@ type ClientInterface interface {
 
 	// SubmitTxWithBody Admit one signed transaction into the mempool
 	//
-	// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
+	// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0028). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -735,7 +735,7 @@ type ClientInterface interface {
 
 	// SubmitTx Admit one signed transaction into the mempool
 	//
-	// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
+	// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0028). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -1216,7 +1216,7 @@ func (c *Client) GetSupply(ctx context.Context, reqEditors ...RequestEditorFn) (
 
 // SubmitTxWithBody Admit one signed transaction into the mempool
 //
-// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
+// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0028). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
 //
 // Takes any type of body and a specified content type.
 //
@@ -1235,7 +1235,7 @@ func (c *Client) SubmitTxWithBody(ctx context.Context, contentType string, body 
 
 // SubmitTx Admit one signed transaction into the mempool
 //
-// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
+// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0028). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -2449,7 +2449,7 @@ type ClientWithResponsesInterface interface {
 
 	// SubmitTxWithBodyWithResponse Admit one signed transaction into the mempool
 	//
-	// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
+	// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0028). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -2458,7 +2458,7 @@ type ClientWithResponsesInterface interface {
 
 	// SubmitTxWithResponse Admit one signed transaction into the mempool
 	//
-	// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
+	// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0028). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -4655,7 +4655,7 @@ func (c *ClientWithResponses) GetSupplyWithResponse(ctx context.Context, reqEdit
 
 // SubmitTxWithBodyWithResponse Admit one signed transaction into the mempool
 //
-// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
+// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0028). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -4670,7 +4670,7 @@ func (c *ClientWithResponses) SubmitTxWithBodyWithResponse(ctx context.Context, 
 
 // SubmitTxWithResponse Admit one signed transaction into the mempool
 //
-// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0012). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
+// Applies the checks of `POST /` to the transaction against the confirmed UTXO set and admits it into the pool (ADR-0028). With a `contract` object it also runs the deploy or call against the confirmed contract state (ADR-0014), so a call that would fail is refused here. It never mines.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //

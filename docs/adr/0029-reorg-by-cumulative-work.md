@@ -1,6 +1,6 @@
-# ADR-0010: Reorg by cumulative work with an atomic ReplaceFrom
+# ADR-0029: Reorg by cumulative work with an atomic ReplaceFrom
 
-Status: Accepted (Lead, ENG-26, 2026-10-21). Implemented in two stories: ENG-111 (storage `ReplaceFrom`) and the `chain.Service.ReplaceChain` story.
+Status: Accepted (Lead, ENG-26, 2026-10-21). Implemented in two stories: ENG-111 (storage `ReplaceFrom`) and the `chain.Service.ReplaceChain` story. Renumbered from ADR-0010 on 2026-11-06 (duplicate number).
 
 ## Context
 - ENG-26 asks `chain.Service` to accept a competing chain: validate it whole, choose by accumulated work, revert the old branch and apply the new one to the UTXO set, and hand the dropped transactions back to the mempool.
