@@ -20,11 +20,17 @@
 A simple blockchain implementation in Go, created as an exercise to demonstrate core blockchain concepts.
 
 ## Features Implemented
-- **Block & Transaction Structure**: Blocks containing index, timestamp, transaction list (`Transactions`), current hash, previous hash, nonce, and difficulty. Each transaction has `ID`, `Inputs` (spent outputs with key and signature), `Outputs` (amount and address) and `Timestamp`.
-- **Cryptographic Hashing**: Uses SHA-256 to ensure data integrity across all block attributes (including nonce, difficulty, and the Merkle root of all transactions). Transaction content hashing is deterministic and independent of transaction ID, signature, and public key.
-- **Proof of Work & Context-Aware Mining**: Nonce search satisfying leading-zero-bit difficulty, supporting graceful context cancellation and mining timeouts.
-- **Chain Validation**: Validates new blocks by checking index sequentiality, cryptographic linkage (`PrevHash`), SHA-256 hash integrity, and Proof of Work against each block's recorded difficulty.
-- **HTTP API**: A RESTful API to view the blockchain, append new blocks with transactions, and report structured errors with appropriate HTTP status codes.
+- **Block & Transaction Structure**: Blocks hold index, timestamp, transactions, Merkle root, hash, previous hash, nonce and difficulty, plus validator and signature under Proof of Authority. Each transaction has `ID`, `Inputs` (spent outputs with key and signature), `Outputs` (amount and address), `Timestamp` and an optional contract operation.
+- **Cryptographic Hashing**: SHA-256 over every header field, including nonce, difficulty and the Merkle root of the transactions. Transaction content hashing is deterministic and independent of transaction ID, signature and public key.
+- **Pluggable Consensus**: Proof of Work with leading-zero-bit difficulty, retargeting, parallel and cancellable mining, or Proof of Authority with a fixed Ed25519 validator set (`CONSENSUS=poa`, [ADR-0005](docs/adr/0005-poa-block-seal.md)).
+- **Chain Validation and Reorg**: Index, linkage, hash, consensus, block rules, UTXO rules and input signatures are checked before a block is stored; a branch with strictly more accumulated work replaces the local one atomically ([ADR-0010](docs/adr/0010-reorg-by-cumulative-work.md)).
+- **UTXO, Coinbase and Halving**: Value lives in unspent outputs; the miner's coinbase pays the halving subsidy plus fees ([ADR-0001](docs/adr/0001-utxo-model.md), [ADR-0015](docs/adr/0015-coinbase-and-halving.md)).
+- **Mempool**: `POST /tx` admits signed transactions to a pool and `POST /mine` mines them ordered by fee rate ([ADR-0012](docs/adr/0012-mempool.md)).
+- **Contract VM**: A stack-machine interpreter with gas runs contract deploys and calls carried by transactions; `GET /contracts/{id}` reads a contract's state ([ADR-0014](docs/adr/0014-contract-vm.md)).
+- **Merkle Inclusion Proofs**: `GET /tx/{id}/proof` proves that a mined transaction is in its block, against the `MerkleRoot` of the header ([ADR-0009](docs/adr/0009-merkle-tree.md)).
+- **Peer-to-Peer over HTTP**: Handshake and persisted peer book ([ADR-0013](docs/adr/0013-p2p-over-http.md)), block and transaction gossip ([ADR-0018](docs/adr/0018-block-and-tx-gossip.md)), and initial sync and fork resolution with peer bans ([ADR-0019](docs/adr/0019-initial-sync-and-forks.md)).
+- **Persistence**: In-memory or bbolt storage with persisted indexes, UTXO snapshots and pruning ([ADR-0004](docs/adr/0004-disk-storage.md), [ADR-0014](docs/adr/0014-snapshots-and-pruning.md)).
+- **HTTP API and Tooling**: A REST API described by `openapi.yaml` with a generated Go client, server-sent events, Prometheus metrics, a web explorer, a read-only network dashboard and the `bwg` CLI with an HD wallet.
 
 ## Consensus Mechanism
 Block validation checks cryptographic linkage, index sequentiality, Proof of Work against the block's recorded difficulty, and transaction data integrity.
@@ -190,19 +196,29 @@ The application can be configured via environment variables (e.g., in a `.env` f
 ```
 blockchain-with-go/
 ├── cmd/
-│   └── node/          # Node binary entrypoint (main.go)
+│   └── bwg/           # The only binary (cobra): node, wallet, miner, dashboard
 ├── internal/
-│   ├── chain/         # Chain service (genesis, mining, validation) and block generation
+│   ├── chain/         # chain.Service: genesis, mining, validation, reorg (ReplaceChain)
+│   ├── consensus/     # Consensus port and errors
+│   │   ├── consensustest/ # Shared acceptance suite for Consensus adapters
+│   │   ├── poa/       # Proof of Authority adapter (fixed Ed25519 validator set)
+│   │   └── pow/       # Proof of Work adapter
+│   ├── dashboard/     # Read-only network dashboard served by `bwg dashboard`
+│   ├── domain/        # Domain entities and rules (Block, Transaction, UTXO, Merkle tree)
+│   ├── explorer/      # Embedded static files of the web explorer (/explorer/)
+│   ├── mempool/       # Transaction pool with fee-rate selection
+│   ├── p2p/           # Handshake, peer book, dialer, gossip and sync
+│   ├── server/        # HTTP REST API: handlers, DTOs, error mapping, metrics
 │   ├── storage/       # BlockRepository port
 │   │   ├── bolt/      # bbolt disk adapter
-│   │   └── memory/    # In-memory adapter (sync.RWMutex)
-│   ├── consensus/     # Consensus port interface and errors
-│   │   └── pow/       # Proof of Work implementation
-│   ├── domain/        # Domain entities (Block, Transaction, rules)
-│   └── server/        # HTTP REST API server, handlers and DTOs
-├── client/            # Go client generated from openapi.yaml (do not edit)
+│   │   ├── memory/    # In-memory adapter (sync.RWMutex)
+│   │   └── storagetest/ # Shared contract suite for storage adapters
+│   └── vm/            # Contract VM: stack-machine interpreter with gas
 ├── pkg/
-│   └── wallet/        # Cryptographic wallet (Ed25519), addresses, and keystore
+│   └── wallet/        # Ed25519 keys, addresses, keystore and HD derivation
+├── client/            # Go client generated from openapi.yaml (do not edit)
+├── e2e/               # Three-node docker compose test (build tag e2e)
+├── docs/              # ADRs (docs/adr/) and the playground guide
 ├── openapi.yaml       # HTTP API contract (OpenAPI 3.0.3)
 ├── go.mod             # Go module definition
 └── README.md          # Project documentation
