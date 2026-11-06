@@ -135,7 +135,7 @@ linters:
       - path: (cmd/bwg/(node|snapshot)|internal/p2p/persist|pkg/wallet/keystore)\.go
         linters: [gosec]
         text: "G(304|306|703)"
-      # G115: heights, sizes and VM jump targets are bounded (jump checks dest < len(code); block size is capped by MaxBlockBytes).
+      # G115: heights, sizes and VM jump targets are bounded (jump checks dest < len(code); block size is capped by the MaxBlockBytes constant).
       - path: internal/(storage/bolt/|mempool/mempool\.go|vm/vm\.go|domain/merkle\.go)
         linters: [gosec]
         text: "G115"

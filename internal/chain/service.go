@@ -117,6 +117,9 @@ type Service struct {
 	// apply to it; readers outside writeSem take contractsMu.RLock.
 	contracts   vm.State
 	contractsMu sync.RWMutex
+	// fitLimit, when positive, replaces domain.MaxBlockBytes as the pool selection
+	// budget. Only export_test.go sets it; no option exposes it (ADR-0032).
+	fitLimit int
 }
 
 // NewService builds a Service over repo, stores the genesis block when repo is
@@ -874,7 +877,10 @@ func (s *Service) lock(ctx context.Context) (func(), error) {
 // is too large the budget drops to that room less the separators of the
 // selection just made. It falls on every pass, so the loop ends.
 func (s *Service) fit() ([]domain.Transaction, error) {
-	limit := domain.MaxBlockBytes()
+	limit := domain.MaxBlockBytes
+	if s.fitLimit > 0 {
+		limit = s.fitLimit
+	}
 
 	empty, err := s.sealedSize([]domain.Transaction{})
 	if err != nil {

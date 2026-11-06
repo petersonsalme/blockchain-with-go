@@ -193,7 +193,6 @@ The application can be configured via environment variables (e.g., in a `.env` f
 | `MAX_INBOUND_PEERS` | Maximum inbound peers (positive integer; invalid values use the default) | `16` |
 | `MAX_OUTBOUND_PEERS` | Maximum outbound peers (positive integer; invalid values use the default) | `8` |
 | `PEER_INTERVAL` | Time between dialer rounds, as a Go duration. Empty, invalid or non-positive values use the default; peers not seen for 3 intervals expire | `30s` |
-| `MAX_BLOCK_BYTES` | Maximum JSON-serialized block size in bytes (positive integer; invalid values fall back to the default) | `1048576` |
 | `RATE_LIMIT` | Maximum requests per minute per client address: `RemoteAddr`, or the rightmost untrusted `X-Forwarded-For` entry when the connection comes from `TRUSTED_PROXIES` (positive integer; empty, invalid, or non-positive disables rate limiting) | disabled (`0`) |
 | `TRUSTED_PROXIES` | Comma-separated CIDRs or IPs of reverse proxies whose `X-Forwarded-For` names the client for the rate limiter ([ADR-0025](docs/adr/0025-trusted-proxies-forwarded-for.md)); `Forwarded` and `X-Real-IP` are ignored. Invalid entries stop the node. List only proxies that overwrite or append the header; trusting anything else lets clients pick their own bucket | empty (header ignored) |
 | `NODE_URL` | Base URL of the node used by `bwg wallet` and `bwg miner` (`--node` overrides it) | `http://localhost:8080` |
@@ -723,7 +722,7 @@ $ curl http://localhost:8080/mempool
 `entries[i]` describes `transactions[i]` (same length and order): `fee` is the fee and `size` the size in bytes the pool orders by. There is no fee rate field; compute `fee / size` to display one. An empty pool returns `{"transactions": [], "entries": []}`.
 
 ### POST /mine
-Mine a new block from the mempool. The request has no body. The node takes the transactions with the highest fee rate per byte that fit in `MAX_BLOCK_BYTES`, in that order. An empty pool mines an empty block.
+Mine a new block from the mempool. The request has no body. The node takes the transactions with the highest fee rate per byte that fit in `MaxBlockBytes` (1 MiB, a consensus constant, ADR-0032), in that order. An empty pool mines an empty block.
 
 Using the same genesis allocations (`GENESIS_ALLOCATIONS=<sender address>:100,<sender address>:100`), two transactions spend different outputs of the genesis transaction: A spends output 0 and pays 99 (fee 1), B spends output 1 and pays 95 (fee 5). Submit A and then B:
 
@@ -844,10 +843,10 @@ Returns the confirmed state of a deployed contract:
 | `405 Method Not Allowed` | HTTP method not allowed on endpoint (e.g. `PUT`, `DELETE`) | empty body (router-level response) |
 | `408 Request Timeout` | Client disconnected or cancelled request during mining | `{"error": "mining cancelled"}` |
 | `422 Unprocessable Entity` | Generated block failed chain validation | `{"error": "invalid block could not be added"}` |
-| `422 Unprocessable Entity` | Block exceeds `MAX_BLOCK_BYTES` (checked before mining) | `{"error": "...", "code": "block_too_large", "details": {"size": 1200, "max": 1000}}` |
+| `422 Unprocessable Entity` | Block exceeds `MaxBlockBytes`, 1 MiB (checked before mining) | `{"error": "...", "code": "block_too_large", "details": {"size": 1048577, "max": 1048576}}` |
 | `422 Unprocessable Entity` | Block timestamp earlier than its parent or more than 2h in the future | `{"error": "...", "code": "timestamp_before_parent" \| "timestamp_too_far_in_future", "details": {...}}` |
 | `409 Conflict` | Another writer appended a block between reading the chain tip and appending (block no longer extends the tip) | `{"error": "...", "code": "chain_conflict"}` |
-| `413 Request Entity Too Large` | `POST /` body larger than 2× `MAX_BLOCK_BYTES` | `{"error": "...", "code": "request_too_large", "details": {"max": 2000}}` |
+| `413 Request Entity Too Large` | `POST /` body larger than 2× `MaxBlockBytes` (2 MiB) | `{"error": "...", "code": "request_too_large", "details": {"max": 2097152}}` |
 | `429 Too Many Requests` | Request rate limit exceeded for client IP; the `Retry-After` header gives the whole seconds until the next token | `{"error": "rate limit exceeded", "code": "rate_limited"}` |
 | `504 Gateway Timeout` | Mining exceeded deadline set by `MINING_TIMEOUT` | `{"error": "mining timeout exceeded"}` |
 | `500 Internal Server Error` | Unexpected internal server error | `{"error": "..."}` |

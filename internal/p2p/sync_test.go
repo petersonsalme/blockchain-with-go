@@ -1167,14 +1167,14 @@ func TestSyncNeverAsksABannedAddressAgain(t *testing.T) {
 }
 
 func TestSyncBodyResponseBound(t *testing.T) {
-	t.Setenv(domain.MaxBlockBytesEnvVar, "1000")
+	t.Setenv("MAX_BLOCK_BYTES", "1000") // the removed variable changes nothing (ADR-0032)
 
 	canonical := grow(nil, "A", 1)
 
 	for name, tc := range map[string]struct {
 		pad  int
 		want int
-	}{"within twice the limit": {1500, 1}, "beyond twice the limit": {2500, 0}} {
+	}{"within twice the limit": {2*domain.MaxBlockBytes - 10000, 1}, "beyond twice the limit": {2*domain.MaxBlockBytes + 10000, 0}} {
 		t.Run(name, func(t *testing.T) {
 			peer := newSyncPeer(t, canonical)
 			peer.hook = func(_ http.ResponseWriter, _ *http.Request, route string, _, _ int, page []*domain.Block) ([]*domain.Block, bool) {

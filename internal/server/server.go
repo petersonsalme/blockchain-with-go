@@ -158,9 +158,9 @@ func ParseMiningTimeout(raw string) time.Duration {
 	return DefaultMiningTimeout
 }
 
-// maxRequestBodyBytes allows headroom over MaxBlockBytes() for JSON overhead of the request.
+// maxRequestBodyBytes allows headroom over MaxBlockBytes for JSON overhead of the request.
 func maxRequestBodyBytes() int64 {
-	return 2 * int64(domain.MaxBlockBytes())
+	return 2 * int64(domain.MaxBlockBytes)
 }
 
 // route is one method pattern that Handler registers.

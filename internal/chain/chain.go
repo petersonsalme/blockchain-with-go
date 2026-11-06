@@ -30,7 +30,7 @@ func GenerateBlockWithContext(ctx context.Context, c consensus.Consensus, histor
 
 	estimate.Hash = strings.Repeat("0", 64)
 
-	err := domain.ValidateSize(&estimate, domain.MaxBlockBytes())
+	err := domain.ValidateSize(&estimate, domain.MaxBlockBytes)
 	if err != nil {
 		return nil, err
 	}

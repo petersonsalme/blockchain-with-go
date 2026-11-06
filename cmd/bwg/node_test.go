@@ -783,3 +783,61 @@ func postURL(url, contentType string, body io.Reader) (*http.Response, error) {
 
 	return http.DefaultClient.Do(req)
 }
+
+func TestRunRefusesRemovedMaxBlockBytes(t *testing.T) {
+	t.Setenv("PORT", freePort(t))
+	t.Setenv("POW_DIFFICULTY", "1")
+	t.Setenv("MAX_BLOCK_BYTES", "512")
+
+	// Bounded so that a run which ignores the variable stops serving instead of hanging.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	err := run(ctx, discardLogger())
+	if err == nil || !strings.Contains(err.Error(), "MAX_BLOCK_BYTES") || !strings.Contains(err.Error(), "ADR-0032") {
+		t.Fatalf("run = %v, want error naming MAX_BLOCK_BYTES and ADR-0032", err)
+	}
+}
+
+func TestRefuseRemovedEnv(t *testing.T) {
+	for _, tc := range []struct {
+		name, value string
+		set         bool
+		wantErr     bool
+	}{
+		{"unset", "", false, false},
+		{"blank", "", true, false},
+		{"spaces", "  ", true, false},
+		{"value", "1048576", true, true},
+		{"invalid value", "abc", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.set {
+				t.Setenv("MAX_BLOCK_BYTES", tc.value)
+			} else {
+				t.Setenv("MAX_BLOCK_BYTES", "")
+
+				_ = os.Unsetenv("MAX_BLOCK_BYTES")
+			}
+
+			err := refuseRemovedEnv()
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("refuseRemovedEnv = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestRunStartsWithBlankMaxBlockBytes(t *testing.T) {
+	t.Setenv("PORT", freePort(t))
+	t.Setenv("POW_DIFFICULTY", "1")
+	t.Setenv("MAX_BLOCK_BYTES", "")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	err := run(ctx, discardLogger())
+	if err != nil {
+		t.Fatalf("run = %v, want nil (blank variable starts normally)", err)
+	}
+}

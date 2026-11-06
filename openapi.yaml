@@ -520,7 +520,7 @@ paths:
     post:
       operationId: minePending
       summary: Mine a block from the mempool
-      description: Takes the pool transactions of highest fee per byte that fit `MAX_BLOCK_BYTES`, in selection order (fee rate descending, then ID); an empty pool mines an empty block. Same timeout and errors as `POST /`.
+      description: Takes the pool transactions of highest fee per byte that fit `MaxBlockBytes` (1 MiB, a consensus constant, ADR-0032), in selection order (fee rate descending, then ID); an empty pool mines an empty block. Same timeout and errors as `POST /`.
       responses:
         "201":
           description: The mined block, already appended to the chain; its transactions left the pool.

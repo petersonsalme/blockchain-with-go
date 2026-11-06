@@ -98,6 +98,18 @@ var _ = Describe("Service.AcceptBlock", func() {
 					Expect(utxoSnapshot(repoB)).To(Equal(utxoSnapshot(repoA)))
 				})
 
+				It("accepts a block above MAX_BLOCK_BYTES when the variable is set (ADR-0032)", func() {
+					GinkgoT().Setenv("MAX_BLOCK_BYTES", "512")
+
+					mined, err := a.Mine(ctx, f.tx())
+					Expect(err).NotTo(HaveOccurred())
+
+					size, err := mined.Size()
+					Expect(err).NotTo(HaveOccurred())
+					Expect(size).To(BeNumerically(">", 512))
+					Expect(b.AcceptBlock(ctx, mined)).To(Succeed())
+				})
+
 				It("removes from the pool the transactions it confirms", func() {
 					confirmed := f.tx()[0]
 					unrelated := f.tx()[0]

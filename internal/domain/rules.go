@@ -3,34 +3,16 @@ package domain
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"strconv"
 	"time"
 )
 
-// DefaultMaxBlockBytes is the maximum serialized block size when MAX_BLOCK_BYTES is not set.
-const DefaultMaxBlockBytes = 1 << 20
-
-// MaxBlockBytesEnvVar overrides DefaultMaxBlockBytes when it holds a positive integer.
-const MaxBlockBytesEnvVar = "MAX_BLOCK_BYTES"
+// MaxBlockBytes is the maximum JSON-serialized size of a block (1 MiB). It is a
+// consensus rule fixed at compile time, like InitialSubsidy: no node can
+// configure it (ADR-0032).
+const MaxBlockBytes = 1 << 20
 
 // MaxFutureDrift is how far ahead of the current time a block timestamp may be.
 const MaxFutureDrift = 2 * time.Hour
-
-// MaxBlockBytes returns the maximum serialized size a block may have.
-func MaxBlockBytes() int {
-	raw := os.Getenv(MaxBlockBytesEnvVar)
-	if raw == "" {
-		return DefaultMaxBlockBytes
-	}
-
-	limit, err := strconv.Atoi(raw)
-	if err != nil || limit <= 0 {
-		return DefaultMaxBlockBytes
-	}
-
-	return limit
-}
 
 // Size returns the length in bytes of the block's JSON encoding.
 func (b *Block) Size() (int, error) {
@@ -104,7 +86,7 @@ func ValidateMerkleRoot(b *Block) error {
 
 // ValidateBlockRules applies the structural block rules (size, merkle root and timestamp).
 func ValidateBlockRules(b, parent *Block, now time.Time) error {
-	err := ValidateSize(b, MaxBlockBytes())
+	err := ValidateSize(b, MaxBlockBytes)
 	if err != nil {
 		return err
 	}

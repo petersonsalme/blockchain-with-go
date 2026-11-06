@@ -49,12 +49,10 @@ func FuzzValidateBlockRules(f *testing.F) {
 			b.MerkleRoot = strings.Repeat("0", 64)
 		}
 
-		limit := domain.DefaultMaxBlockBytes
-		if maxBytes > 0 {
-			limit = int(maxBytes)
-		}
+		// The rule is the constant whatever the removed variable holds (ADR-0032).
+		limit := domain.MaxBlockBytes
 
-		t.Setenv(domain.MaxBlockBytesEnvVar, strconv.Itoa(int(maxBytes)))
+		t.Setenv("MAX_BLOCK_BYTES", strconv.Itoa(int(maxBytes)))
 
 		err := domain.ValidateBlockRules(b, parent, now)
 
