@@ -218,6 +218,20 @@ var _ = Describe("Contract routes", func() {
 		Expect(rec.Body.String()).To(ContainSubstring(`"code": "invalid_contract_op"`))
 	})
 
+	It("rejects a call with more than MaxContractArgs args with 400 invalid_contract_op", func() {
+		_, body := contractTx(&domain.ContractOp{
+			Kind:     domain.ContractCall,
+			Target:   strings.Repeat("ab", 32),
+			GasLimit: 10,
+			Args:     make([]uint64, domain.MaxContractArgs+1),
+		})
+
+		rec := do(http.MethodPost, "/tx", body)
+
+		Expect(rec.Code).To(Equal(http.StatusBadRequest), rec.Body.String())
+		Expect(rec.Body.String()).To(ContainSubstring(`"code": "invalid_contract_op"`))
+	})
+
 	It("rejects undeployable code with 400 invalid_code", func() {
 		_, body := contractTx(&domain.ContractOp{Kind: domain.ContractDeploy, Code: "01", GasLimit: 10})
 
