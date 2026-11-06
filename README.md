@@ -165,6 +165,7 @@ Design decisions live in [`docs/adr/`](docs/adr/):
 | [0030](docs/adr/0030-rate-limiter-sweep-interval.md) | Rate limiter evicts idle buckets at most once per refill window |
 | [0031](docs/adr/0031-snapshots-and-pruning.md) | UTXO snapshots every N blocks, pruning of old bodies to headers, and boot from a snapshot file |
 | [0032](docs/adr/0032-max-block-bytes-constant.md) | `MAX_BLOCK_BYTES` becomes a 1 MiB consensus constant in `internal/domain`; the environment variable is refused at startup |
+| [0033](docs/adr/0033-contract-args-limit.md) | Contract operations carry at most `MaxContractArgs = 256` args (consensus rule) |
 
 ## Configuration & Environment Variables
 
@@ -776,7 +777,7 @@ BPM payloads cannot be signed, so the endpoint answers `410 Gone` (with `Depreca
 | `kind` | `"deploy"` | `"call"` |
 | `code` | bytecode, lowercase hex, 1 to 1024 bytes | absent |
 | `target` | absent | contract ID, 64 lowercase hex characters |
-| `args` | numbers the code reads with `ARG` (optional) | same |
+| `args` | numbers the code reads with `ARG` (optional, at most 256, [ADR-0033](docs/adr/0033-contract-args-limit.md)) | same |
 | `gas_limit` | `1` to `100000` | same |
 
 The contract is part of the transaction hash and of every input signature (`CalculateHash`), so compute `ID` and sign after filling it in. A deploy's contract ID is the `ID` of its transaction. `POST /tx` runs the operation against the confirmed contract state and refuses what would fail (`400` for a malformed operation, `422` for an execution error); state changes only when `POST /mine` mines the transaction. Counter walkthrough (`vm.CounterCode`, which costs 29 gas per call):

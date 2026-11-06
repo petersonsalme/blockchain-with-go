@@ -178,7 +178,7 @@ type ConsensusResponse struct {
 // ConsensusResponseEngine defines model for ConsensusResponse.Engine.
 type ConsensusResponseEngine string
 
-// ContractOp The optional `contract` of a transaction, accepted by `POST /tx` and covered by its hash and signatures (ADR-0014); mined transactions are served with the Go field names (`Contract`, `Kind`, `GasLimit`). A `deploy` carries `code` (lowercase hex, 1 to 1024 bytes) and no `target`; a `call` carries `target` (the contract ID) and no `code`.
+// ContractOp The optional `contract` of a transaction, accepted by `POST /tx` and covered by its hash and signatures (ADR-0014); mined transactions are served with the Go field names (`Contract`, `Kind`, `GasLimit`). A `deploy` carries `code` (lowercase hex, 1 to 1024 bytes) and no `target`; a `call` carries `target` (the contract ID) and no `code`. `args` has at most 256 items (ADR-0033).
 type ContractOp struct {
 	Args     *[]uint64      `json:"args,omitempty"`
 	Code     *string        `json:"code,omitempty"`
@@ -349,7 +349,7 @@ type Transaction struct {
 	Outputs   []TxOut   `json:"Outputs"`
 	Timestamp time.Time `json:"Timestamp"`
 
-	// Contract The optional `contract` of a transaction, accepted by `POST /tx` and covered by its hash and signatures (ADR-0014); mined transactions are served with the Go field names (`Contract`, `Kind`, `GasLimit`). A `deploy` carries `code` (lowercase hex, 1 to 1024 bytes) and no `target`; a `call` carries `target` (the contract ID) and no `code`.
+	// Contract The optional `contract` of a transaction, accepted by `POST /tx` and covered by its hash and signatures (ADR-0014); mined transactions are served with the Go field names (`Contract`, `Kind`, `GasLimit`). A `deploy` carries `code` (lowercase hex, 1 to 1024 bytes) and no `target`; a `call` carries `target` (the contract ID) and no `code`. `args` has at most 256 items (ADR-0033).
 	Contract *ContractOp `json:"contract,omitempty"`
 }
 

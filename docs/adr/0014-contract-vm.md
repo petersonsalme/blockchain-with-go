@@ -1,6 +1,6 @@
 # ADR-0014: Stack-machine contract VM — contract operations ride on UTXO transactions, contract state is derived in memory
 
-Status: Proposed (ENG-42) — option A
+Status: Proposed (ENG-42) — option A; amended by [ADR-0033](0033-contract-args-limit.md) (limit on `Args`)
 
 ## Context
 - The chain only moves value (ADR-0001, UTXO). ENG-42 asks for a minimal stack VM: opcodes, a gas (step) limit, per-contract state, deploy and call transactions, deterministic and isolated execution. Acceptance: a counter contract runs deterministically and respects the gas limit.
