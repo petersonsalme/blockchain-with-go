@@ -164,6 +164,7 @@ Design decisions live in [`docs/adr/`](docs/adr/):
 | [0029](docs/adr/0029-reorg-by-cumulative-work.md) | Reorg by cumulative work with an atomic `ReplaceFrom` |
 | [0030](docs/adr/0030-rate-limiter-sweep-interval.md) | Rate limiter evicts idle buckets at most once per refill window |
 | [0031](docs/adr/0031-snapshots-and-pruning.md) | UTXO snapshots every N blocks, pruning of old bodies to headers, and boot from a snapshot file |
+| [0032](docs/adr/0032-max-block-bytes-constant.md) | `MAX_BLOCK_BYTES` becomes a 1 MiB consensus constant in `internal/domain`; the environment variable is refused at startup |
 
 ## Configuration & Environment Variables
 
