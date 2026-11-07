@@ -167,6 +167,7 @@ Design decisions live in [`docs/adr/`](docs/adr/):
 | [0032](docs/adr/0032-max-block-bytes-constant.md) | `MAX_BLOCK_BYTES` becomes a 1 MiB consensus constant in `internal/domain`; the environment variable is refused at startup |
 | [0033](docs/adr/0033-contract-args-limit.md) | Contract operations carry at most `MaxContractArgs = 256` args (consensus rule) |
 | [0034](docs/adr/0034-median-time-past.md) | Block timestamp must be later than the median time past of the last 11 blocks (replaces the parent rule) |
+| [0035](docs/adr/0035-verify-stored-chain.md) | `bwg node --verify` replays the stored chain under the full block rules before serving (opt-in) |
 
 ## Configuration & Environment Variables
 
@@ -287,6 +288,16 @@ reindexed: tip height 42
 ```
 
 `--reindex` opens `$DATA_DIR/chain.db`, drops and rebuilds the indexes from the blocks in one transaction, prints the tip height (`reindexed: empty chain` when there are no blocks) and exits with code 0 without opening an HTTP port. Running it twice leaves the file in the same state as running it once. It exits with a non-zero code and an error on stderr when `DATA_DIR` is empty (the in-memory repository has nothing to rebuild), when `DATA_DIR` does not exist, or when another process holds `chain.db` (the lock wait is 1 second). `DATA_DIR` is also read from `.env` when present.
+
+#### Verifying the stored chain (`--verify`)
+
+`NewService` trusts `chain.db`: a block edited on disk is served and built upon. To check the file, start the node with the flag:
+
+```
+$ DATA_DIR=./data go run ./cmd/bwg node --verify
+```
+
+`--verify` replays every stored block under the **current** block rules (consensus seal, Merkle root, timestamp, UTXO rules, input signatures, contract operations) on scratch state, before any port opens, and writes nothing ([ADR-0035](docs/adr/0035-verify-stored-chain.md)). On success the node logs `verified stored chain` with the tip height and serves as usual. On the first failing block it exits with a non-zero code and writes the height and the rule to stderr (`chain: stored block 3: ...`) without opening the HTTP or P2P port. On a pruned `DATA_DIR` the pruned heights get the header rules only and the replay starts from the stored snapshot. The cost is O(chain) at boot, so it is opt-in: without the flag the node starts exactly as before, even on a file that would fail the check. Because it uses the current rules, a `chain.db` written before a rule change may fail and must be resynced. The persisted UTXO set and indexes are not compared (use `--reindex`). `--verify` cannot be combined with `--reindex` or any `--snapshot-*` flag (usage error, exit code non-zero, nothing touched).
 
 ### Snapshots and pruning
 

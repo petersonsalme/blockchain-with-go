@@ -52,7 +52,7 @@ func fatalIf(err error, logger *slog.Logger, exit func(code int)) {
 // and .env, never from flags.
 func newNodeCmd(logger *slog.Logger) *cobra.Command {
 	var (
-		reindex                              bool
+		reindex, verify                      bool
 		snapshotExport, snapshotImport, hash string
 	)
 
@@ -64,13 +64,7 @@ func newNodeCmd(logger *slog.Logger) *cobra.Command {
 		// main reports a node error as a JSON "node stopped" line, not as cobra text.
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			var err error
-			if snapshotExport != "" || snapshotImport != "" || hash != "" {
-				err = runSnapshot(cmd, reindex, snapshotExport, snapshotImport, hash)
-			} else {
-				err = runNode(cmd.Context(), logger, reindex, cmd.OutOrStdout())
-			}
-
+			err := dispatchNode(cmd, logger, reindex, verify, snapshotExport, snapshotImport, hash)
 			if err != nil {
 				return nodeStoppedError{err}
 			}
@@ -79,12 +73,28 @@ func newNodeCmd(logger *slog.Logger) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&reindex, "reindex", false, "rebuild the indexes of DATA_DIR/chain.db and exit")
+	cmd.Flags().BoolVar(&verify, "verify", false, "replay the stored chain under the current block rules before serving; refuse to start when a block fails")
 	cmd.Flags().StringVar(&snapshotExport, "snapshot-export", "", "write the snapshot stored in DATA_DIR/chain.db to FILE and exit")
 	cmd.Flags().StringVar(&snapshotImport, "snapshot-import", "", "restore an empty DATA_DIR/chain.db from the snapshot FILE and exit; needs --snapshot-hash")
 	cmd.Flags().StringVar(&hash, "snapshot-hash", "", "hash the --snapshot-import file must carry (hex)")
 	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return nodeStoppedError{err} })
 
 	return cmd
+}
+
+// dispatchNode picks what `bwg node` does for the flags: --verify excludes --reindex and the
+// --snapshot-* flags, which run a task and exit; otherwise the node runs.
+func dispatchNode(cmd *cobra.Command, logger *slog.Logger, reindex, verify bool, export, imp, hash string) error {
+	snapshotSet := export != "" || imp != "" || hash != ""
+	if verify && (reindex || snapshotSet) {
+		return errors.New("--verify cannot be combined with --reindex or the --snapshot-* flags")
+	}
+
+	if snapshotSet {
+		return runSnapshot(cmd, reindex, export, imp, hash)
+	}
+
+	return runNode(cmd.Context(), logger, reindex, verify, cmd.OutOrStdout())
 }
 
 // runSnapshot runs --snapshot-export or --snapshot-import after loading .env when present.
@@ -107,12 +117,13 @@ func runSnapshot(cmd *cobra.Command, reindex bool, export, imp, hash string) err
 }
 
 // runNode runs the node, or, with reindex, rebuilds the indexes of DATA_DIR and returns.
-func runNode(ctx context.Context, logger *slog.Logger, reindex bool, stdout io.Writer) error {
+// With verify the node replays the stored chain before it opens any port.
+func runNode(ctx context.Context, logger *slog.Logger, reindex, verify bool, stdout io.Writer) error {
 	if reindex {
 		return reindexData(stdout)
 	}
 
-	return bootstrap(ctx, logger)
+	return bootstrapVerify(ctx, logger, verify)
 }
 
 // reindexData loads .env when present, then rebuilds the indexes of DATA_DIR/chain.db
@@ -157,12 +168,17 @@ func reindexData(stdout io.Writer) error {
 
 // bootstrap loads .env and runs the node until ctx is done.
 func bootstrap(ctx context.Context, logger *slog.Logger) error {
+	return bootstrapVerify(ctx, logger, false)
+}
+
+// bootstrapVerify is bootstrap with the optional replay of the stored chain (ADR-0035).
+func bootstrapVerify(ctx context.Context, logger *slog.Logger, verify bool) error {
 	err := godotenv.Load()
 	if err != nil {
 		return err
 	}
 
-	return run(ctx, logger)
+	return runVerify(ctx, logger, verify)
 }
 
 // shutdownContext bounds the graceful shutdown to 10 seconds.
@@ -426,6 +442,12 @@ func refuseRemovedEnv() error {
 
 // run wires repository, consensus, service and server, then serves until ctx is done.
 func run(ctx context.Context, logger *slog.Logger) error {
+	return runVerify(ctx, logger, false)
+}
+
+// runVerify is run; with verify it replays the stored chain right after the
+// service is built and returns the failure before any listener exists.
+func runVerify(ctx context.Context, logger *slog.Logger, verify bool) error {
 	err := refuseRemovedEnv()
 	if err != nil {
 		return err
@@ -456,6 +478,20 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	svc, err := newService(repo, engine)
 	if err != nil {
 		return err
+	}
+
+	if verify {
+		err = svc.Verify(ctx)
+		if err != nil {
+			return err
+		}
+
+		tip, err := svc.Tip()
+		if err != nil {
+			return err
+		}
+
+		logger.Info("verified stored chain", "height", tip.Index)
 	}
 
 	events := server.NewEvents()

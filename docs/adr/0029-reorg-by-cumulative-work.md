@@ -38,4 +38,4 @@ S1 + W1 + U1.
 - Between `ReplaceFrom` and the UTXO `Apply`, a reader can see the new blocks with the old balances, the same window `Mine` already has.
 - A reorg costs a replay of the local chain. Acceptable at this scale; revisit with persisted undo data if chains grow.
 - `Difficulty` becomes part of the fork-choice rule, so every `Consensus.Verify` must keep pinning it. A new adapter that does not would let a peer inflate its work.
-- The `NewService` replay still does not revalidate stored blocks and still panics on a nil stored block (ENG-83 finding 4 for the startup path): out of scope, tracked separately.
+- The `NewService` replay still does not revalidate stored blocks and still panics on a nil stored block (ENG-83 finding 4 for the startup path): out of scope, tracked separately. Closed by ADR-0035 (`bwg node --verify`).
