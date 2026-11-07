@@ -1,0 +1,57 @@
+name: Fuzz (nightly)
+
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  targets:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: List fuzz targets
+      id: list
+      run: echo "matrix=$(scripts/fuzz-targets.sh)" >> "$GITHUB_OUTPUT"
+
+  fuzz:
+    needs: targets
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.targets.outputs.matrix) }}
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: Fuzz for 60s
+      env:
+        PKG: ${{ matrix.pkg }}
+        TARGET: ${{ matrix.target }}
+      run: go test -run='^$' -fuzz="^${TARGET}\$" -fuzztime=60s "$PKG"
+
+    - name: Upload the failing input
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: fuzz-${{ matrix.target }}
+        path: ${{ matrix.pkg }}/testdata/fuzz/${{ matrix.target }}
+        if-no-files-found: ignore
