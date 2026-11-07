@@ -16,6 +16,9 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
+      - -X main.version={{ .Tag }}
+      - -X main.commit={{ .FullCommit }}
+      - -X main.date={{ .Date }}
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
 
@@ -28,6 +31,43 @@ archives:
 
 checksum:
   name_template: checksums.txt
+
+# One SBOM per archive (syft, default spdx-json): <archive>.sbom.json.
+sboms:
+  - artifacts: archive
+
+# Keyless: cosign signs with the workflow's OIDC identity; no private key exists.
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    signature: "${artifact}.sigstore.json"
+    args:
+      - sign-blob
+      - --yes
+      - --bundle=${signature}
+      - ${artifact}
+    output: true
+
+dockers_v2:
+  - ids: [bwg]
+    dockerfile: Dockerfile.release
+    images:
+      - ghcr.io/petersonsalme/blockchain-with-go
+    tags:
+      - "{{ .Tag }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+
+docker_signs:
+  - cmd: cosign
+    artifacts: manifests
+    args:
+      - sign
+      - --yes
+      - ${artifact}@${digest}
+    output: true
 
 snapshot:
   version_template: "{{ incpatch .Version }}-next"

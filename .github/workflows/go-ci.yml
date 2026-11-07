@@ -114,3 +114,45 @@ jobs:
 
     - name: goreleaser check
       run: go run github.com/goreleaser/goreleaser/v2@v2.19.0 check
+
+  release-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: Install syft
+      uses: anchore/sbom-action/download-syft@v0
+
+    - name: Install cosign
+      uses: sigstore/cosign-installer@v3
+
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Snapshot release (no publish, no signature)
+      uses: goreleaser/goreleaser-action@v6
+      with:
+        distribution: goreleaser
+        version: v2.19.0
+        args: release --snapshot --clean --skip=publish,sign
+
+    - name: Check SBOMs and images
+      run: |
+        archives=$(find dist -maxdepth 1 \( -name '*.tar.gz' -o -name '*.zip' \) | wc -l)
+        sboms=$(find dist -maxdepth 1 -name '*.sbom.json' | wc -l)
+        echo "archives=$archives sboms=$sboms"
+        [ "$archives" -gt 0 ] && [ "$archives" -eq "$sboms" ] || { echo "want one SBOM per archive"; exit 1; }
+        docker image ls
+        for arch in amd64 arm64; do
+          docker image ls ghcr.io/petersonsalme/blockchain-with-go | grep -q "$arch" || { echo "missing $arch image"; exit 1; }
+        done
