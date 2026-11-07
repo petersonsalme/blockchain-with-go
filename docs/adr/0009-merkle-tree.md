@@ -23,7 +23,7 @@ Option B, with SHA-256 and 64-character lowercase hex:
 - **Proof:** a list of steps `{sibling hash, side}` from the leaf to the root. Verifying needs only the leaf hash, the steps and the root.
 
 ## Consequences
-- The block hash commits to the transactions only through the root, so `merkle_root_mismatch` must run on every path that accepts a block (today: `Mine`). Consensus `Verify` checks the seal over the header and no longer notices a transaction edit on its own. Replaying the stored chain in `NewService` still does not revalidate blocks (pre-existing gap, out of scope).
+- The block hash commits to the transactions only through the root, so `merkle_root_mismatch` must run on every path that accepts a block (today: `Mine`). Consensus `Verify` checks the seal over the header and no longer notices a transaction edit on its own. Replaying the stored chain in `NewService` still does not revalidate blocks (pre-existing gap, out of scope). Closed by ADR-0035 (`bwg node --verify`).
 - Any change to a field of a transaction (including `PublicKey` and `Signature`), a reorder, an insertion or a removal changes the root.
 - `GET /` exposes `MerkleRoot` on each block (additive).
 - Block hashes differ from earlier versions. A `chain.db` written before this change holds blocks without `MerkleRoot`.

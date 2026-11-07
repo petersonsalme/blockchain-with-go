@@ -2,6 +2,7 @@ package chain
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -53,3 +54,7 @@ func GenerateBlock(c consensus.Consensus, history []*domain.Block, txs []domain.
 	newBlock, _ := GenerateBlockWithContext(context.Background(), c, history, txs)
 	return newBlock
 }
+
+// ErrInvalidStoredChain is wrapped by Verify around the rule error of the first
+// stored block that fails the current block rules (ADR-0035).
+var ErrInvalidStoredChain = errors.New("chain: invalid stored chain")
