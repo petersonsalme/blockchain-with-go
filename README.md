@@ -229,7 +229,7 @@ blockchain-with-go/
 ├── pkg/
 │   └── wallet/        # Ed25519 keys, addresses, keystore and HD derivation
 ├── client/            # Go client generated from openapi.yaml (do not edit)
-├── e2e/               # Three-node docker compose test (build tag e2e)
+├── e2e/               # Docker compose tests (build tag e2e): three nodes, partition/reorg, PoA with 2 validators
 ├── docs/              # ADRs (docs/adr/) and the playground guide
 ├── openapi.yaml       # HTTP API contract (OpenAPI 3.0.3)
 ├── go.mod             # Go module definition
@@ -365,11 +365,11 @@ Pass any other variable with `-e` (for example `-e CONSENSUS=poa -e POA_VALIDATO
 $ docker compose up -d --build                  # brings the network up
 $ curl -s localhost:18081/health                # node1; use 18082 and 18083 for the others
 $ curl -s -X POST localhost:18081/mine          # mines one block; the other two receive it
-$ go test -tags e2e -count=1 -timeout 10m ./e2e/...   # e2e: propagation, restarted node and convergence
+$ go test -tags e2e -count=1 -timeout 20m ./e2e/...   # e2e: propagation, restart, convergence, partition reorg, PoA
 $ docker compose down -v                        # stops the network and deletes the volumes
 ```
 
-The e2e test uses the `bwg-e2e` project and tears it down when it finishes; CI runs it in the `e2e` job.
+The e2e tests use the projects `bwg-e2e`, `bwg-e2e-contract`, `bwg-e2e-partition` and `bwg-e2e-poa` (run in sequence, they share ports 18081-18083) and tear them down when they finish; CI runs them in the `e2e` job.
 
 To try the network by hand, starting from an empty chain funded by mining, see [docs/playground.md](docs/playground.md). The same page has the guide to the network dashboard (`--profile dashboard`, port 18080): [Network dashboard](docs/playground.md#network-dashboard---profile-dashboard).
 

@@ -90,7 +90,7 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
     - uses: actions/checkout@v4
 
@@ -100,7 +100,7 @@ jobs:
         go-version-file: go.mod
 
     - name: Three-node docker compose e2e
-      run: go test -tags e2e -count=1 -timeout 10m ./e2e/...
+      run: go test -tags e2e -count=1 -timeout 20m ./e2e/...
 
   release-check:
     runs-on: ubuntu-latest
