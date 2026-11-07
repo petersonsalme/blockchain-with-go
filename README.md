@@ -129,7 +129,7 @@ fmt.Println(w.Address())
 
 ## Architecture Decision Records
 
-Design decisions live in [`docs/adr/`](docs/adr/):
+Design decisions live in [`docs/adr/`](docs/adr/). For a walkthrough of the code, follow one transaction and one reorg through it in the [study guide](docs/guide/README.md):
 
 | ADR | Decision |
 |---|---|
