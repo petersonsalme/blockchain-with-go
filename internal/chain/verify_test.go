@@ -206,24 +206,30 @@ var _ = Describe("Service.Verify", func() {
 			})
 
 			It("rejects a changed input signature", func() {
-				serve(func(all []*domain.Block) {
-					sig := []byte(all[prunedTip].Transactions[0].Inputs[0].Signature)
-					sig[0] ^= 1
-					all[prunedTip].Transactions[0].Inputs[0].Signature = string(sig)
-				})
+				local := mustAll(repo)
+				txs := slices.Clone(local[prunedTip].Transactions)
+				txs[0].Inputs = slices.Clone(txs[0].Inputs)
+				sig := []byte(txs[0].Inputs[0].Signature)
+				sig[0] ^= 1
+				txs[0].Inputs[0].Signature = string(sig)
+				bad := grow(eng, local[:prunedTip], txs)
+
+				serve(func(all []*domain.Block) { all[prunedTip] = bad[prunedTip] })
 
 				err := svc.Verify(ctx)
 
 				Expect(errors.Is(err, ErrInvalidStoredChain)).To(BeTrue())
+				Expect(errors.Is(err, domain.ErrInvalidSignature)).To(BeTrue(), "%v", err)
 				Expect(err.Error()).To(HavePrefix(fmt.Sprintf("chain: stored block %d: ", prunedTip)))
 			})
 
 			It("rejects a header whose previous hash changed", func() {
-				serve(func(all []*domain.Block) { all[2].PrevHash = "00" + all[2].PrevHash[2:] })
+				serve(func(all []*domain.Block) { all[2].PrevHash = "ff" + all[2].PrevHash[2:] })
 
 				err := svc.Verify(ctx)
 
 				Expect(errors.Is(err, ErrInvalidStoredChain)).To(BeTrue())
+				Expect(errors.Is(err, consensus.ErrInvalidPrevHash)).To(BeTrue(), "%v", err)
 				Expect(err.Error()).To(HavePrefix("chain: stored block 2: "))
 			})
 
