@@ -3,6 +3,7 @@ package domain
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -42,15 +43,40 @@ func ValidateSize(b *Block, limit int) error {
 	return nil
 }
 
-// ValidateTimestamp rejects blocks older than their parent or too far in the future.
-func ValidateTimestamp(b, parent *Block, now time.Time) error {
-	if b.Timestamp.Before(parent.Timestamp) {
+// MedianTimeSpan is how many of the newest blocks the median time past covers (ADR-0034).
+const MedianTimeSpan = 11
+
+// MedianTimePast is the median timestamp of the last MedianTimeSpan blocks of
+// history (all of them when fewer): the element at index len/2 of the sorted
+// timestamps. It is the zero time for an empty history.
+func MedianTimePast(history []*Block) time.Time {
+	window := history[max(0, len(history)-MedianTimeSpan):]
+
+	if len(window) == 0 {
+		return time.Time{}
+	}
+
+	stamps := make([]time.Time, len(window))
+	for i, b := range window {
+		stamps[i] = b.Timestamp
+	}
+
+	sort.Slice(stamps, func(i, j int) bool { return stamps[i].Before(stamps[j]) })
+
+	return stamps[len(stamps)/2]
+}
+
+// ValidateTimestamp rejects blocks not strictly later than the median time past
+// of history (which ends with the block's parent) or too far in the future.
+func ValidateTimestamp(b *Block, history []*Block, now time.Time) error {
+	median := MedianTimePast(history)
+	if !b.Timestamp.After(median) {
 		return &ValidationError{
-			Code:    CodeTimestampBeforeParent,
-			Message: "block timestamp is before its parent's timestamp",
+			Code:    CodeTimestampNotAfterMedianTimePast,
+			Message: "block timestamp is not later than the median time past of the last blocks",
 			Details: map[string]any{
 				"timestamp":        b.Timestamp.Format(time.RFC3339Nano),
-				"parent_timestamp": parent.Timestamp.Format(time.RFC3339Nano),
+				"median_time_past": median.Format(time.RFC3339Nano),
 			},
 		}
 	}
@@ -85,7 +111,7 @@ func ValidateMerkleRoot(b *Block) error {
 }
 
 // ValidateBlockRules applies the structural block rules (size, merkle root and timestamp).
-func ValidateBlockRules(b, parent *Block, now time.Time) error {
+func ValidateBlockRules(b *Block, history []*Block, now time.Time) error {
 	err := ValidateSize(b, MaxBlockBytes)
 	if err != nil {
 		return err
@@ -96,5 +122,5 @@ func ValidateBlockRules(b, parent *Block, now time.Time) error {
 		return err
 	}
 
-	return ValidateTimestamp(b, parent, now)
+	return ValidateTimestamp(b, history, now)
 }

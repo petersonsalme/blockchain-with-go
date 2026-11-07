@@ -101,6 +101,33 @@ var _ = Describe("Blockchain", Ordered, func() {
 			Expect(pow.Verify([]*domain.Block{oldBlock}, newBlock)).To(Succeed())
 		})
 
+		It("stamps time.Now() when the median time past is behind the clock", func() {
+			before := time.Now()
+			newBlock, err := GenerateBlockWithContext(context.Background(), pow, []*domain.Block{oldBlock}, sampleTxs)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(newBlock.Timestamp).To(BeTemporally(">=", before))
+			Expect(newBlock.Timestamp).To(BeTemporally("<=", time.Now()))
+		})
+
+		It("stamps MTP+1ns when the median time past is ahead of the clock, and the block passes ValidateBlockRules", func() {
+			ahead := time.Now().Add(time.Hour)
+			history := make([]*domain.Block, 0, 3)
+
+			for i := range 3 {
+				history = append(history, &domain.Block{
+					Index:        i,
+					Timestamp:    ahead,
+					Transactions: []domain.Transaction{},
+					Hash:         strings.Repeat("a", 64),
+				})
+			}
+
+			newBlock, err := GenerateBlockWithContext(context.Background(), pow, history, sampleTxs)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(newBlock.Timestamp).To(Equal(ahead.Add(time.Nanosecond)))
+			Expect(domain.ValidateBlockRules(newBlock, history, time.Now())).To(Succeed())
+		})
+
 		It("should return an error when context is canceled", func() {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()

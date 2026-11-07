@@ -579,7 +579,7 @@ var _ = Describe("Server", func() {
 
 			var body map[string]any
 			Expect(json.Unmarshal(rec.Body.Bytes(), &body)).To(Succeed())
-			Expect(body["code"]).To(Equal("timestamp_before_parent"))
+			Expect(body["code"]).To(Equal("timestamp_not_after_median_time_past"))
 			Expect(chainLen()).To(Equal(1))
 		})
 

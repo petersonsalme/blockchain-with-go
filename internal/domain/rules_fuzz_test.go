@@ -54,7 +54,7 @@ func FuzzValidateBlockRules(f *testing.F) {
 
 		t.Setenv("MAX_BLOCK_BYTES", strconv.Itoa(int(maxBytes)))
 
-		err := domain.ValidateBlockRules(b, parent, now)
+		err := domain.ValidateBlockRules(b, []*domain.Block{parent}, now)
 
 		encoded, marshalErr := json.Marshal(b)
 		if marshalErr != nil {
@@ -72,8 +72,8 @@ func FuzzValidateBlockRules(f *testing.F) {
 			wantCode = domain.CodeBlockTooLarge
 		case corrupt:
 			wantCode = domain.CodeMerkleRootMismatch
-		case ts.Before(parent.Timestamp):
-			wantCode = domain.CodeTimestampBeforeParent
+		case !ts.After(domain.MedianTimePast([]*domain.Block{parent})):
+			wantCode = domain.CodeTimestampNotAfterMedianTimePast
 		case ts.After(now.Add(domain.MaxFutureDrift)):
 			wantCode = domain.CodeTimestampTooFarInTheFuture
 		}
@@ -93,6 +93,70 @@ func FuzzValidateBlockRules(f *testing.F) {
 
 		if verr.Code != wantCode {
 			t.Fatalf("code %q, want %q", verr.Code, wantCode)
+		}
+	})
+}
+
+// FuzzValidateTimestamp checks ValidateTimestamp against an independent oracle
+// over histories of 1..30 blocks with arbitrary, unsorted timestamps.
+func FuzzValidateTimestamp(f *testing.F) {
+	f.Add(int64(1), int64(2), int64(3), int64(4), int64(5), 12, int64(3), int64(100))
+	f.Add(int64(100), int64(0), int64(50), int64(7), int64(9), 30, int64(50), int64(60))
+	f.Add(int64(0), int64(0), int64(0), int64(0), int64(0), 1, int64(0), int64(0))
+	f.Add(int64(5), int64(9), int64(1), int64(8), int64(2), 11, int64(100), int64(0))
+
+	f.Fuzz(func(t *testing.T, a, b, c, d, e int64, n int, tsSec, nowSec int64) {
+		n = 1 + (n%30+30)%30
+		seeds := []int64{a, b, c, d, e}
+		history := make([]*domain.Block, n)
+
+		for i := range history {
+			history[i] = &domain.Block{Timestamp: time.Unix(1_700_000_000+seeds[i%5]%1000+int64(i*7%13), 0).UTC()}
+		}
+
+		ts := time.Unix(1_700_000_000+tsSec%2000, 0).UTC()
+		now := time.Unix(1_700_000_000+nowSec%20000, 0).UTC()
+
+		window := history
+		if len(window) > 11 {
+			window = window[len(window)-11:]
+		}
+
+		stamps := make([]time.Time, len(window))
+		for i, blk := range window {
+			stamps[i] = blk.Timestamp
+		}
+
+		// Independent insertion sort, not the production sort.
+		for i := 1; i < len(stamps); i++ {
+			for j := i; j > 0 && stamps[j].Before(stamps[j-1]); j-- {
+				stamps[j], stamps[j-1] = stamps[j-1], stamps[j]
+			}
+		}
+
+		median := stamps[len(stamps)/2]
+
+		var wantCode string
+
+		switch {
+		case !ts.After(median):
+			wantCode = domain.CodeTimestampNotAfterMedianTimePast
+		case ts.After(now.Add(domain.MaxFutureDrift)):
+			wantCode = domain.CodeTimestampTooFarInTheFuture
+		}
+
+		err := domain.ValidateTimestamp(&domain.Block{Timestamp: ts}, history, now)
+		if wantCode == "" {
+			if err != nil {
+				t.Fatalf("accepted by the oracle, rejected: %v", err)
+			}
+
+			return
+		}
+
+		var verr *domain.ValidationError
+		if !errors.As(err, &verr) || verr.Code != wantCode {
+			t.Fatalf("want code %q, got %v", wantCode, err)
 		}
 	})
 }
