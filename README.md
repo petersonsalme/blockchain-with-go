@@ -168,6 +168,7 @@ Design decisions live in [`docs/adr/`](docs/adr/):
 | [0033](docs/adr/0033-contract-args-limit.md) | Contract operations carry at most `MaxContractArgs = 256` args (consensus rule) |
 | [0034](docs/adr/0034-median-time-past.md) | Block timestamp must be later than the median time past of the last 11 blocks (replaces the parent rule) |
 | [0035](docs/adr/0035-verify-stored-chain.md) | `bwg node --verify` replays the stored chain under the full block rules before serving (opt-in) |
+| [0036](docs/adr/0036-signed-release-sbom-image.md) | Signed release: `bwg version` from ldflags, syft SBOMs, cosign keyless checksums and a signed GHCR image |
 
 ## Configuration & Environment Variables
 
@@ -374,11 +375,33 @@ To try the network by hand, starting from an empty chain funded by mining, see [
 
 ### Releases
 
-Pushing a tag `v*` (for example `git tag v0.1.0 && git push origin v0.1.0`) runs `.github/workflows/release.yml`, which uses [goreleaser](https://goreleaser.com) (`.goreleaser.yaml`) to build static `bwg` binaries for linux, darwin and windows on amd64 and arm64 and publish them, with `checksums.txt`, as a GitHub release. To try it locally without publishing:
+Pushing a tag `v*` (for example `git tag v0.1.0 && git push origin v0.1.0`) runs `.github/workflows/release.yml`, which uses [goreleaser](https://goreleaser.com) (`.goreleaser.yaml`) to build static `bwg` binaries for linux, darwin and windows on amd64 and arm64 and publish them as a GitHub release, with `checksums.txt`, a [syft](https://github.com/anchore/syft) SBOM per archive (`*.sbom.json`), the keyless [cosign](https://github.com/sigstore/cosign) signature `checksums.txt.sigstore.json`, and a signed multi-arch image `ghcr.io/petersonsalme/blockchain-with-go` (`linux/amd64`, `linux/arm64`; tags `<tag>` and `latest`, built from `Dockerfile.release`). No private key exists: cosign signs with the workflow's OIDC identity ([ADR-0036](docs/adr/0036-signed-release-sbom-image.md)).
+
+`bwg version` prints the tag, commit and build date injected at link time, for example `bwg v0.1.0 (commit <sha>, built 2026-11-07T00:00:00Z)`; a plain `go build` prints `bwg dev (commit none, built unknown)`.
+
+Verify the checksums of a download, then the files against them:
+
+```shell
+$ cosign verify-blob --bundle checksums.txt.sigstore.json \
+    --certificate-identity-regexp 'https://github.com/petersonsalme/blockchain-with-go/.github/workflows/release.yml@refs/tags/v.*' \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt
+$ sha256sum --ignore-missing -c checksums.txt
+```
+
+Verify the image:
+
+```shell
+$ cosign verify \
+    --certificate-identity-regexp 'https://github.com/petersonsalme/blockchain-with-go/.github/workflows/release.yml@refs/tags/v.*' \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    ghcr.io/petersonsalme/blockchain-with-go:v0.1.0
+```
+
+The GHCR package starts private; the maintainer makes it public once in the package settings. To check the config and try a build locally without publishing (the SBOMs need syft and the image needs Docker buildx; CI runs this as the `release-snapshot` job):
 
 ```shell
 $ go run github.com/goreleaser/goreleaser/v2@v2.19.0 check
-$ go run github.com/goreleaser/goreleaser/v2@v2.19.0 release --snapshot --clean   # binaries in dist/
+$ go run github.com/goreleaser/goreleaser/v2@v2.19.0 release --snapshot --clean --skip=publish,sign   # binaries, SBOMs and images in dist/
 ```
 
 ### Fuzzing

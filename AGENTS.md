@@ -39,6 +39,7 @@ blockchain-with-go/
 ├── pkg/
 │   └── wallet/        # Ed25519 keys, addressing and keystore
 ├── Dockerfile         # Multi-stage image: static bwg on distroless nonroot, runs `bwg node` on 8080
+├── Dockerfile.release # Image goreleaser builds (dockers_v2): copies the built bwg onto distroless nonroot, same runtime as Dockerfile
 ├── .goreleaser.yaml   # Release build of bwg (linux/darwin/windows × amd64/arm64); run on `v*` tags by release.yml
 ├── openapi.yaml       # HTTP API contract (OpenAPI 3.0.3); internal/server/contract_test.go checks the server against it
 ├── go.mod             # Go module and dependencies
@@ -77,7 +78,7 @@ Everything else (HTTP handlers and DTOs, logging, docs, README, CLI, build files
    - Docker smoke (build, non-root user, `GET /health` in memory and with `DATA_DIR=/data`): `scripts/docker-smoke.sh`
    - TLS proxy smoke (`compose.tls.yml`: Caddy TLS, route allowlist, headers, no published node port; not in CI): `scripts/tls-smoke.sh`
    - Three-node e2e (needs docker; builds the image, tag `e2e` keeps it out of `go test ./...`): `go test -tags e2e -count=1 -timeout 10m ./e2e/...`
-   - Release config check and local snapshot build: `go run github.com/goreleaser/goreleaser/v2@v2.19.0 check` and `go run github.com/goreleaser/goreleaser/v2@v2.19.0 release --snapshot --clean` (output in `dist/`, ignored)
+   - Release config check and local snapshot build: `go run github.com/goreleaser/goreleaser/v2@v2.19.0 check` and `go run github.com/goreleaser/goreleaser/v2@v2.19.0 release --snapshot --clean --skip=publish,sign` (output in `dist/`, ignored; SBOMs need syft and images need buildx, so CI's `release-snapshot` job proves them)
    - Regenerate the client after editing `openapi.yaml`: `go generate ./client/...` (CI fails on `git diff --exit-code client/`)
    - Working gate while implementing: `scripts/gate-diff.sh [--base REF] [--dependents] [--mutation]` finds the Go packages the change touches (committed, staged, unstaged and untracked files against `origin/master`) and runs `go test -race` and `golangci-lint run` on them only. `--dependents` adds the packages that import a changed one (use it when `internal/domain` or another shared package changes); `go.mod`/`go.sum` select `./...`; `openapi.yaml` and `client/` select `internal/server` and `client`. It does not replace the full gate: run the CI quality gates below on `./...` once, at the end, before delivery or approval.
    - CI quality gates (`.github/workflows/go-ci.yml`), local equivalents:

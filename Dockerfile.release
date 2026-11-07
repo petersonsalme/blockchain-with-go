@@ -1,0 +1,19 @@
+# syntax=docker/dockerfile:1
+# Image built by goreleaser (dockers_v2): it copies the bwg binary goreleaser
+# already built for $TARGETPLATFORM instead of compiling. Dockerfile builds from source.
+
+# distroless has no shell: create /app/.env and /data here and copy them with their owner.
+FROM busybox:stable AS dirs
+RUN mkdir -p /out/app /out/data && touch /out/app/.env
+
+FROM gcr.io/distroless/static-debian12:nonroot
+ARG TARGETPLATFORM
+COPY $TARGETPLATFORM/bwg /usr/local/bin/bwg
+COPY --from=dirs --chown=65532:65532 /out/app /app
+COPY --from=dirs --chown=65532:65532 /out/data /data
+WORKDIR /app
+ENV PORT=8080
+EXPOSE 8080
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/bwg"]
+CMD ["node"]
