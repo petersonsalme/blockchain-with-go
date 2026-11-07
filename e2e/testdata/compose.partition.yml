@@ -1,0 +1,11 @@
+# Override for the partition e2e test (e2e/partition_test.go): node3 joins a second
+# network that no other node joins. The test disconnects node3 from "default" (the
+# network the nodes talk on); node3's published port stays reachable through
+# node3-access. A network shared by every node would not isolate it: compose
+# registers each service name as an alias on every network it joins.
+services:
+  node3:
+    networks: [default, node3-access]
+
+networks:
+  node3-access:

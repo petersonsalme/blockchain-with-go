@@ -17,7 +17,7 @@ blockchain-with-go/
 ├── docker-compose.yml # Three-node network (node1..node3) for local runs and the e2e test; `--profile dashboard` adds the dashboard service (port 18080)
 ├── compose.tls.yml    # Standalone stack (project bwg-tls): node1, node2, dashboard on an internal network behind a TLS-terminating Caddy on 127.0.0.1:18443/18444 (ADR-0024)
 ├── proxy/             # Caddyfile for compose.tls.yml: route allowlist, response headers, local CA (no key or certificate is committed)
-├── e2e/               # Build-tag `e2e` test: brings the compose network up and checks propagation, restart sync and convergence
+├── e2e/               # Build-tag `e2e` tests: compose network up; propagation, restart sync, convergence, contract reorg, partition reorg to the branch with more work, PoA with 2 validators
 ├── observability/     # Prometheus config and provisioned Grafana (data source, dashboard) for the `observability` profile of compose.playground.yml (ADR-0022)
 ├── client/            # Go client generated from openapi.yaml by oapi-codegen (do not edit by hand)
 ├── internal/
@@ -77,7 +77,7 @@ Everything else (HTTP handlers and DTOs, logging, docs, README, CLI, build files
    - Run the node locally: `go run ./cmd/bwg node`
    - Docker smoke (build, non-root user, `GET /health` in memory and with `DATA_DIR=/data`): `scripts/docker-smoke.sh`
    - TLS proxy smoke (`compose.tls.yml`: Caddy TLS, route allowlist, headers, no published node port; not in CI): `scripts/tls-smoke.sh`
-   - Three-node e2e (needs docker; builds the image, tag `e2e` keeps it out of `go test ./...`): `go test -tags e2e -count=1 -timeout 10m ./e2e/...`
+   - Three-node e2e (needs docker; builds the image, tag `e2e` keeps it out of `go test ./...`): `go test -tags e2e -count=1 -timeout 20m ./e2e/...`
    - Release config check and local snapshot build: `go run github.com/goreleaser/goreleaser/v2@v2.19.0 check` and `go run github.com/goreleaser/goreleaser/v2@v2.19.0 release --snapshot --clean --skip=publish,sign` (output in `dist/`, ignored; SBOMs need syft and images need buildx, so CI's `release-snapshot` job proves them)
    - Regenerate the client after editing `openapi.yaml`: `go generate ./client/...` (CI fails on `git diff --exit-code client/`)
    - Working gate while implementing: `scripts/gate-diff.sh [--base REF] [--dependents] [--mutation]` finds the Go packages the change touches (committed, staged, unstaged and untracked files against `origin/master`) and runs `go test -race` and `golangci-lint run` on them only. `--dependents` adds the packages that import a changed one (use it when `internal/domain` or another shared package changes); `go.mod`/`go.sum` select `./...`; `openapi.yaml` and `client/` select `internal/server` and `client`. It does not replace the full gate: run the CI quality gates below on `./...` once, at the end, before delivery or approval.

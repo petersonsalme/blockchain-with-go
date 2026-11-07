@@ -1,0 +1,22 @@
+# Override for the PoA e2e test (e2e/poa_test.go): two validators, each sealing with
+# its own key. The test writes the keystores to a temp dir and passes
+# BWG_E2E_KEYS (that dir), BWG_E2E_POA_VALIDATORS and BWG_E2E_POA_PASSWORD.
+# node2 joins node2-access, a network only it joins, so the test can cut it off
+# from "default" and still reach its published port.
+x-poa: &poa
+  CONSENSUS: poa
+  POA_VALIDATORS: ${BWG_E2E_POA_VALIDATORS:?}
+  POA_KEYSTORE: /keys/validator.key
+  POA_KEYSTORE_PASSWORD: ${BWG_E2E_POA_PASSWORD:?}
+
+services:
+  node1:
+    environment: *poa
+    volumes: ["${BWG_E2E_KEYS:?}/node1.key:/keys/validator.key:ro"]
+  node2:
+    environment: *poa
+    volumes: ["${BWG_E2E_KEYS:?}/node2.key:/keys/validator.key:ro"]
+    networks: [default, node2-access]
+
+networks:
+  node2-access:

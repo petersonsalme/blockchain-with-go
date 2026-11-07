@@ -10,7 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 )
@@ -42,6 +44,91 @@ func compose(ctx context.Context, args ...string) ([]byte, error) {
 	full := append([]string{"compose", "-p", project, "-f", "../docker-compose.yml"}, args...)
 
 	return exec.CommandContext(ctx, "docker", full...).CombinedOutput()
+}
+
+// stack is one compose project: its name, extra -f files (after the stock one) and
+// extra environment (for ${VAR:?} interpolation, which every compose call needs).
+type stack struct {
+	project string
+	files   []string
+	env     []string
+}
+
+func (s stack) compose(ctx context.Context, args ...string) ([]byte, error) {
+	full := []string{"compose", "-p", s.project, "-f", "../docker-compose.yml"}
+	for _, f := range s.files {
+		full = append(full, "-f", f)
+	}
+
+	full = append(full, args...)
+	cmd := exec.CommandContext(ctx, "docker", full...)
+
+	cmd.Env = append(os.Environ(), s.env...)
+
+	return cmd.CombinedOutput()
+}
+
+func (s stack) must(ctx context.Context, t *testing.T, args ...string) {
+	t.Helper()
+
+	out, err := s.compose(ctx, args...)
+	if err != nil {
+		t.Fatalf("docker compose %v: %v\n%s", args, err, out)
+	}
+}
+
+// containerID returns the id of the running container of a service.
+func (s stack) containerID(ctx context.Context, t *testing.T, service string) string {
+	t.Helper()
+
+	out, err := s.compose(ctx, "ps", "-q", service)
+	if err != nil {
+		t.Fatalf("docker compose ps -q %s: %v\n%s", service, err, out)
+	}
+
+	id := strings.TrimSpace(string(out))
+	if id == "" {
+		t.Fatalf("no container for %s", service)
+	}
+
+	return id
+}
+
+// cleanup registers the teardown every compose test needs: logs on failure, then down -v.
+func (s stack) cleanup(t *testing.T) {
+	t.Helper()
+
+	t.Cleanup(func() {
+		// Fresh context: the test one may already be done.
+		cctx, ccancel := context.WithTimeout(context.Background(), time.Minute)
+		defer ccancel()
+
+		if t.Failed() {
+			logs, _ := s.compose(cctx, "logs", "--no-color")
+			t.Logf("docker compose logs:\n%s", logs)
+		}
+
+		out, err := s.compose(cctx, "down", "-v", "--remove-orphans")
+		if err != nil {
+			t.Errorf("docker compose down -v: %v\n%s", err, out)
+		}
+	})
+}
+
+// getBlock fetches GET /block/{ref} from a node.
+func getBlock(ctx context.Context, node, ref string) (blockView, error) {
+	var b blockView
+
+	err := call(ctx, http.MethodGet, nodeURLs[node]+"/block/"+ref, &b)
+
+	return b, err
+}
+
+// blockView holds the fields of a block the e2e tests read.
+type blockView struct {
+	Index     int
+	Hash      string
+	Validator string
 }
 
 func mustCompose(ctx context.Context, t *testing.T, args ...string) {
