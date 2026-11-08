@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -470,5 +471,66 @@ func TestOptionsAreValidated(t *testing.T) {
 	f := indexer.NewFollower(&fakeNode{}, &fakeStore{}, nil, indexer.WithPollInterval(0))
 	if f == nil {
 		t.Fatal("nil follower")
+	}
+}
+
+// notNextStore answers ErrNotNext to the nth Apply call (0-based) and delegates the others.
+type notNextStore struct {
+	*fakeStore
+
+	at, calls int
+}
+
+func (s *notNextStore) Apply(ctx context.Context, b indexer.Block) error {
+	s.calls++
+	if s.calls-1 == s.at {
+		return indexer.ErrNotNext
+	}
+
+	return s.fakeStore.Apply(ctx, b)
+}
+
+func TestSyncStoreRefusingTheFirstBlockOfAPageIsInconsistent(t *testing.T) {
+	node := &fakeNode{chain: fakeChain("a", genesis("a"), 5)}
+	store := &notNextStore{fakeStore: &fakeStore{}, at: 0}
+
+	err := newFollower(node, store).Sync(t.Context())
+	if !errors.Is(err, indexer.ErrInconsistent) || len(store.applied) != 0 {
+		t.Fatalf("err %v applied %v, want ErrInconsistent and nothing applied", err, store.applied)
+	}
+}
+
+func TestSyncStoreRefusingALaterBlockKeepsProgressAndRetries(t *testing.T) {
+	node := &fakeNode{chain: fakeChain("a", genesis("a"), 5)}
+	store := &notNextStore{fakeStore: &fakeStore{}, at: 2}
+
+	err := newFollower(node, store).Sync(t.Context())
+	if err != nil || len(store.blocks) != 5 {
+		t.Fatalf("err %v stored %d, want nil and 5", err, len(store.blocks))
+	}
+}
+
+// headerNode answers Headers with a canned page.
+type headerNode struct {
+	fakeNode
+
+	headers []indexer.Header
+}
+
+func (n *headerNode) Headers(context.Context, int, int) ([]indexer.Header, error) {
+	return n.headers, nil
+}
+
+func TestSyncHeaderAtWrongHeightIsInconsistent(t *testing.T) {
+	chainA := fakeChain("a", genesis("a"), 5)
+	bad := fakeChain("b", genesis("b"), 5)
+	node := &headerNode{
+		fakeNode: fakeNode{chain: bad},
+		headers:  []indexer.Header{{Height: 9, Hash: "x"}},
+	}
+
+	err := newFollower(node, &fakeStore{blocks: chainA}).Sync(t.Context())
+	if !errors.Is(err, indexer.ErrInconsistent) || !strings.Contains(err.Error(), "header 9 at height 0") {
+		t.Fatalf("err %v, want ErrInconsistent naming header 9 at height 0", err)
 	}
 }

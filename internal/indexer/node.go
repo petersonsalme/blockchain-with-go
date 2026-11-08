@@ -49,10 +49,11 @@ func (c *NodeClient) Blocks(ctx context.Context, from, limit int) ([]Block, erro
 			return nil, err
 		}
 
-		switch {
-		case b.Index == 0:
+		if b.Index == 0 {
 			genesis = conv.Hash
-		case b.Index == 1 && b.PrevHash == "":
+		}
+
+		if b.Index == 1 && b.PrevHash == "" {
 			if genesis == "" {
 				genesis, err = c.genesisID(ctx)
 				if err != nil {
