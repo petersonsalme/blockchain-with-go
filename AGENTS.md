@@ -13,11 +13,13 @@ Educational blockchain implementation in Go with block validation, SHA-256 hashi
 ```
 blockchain-with-go/
 ├── cmd/
-│   └── bwg/           # The only binary and composition root (cobra): node, wallet new/balance/send, miner, dashboard
+│   └── bwg/           # The only binary and composition root (cobra): node, wallet new/balance/send, contract deploy/call/show, miner, dashboard
 ├── docker-compose.yml # Three-node network (node1..node3) for local runs and the e2e test; `--profile dashboard` adds the dashboard service (port 18080)
 ├── compose.tls.yml    # Standalone stack (project bwg-tls): node1, node2, dashboard on an internal network behind a TLS-terminating Caddy on 127.0.0.1:18443/18444 (ADR-0024)
 ├── proxy/             # Caddyfile for compose.tls.yml: route allowlist, response headers, local CA (no key or certificate is committed)
-├── e2e/               # Build-tag `e2e` tests: compose network up; propagation, restart sync, convergence, contract reorg, partition reorg to the branch with more work, PoA with 2 validators
+├── examples/
+│   └── contracts/     # Four example contracts as hex files, a README and a test that runs each through vm.ValidateCode and vm.Execute (ADR-0037)
+├── e2e/               # Build-tag `e2e` tests: compose network up; propagation, restart sync, convergence, contract reorg, contract CLI (`contract_cli_test.go`: bwg contract deploy/call/show), partition reorg to the branch with more work, PoA with 2 validators
 ├── observability/     # Prometheus config and provisioned Grafana (data source, dashboard) for the `observability` profile of compose.playground.yml (ADR-0022)
 ├── client/            # Go client generated from openapi.yaml by oapi-codegen (do not edit by hand)
 ├── internal/

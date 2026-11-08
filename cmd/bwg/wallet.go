@@ -238,5 +238,28 @@ func toClientTx(tx domain.Transaction) client.Transaction {
 		Inputs:    &ins,
 		Outputs:   outs,
 		Timestamp: tx.Timestamp,
+		Contract:  toClientContract(tx.Contract),
 	}
+}
+
+// toClientContract maps op to the wire object; empty Code, Target and Args stay unset.
+func toClientContract(op *domain.ContractOp) *client.ContractOp {
+	if op == nil {
+		return nil
+	}
+
+	out := &client.ContractOp{Kind: client.ContractOpKind(op.Kind), GasLimit: op.GasLimit}
+	if op.Code != "" {
+		out.Code = &op.Code
+	}
+
+	if op.Target != "" {
+		out.Target = &op.Target
+	}
+
+	if len(op.Args) > 0 {
+		out.Args = &op.Args
+	}
+
+	return out
 }
