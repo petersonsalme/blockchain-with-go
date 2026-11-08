@@ -3,7 +3,9 @@ module github.com/petersonsalme/blockchain-with-go
 go 1.26.10
 
 require (
+	github.com/fergusstrange/embedded-postgres v1.34.0
 	github.com/getkin/kin-openapi v0.151.0
+	github.com/jackc/pgx/v5 v5.12.0
 	github.com/joho/godotenv v1.4.0
 	github.com/oapi-codegen/runtime v1.7.0
 	github.com/onsi/ginkgo/v2 v2.1.4
@@ -25,7 +27,10 @@ require (
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
+	github.com/lib/pq v1.10.9 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/oasdiff/yaml v0.1.1 // indirect
 	github.com/oasdiff/yaml3 v0.0.14 // indirect
@@ -34,6 +39,7 @@ require (
 	github.com/prometheus/procfs v0.22.0 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
+	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8 // indirect
 	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect

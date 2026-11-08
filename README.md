@@ -170,6 +170,7 @@ Design decisions live in [`docs/adr/`](docs/adr/). For a walkthrough of the code
 | [0035](docs/adr/0035-verify-stored-chain.md) | `bwg node --verify` replays the stored chain under the full block rules before serving (opt-in) |
 | [0036](docs/adr/0036-signed-release-sbom-image.md) | Signed release: `bwg version` from ldflags, syft SBOMs, cosign keyless checksums and a signed GHCR image |
 | [0037](docs/adr/0037-contract-cli.md) | Contract transactions from the CLI: `bwg contract deploy\|call\|show`, example contracts |
+| [0038](docs/adr/0038-chain-indexer-postgres.md) | Reorg-safe chain indexer in Postgres: `bwg indexer run\|resync`, pull by height, one writer |
 
 ## Configuration & Environment Variables
 
@@ -334,6 +335,10 @@ $ go run ./cmd/bwg miner --count 1                         # calls POST /mine; p
 ```
 
 `wallet send` spends the confirmed outputs of the keystore address in the order the node lists them, until they cover `amount + fee`, sends any change back to the same address, signs every input and submits the transaction to `POST /tx` (it is then in the mempool; `miner` or `POST /mine` confirms it). `contract deploy` (`--code HEX` or `--code-file PATH`, `--gas-limit`, optional `--args a,b,...` of decimal `uint64`, `--fee`) and `contract call` (`--target`, same flags) build their transaction the same way, but pay everything but the fee back to the sender in one output, since contracts hold no coins; the CLI checks no contract rule and prints the node's message when it rejects the operation ([ADR-0037](docs/adr/0037-contract-cli.md)). One confirmed output allows one pending spend, so mine a block between a deploy and its first call. Four ready-made contracts are in [`examples/contracts/`](examples/contracts/README.md). `miner` retries when the chain changed during mining (`409`) and, with `--count 0` (the default), mines until interrupted (`Ctrl+C`). `--node` (or `NODE_URL`) selects the node; the default matches the node's default `PORT`.
+
+### Chain indexer (bwg indexer)
+
+`bwg indexer run` follows one node through `GET /blocks` and `GET /headers` and copies its canonical chain into Postgres: `blocks`, `outputs` (spent or not), `balances` per address and `supply` per height ([ADR-0038](docs/adr/0038-chain-indexer-postgres.md)). It stays equal to the node across reorgs (it rolls back to the highest common block and applies forward, each step one transaction), crashes and restarts (the stored tip is the cursor). It needs a node that keeps every block body (`PRUNE_KEEP_BLOCKS=0`), and stops with `different chain; run bwg indexer resync` when the node's genesis is not the stored one. `bwg indexer resync` drops the indexer's tables, re-ingests from height 0 and exits when level. One indexer per database: a second one exits at once naming the advisory lock. Configuration: `INDEXER_DATABASE_URL` (required, a Postgres URL), `NODE_URL` or `--node` (default as the other commands), `INDEXER_POLL_INTERVAL` (default `1s`). The node is unchanged. The indexer's tests start an embedded Postgres 18 (downloaded on the first run, cached afterwards): `go test ./...` needs neither docker nor an environment variable.
 
 ### Logs and shutdown
 
