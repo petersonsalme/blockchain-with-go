@@ -249,9 +249,92 @@ Verified: 2026-10-31, commit 9c41517.
 
 ## Contracts (deploy and call)
 
-**Not reproducible by hand.** A contract is deployed and called by a signed transaction with a contract payload, and `bwg` has no command that builds one (`wallet send` only builds transfers). What you can check by hand is that the route exists and an unknown contract is a `404`:
+`bwg contract deploy|call|show` builds, signs and sends the contract transactions ([ADR-0037](adr/0037-contract-cli.md)); the four example contracts are in [`examples/contracts/`](../examples/contracts/README.md). The signing wallet pays from its confirmed coins, so use the funded miner keystore. The command lines use the flags of `e2e/contract_cli_test.go:TestContractCLI`, with `--keystore` where the test sets `WALLET_KEYSTORE`.
+
+Deploy `adder` (`storage[0] += args[0]`) on node1, mine it, call it twice with a block each, then read it on node3, a node that did not mine:
 
 ```shell
+$ ADDER=$($B contract deploy --node=$N:18081 --code-file=examples/contracts/adder.hex --gas-limit=100 --keystore=.playground/miner.key)
+$ echo $ADDER
+4a098c86a9102e8a8dd0ce3a6744ab14cd2aaffbac5e28130169e2aff7ae4748
+$ $B miner --node $N:18081 --count 1
+block 9 3bc35f81228bda44ba06e8abb13249a020ed63119cf54687a12887a8e960356c txs=2
+$ $B contract call --node=$N:18081 --target=$ADDER --gas-limit=100 --args=7 --keystore=.playground/miner.key
+155aa9c5301a62c0302fc198c44dad95299a3f3002e194aa762868f605f487a0
+$ $B miner --node $N:18081 --count 1
+block 10 007233ac832b844e7c4357df2e093dae16dfaa2332ac4f80b0f4d3f6efa0b5c2 txs=2
+$ $B contract call --node=$N:18081 --target=$ADDER --gas-limit=100 --args=5 --keystore=.playground/miner.key
+e7c044478d95b1daa7b40af57bf308b84a5c5dc4cf4132927b26c4d869b82aad
+$ $B miner --node $N:18081 --count 1
+block 11 0fef34499c863931ff7ba93865a6df1bc78b09226692f3680fc4cbe3e291678e txs=2
+$ $B contract show --node=$N:18083 $ADDER
+{
+  "id": "4a098c86a9102e8a8dd0ce3a6744ab14cd2aaffbac5e28130169e2aff7ae4748",
+  "code": "0100000000000000003001000000000000000040100100000000000000003100",
+  "storage": {
+    "0": 12
+  }
+}
+```
+
+`deploy` and `call` print the transaction ID once the node has put it in the mempool; the contract ID is the ID of the deploy transaction. The state changes only when a block confirms the transaction (`txs=2`: the coinbase and the contract transaction), so `storage` is `{"0": 12}` (7 plus 5) after the second call. `GET /contracts/{id}` answers the same JSON on every node.
+
+Deploy `counter` and `guard` (blocks 12 and 13), which the failure cases below need:
+
+```shell
+$ COUNTER=$($B contract deploy --node=$N:18081 --code-file=examples/contracts/counter.hex --gas-limit=100 --keystore=.playground/miner.key)
+$ $B miner --node $N:18081 --count 1
+block 12 0482ed454cf1f904e11bb4757284351c3d832d91fdc2e87fafeaea498a446815 txs=2
+$ GUARD=$($B contract deploy --node=$N:18081 --code-file=examples/contracts/guard.hex --gas-limit=100 --keystore=.playground/miner.key)
+$ $B miner --node $N:18081 --count 1
+block 13 44f46fb1d713d2f2e360685250cbc990a8366e48009d4c4bd60b8741878704b5 txs=2
+```
+
+### Failure cases
+
+A call that cannot run is refused when it is sent: `bwg` exits with status 1, prints the node's answer on stderr and nothing reaches the mempool. The HTTP code is in the node's JSON (`curl -s -X POST` shows it); `bwg` prints only the status and the message.
+
+```shell
+$ $B contract call --node=$N:18081 --target=$COUNTER --gas-limit=28 --keystore=.playground/miner.key
+Error: node answered 422: transaction 0: vm: out of gas
+$ $B contract call --node=$N:18081 --target=$GUARD --gas-limit=100 --args=0 --keystore=.playground/miner.key
+Error: node answered 422: transaction 0: vm: reverted
+$ $B contract call --node=$N:18081 --target=0000000000000000000000000000000000000000000000000000000000000000 --gas-limit=100 --keystore=.playground/miner.key
+Error: node answered 422: transaction 0: vm: unknown contract
+```
+
+- `out_of_gas`: `counter` needs 29 gas and the limit is 28.
+- `reverted`: `guard` reverts when `args[0]` is 0.
+- `unknown_contract`: the ID was never deployed.
+
+A deploy that is still in the mempool is not a contract yet. Deploy `capped` and call it before mining the deploy:
+
+```shell
+$ CAPPED=$($B contract deploy --node=$N:18081 --code-file=examples/contracts/capped.hex --gas-limit=100 --keystore=.playground/miner.key)
+$ $B contract call --node=$N:18081 --target=$CAPPED --gas-limit=100 --keystore=.playground/miner.key
+Error: node answered 422: transaction 0: vm: unknown contract
+$ $B miner --node $N:18081 --count 1
+block 14 3be40ef0c312c6f1b9914b43fe07bc94e473d380d78cff8657da27f5766ef31b txs=2
+$ $B contract show --node=$N:18081 $CAPPED
+{
+  "id": "0964b9964d88afe7488c1acfeb2f808de265b1253787c7b7b1c53bf44b4f4079",
+  "code": "0100000000000000003003010000000000000003131501000000000000003521010000000000000001100100000000000000003100ff",
+  "storage": {}
+}
+```
+
+The same call works after block 14. A call takes at most 256 `--args` (ADR-0033); with 257 values the node answers `400 invalid_contract_op` (`MANY` is `1,1,...,1`, 257 times; the output is cut here):
+
+```shell
+$ $B contract call --node=$N:18081 --target=$COUNTER --gas-limit=100 --args=$MANY --keystore=.playground/miner.key
+Error: node answered 400: transaction 0: invalid contract operation
+```
+
+`contract show` of an ID that is not deployed is a `404`, and so is the `curl` of the same route:
+
+```shell
+$ $B contract show --node=$N:18081 0000000000000000000000000000000000000000000000000000000000000000
+Error: node answered 404: contract not found
 $ curl -s $N:18081/contracts/0000000000000000000000000000000000000000000000000000000000000000
 {
   "error": "contract not found",
@@ -259,39 +342,125 @@ $ curl -s $N:18081/contracts/000000000000000000000000000000000000000000000000000
 }
 ```
 
-Deploy and call are covered by the tests of `internal/vm` (`vm_test.go`, `state_test.go`, plus the fuzz tests), the two-node e2e test `e2e/contract_test.go:TestTwoNodeCounterContract` and the README section "Contracts".
+`contract_exists` (a second deploy of a contract that exists) cannot be provoked: a resubmitted deploy fails on its spent inputs first, before the contract rules run. Not reproducible by hand; covered by internal/vm/state_test.go:"deploy of an existing contract in the view" (run by `TestVM` in `internal/vm/vm_suite_test.go`).
 
-Not reproducible by hand; covered by internal/vm/vm_suite_test.go:TestVM.
+The contracts, their opcodes and gas are in [`examples/contracts/README.md`](../examples/contracts/README.md); the VM is ADR-0014. The block heights above (9 to 14) continue in the next sections.
+
+Verified: 2026-11-08, commit f3bd815.
+
+## Version (`bwg version`)
+
+```shell
+$ $B version
+bwg dev (commit none, built unknown)
+```
+
+`scripts/playground.sh` builds with a plain `go build`, so the version, commit and date are the defaults. A release binary has them filled in by the build (ADR-0036: goreleaser sets them, and the release publishes SBOMs, signed checksums and a signed image).
+
+Verified: 2026-11-08, commit f3bd815.
+
+## Supply (`GET /supply`)
+
+```shell
+$ curl -s $N:18081/supply
+{
+  "height": 14,
+  "issued": "70000000000",
+  "initial_subsidy": "5000000000",
+  "halving_interval": 210000
+}
+```
+
+`issued` is the sum of the block subsidy over heights 1 to `height` (ADR-0027): 14 blocks of 5,000,000,000 is 70,000,000,000. It is what the rules allow the chain to issue, not what was paid: block 4 was mined on node2, which has no `MINER_ADDRESS`, so it paid no coinbase. The coinbase total of this run is 13 blocks (all but block 4) × 5,000,000,000 = 65,000,000,000 plus the fees of the transfers, 526; the miner has spent 1,002,021 (three transfers and their fees), so its balance is:
+
+```shell
+$ $B wallet balance --node $N:18081 $(cat .playground/miner.addr)
+64998998505
+```
+
+65,000,000,526 - 1,002,021 = 64,998,998,505. Every node answers the same `/supply` at the same height.
+
+Verified: 2026-11-08, commit f3bd815.
+
+## Verify the stored chain (`bwg node --verify`)
+
+`--verify` replays the stored chain under the full block rules (consensus, size, Merkle root, timestamps, UTXO rules, signatures, contracts) on scratch state, writes nothing, and runs before the node opens a port (ADR-0035). It needs the node's `chain.db`, so stop node3 and run it on node3's volume, with the port published to look at the node afterwards:
+
+```shell
+$ dc stop node3
+$ dc run -d --service-ports node3 node --verify
+$ docker logs <container> 2>&1
+{"time":"2026-11-08T15:01:27.977844109Z","level":"INFO","msg":"verified stored chain","height":14}
+{"time":"2026-11-08T15:01:27.978152207Z","level":"INFO","msg":"listening","addr":":8080"}
+$ curl -s $N:18083/health
+{
+  "status": "ok",
+  "height": 14,
+  "tip": "3be40ef0c312c6f1b9914b43fe07bc94e473d380d78cff8657da27f5766ef31b"
+}
+$ docker rm -f <container>; dc start node3
+```
+
+`verified stored chain` carries the tip height (14) and comes before `listening`: the listener opens only after the replay passes, and a failing replay stops the node with a non-zero exit instead. At 15 blocks the replay takes 0.3 ms here, so by hand you cannot catch the node answering `/health` during it; the log order is the evidence. Without `--service-ports`, `dc run` publishes no port. The flag cannot be combined with `--reindex` or `--snapshot-*`. A tampered `chain.db` that fails the replay is covered by the tests of `chain.(*Service).Verify`, not run here.
+
+Verified: 2026-11-08, commit f3bd815.
+
+## `MAX_BLOCK_BYTES` is refused (ADR-0032)
+
+The block size limit is the 1 MiB consensus constant `domain.MaxBlockBytes`, not a setting. A node started with `MAX_BLOCK_BYTES` set to a non-blank value stops at once instead of ignoring it (node3 is stopped first; it does not start):
+
+```shell
+$ dc stop node3
+$ dc run --rm -e MAX_BLOCK_BYTES=512 node3 node
+{"time":"2026-11-08T15:01:01.018539216Z","level":"ERROR","msg":"node stopped","error":"MAX_BLOCK_BYTES is no longer supported: the block size limit is the 1048576-byte consensus constant domain.MaxBlockBytes (ADR-0032); unset the variable"}
+$ echo $?
+1
+$ dc start node3
+```
+
+Unset or blank, the variable has no effect.
+
+Verified: 2026-11-08, commit f3bd815.
+
+## Median time past (ADR-0034)
+
+A block's timestamp must be strictly later than the median of the timestamps of the last 11 blocks (fewer when the chain is shorter) and at most 2 hours ahead of the validator's clock. It may be earlier than its parent: one block with a wrong clock cannot hold honest miners back, because the miner stamps `max(now, median + 1ns)`. A block that breaks the rule is refused with `timestamp_not_after_median_time_past`. The shipped commands always stamp the current time, so no command here can produce such a block.
+
+Not reproducible by hand; covered by internal/domain/rules_test.go:"rejects a timestamp equal to the median time past" (run by `TestDomain` in `internal/domain/domain_suite_test.go`).
 
 ## SSE events (`/events`)
 
 ```shell
 $ curl -sN $N:18081/events        # terminal 1
 $ $B miner --node $N:18081 --count 1   # terminal 2
+block 15 48851f270a13556016db8c22e7a6ea8fd1d56b0fdae8236ce1aedea5059c9767 txs=1
 ```
 
 To see the `event: tx` too, send a transfer from a third terminal before mining (to Alice's address of the Wallet section; use yours):
 
 ```shell
-$ $B wallet send --node $N:18081 --keystore .playground/miner.key --to 00dca668461fe49762d03394953b8bfaa07ef43ea7a7457cce --amount 1 --fee 1
-6b967d3503a4766c2122da4e7a43348ce1bb56271afe49138d725ebec505c4dc
+$ $B wallet send --node $N:18081 --keystore .playground/miner.key --to 00c994aebc7e17520985e0eccdcb4d985bb3b0a4de81cd08cc --amount 1 --fee 1
+587847028a7427cef96a8f6c67a3087a28c68f31d4889d3bbc30c2d938e5b6ac
 $ $B miner --node $N:18081 --count 1
-block 9 22b0354a6ece3eb849192cc4dea86b81fb52ee2859765202aee836c18a60c8ed txs=2
+block 16 2b3de0fd6ae349834a6690ab22c35ebc10185516e176888f3e704bcacfbe9cb0 txs=2
 ```
 
-Terminal 1 prints one `event: tx` with a single-line `data:` JSON when the transfer is accepted and one `event: block` for the mined block (the JSON lines are shortened here):
+Terminal 1 prints one `event: block` for block 15, then one `event: tx` with a single-line `data:` JSON when the transfer is accepted and one `event: block` for block 16 (the JSON lines are shortened here):
 
 ```
+event: block
+data: {"Index":15,"Timestamp":"2026-11-08T15:01:42.738344456Z","Transactions":[{"ID":"13484531f9d55ef5c8799a90077040601e8d7f7f239aca7d798e1be68f311e57","Inputs":null,"Outputs":[{"Amount":5000000000,"A...
+
 event: tx
-data: {"ID":"6b967d3503a4766c2122da4e7a43348ce1bb56271afe49138d725ebec505c4dc","Inputs":[{"PrevTxID":"778a9ff493a4c0dda1fb923cfa18b90051aa0a927492ac8920d28f4177c471c8","OutIndex":0,"PublicKey":"fbcc1fdb57514425...
+data: {"ID":"587847028a7427cef96a8f6c67a3087a28c68f31d4889d3bbc30c2d938e5b6ac","Inputs":[{"PrevTxID":"0964b9964d88afe7488c1acfeb2f808de265b1253787c7b7b1c53bf44b4f4079","OutIndex":0,"PublicKey":"b6ac2c...
 
 event: block
-data: {"Index":9,"Timestamp":"2026-10-31T19:12:23.386067897Z","Transactions":[{"ID":"07be6c5aeb6cf40a4302fec44be81da05c3e9c07733e7a2f1d38c8fe76951d73","Inputs":null,"Outputs":[{"Amount":5000000001,"Address":"00...
+data: {"Index":16,"Timestamp":"2026-11-08T15:01:42.819410546Z","Transactions":[{"ID":"20000062b35eda8710f7eff238c2a9a0a8c0f923b0d90685149afa91957fab99","Inputs":null,"Outputs":[{"Amount":5000000001,"A...
 ```
 
-The coinbase of block 9 pays `5000000001`: 5,000,000,000 plus the fee of 1. Every node sends the event for each block it appends, whatever the source: a block mined on node1 is also one `event: block` (same `Hash`) on node2 and node3, through gossip, sync or reorg. The explorer uses this stream to add new blocks at the top without polling. The same `event: tx` and `event: block` arrived on node2's `/events`. Known limitation seen while writing this page: the node sends the response headers of `/events` together with the first event (`curl -siN $N:18081/events` prints nothing on an idle node), so the explorer's status label stays "connecting" until the first block or transaction arrives and only then changes. This is node behaviour, not something the playground changes.
+The coinbase of block 16 pays `5000000001`: 5,000,000,000 plus the fee of 1. Every node sends the event for each block it appends, whatever the source: a block mined on node1 is also one `event: block` (same `Hash`) on node2 and node3, through gossip, sync or reorg. The explorer uses this stream to add new blocks at the top without polling. Known limitation seen while writing this page: the node sends the response headers of `/events` together with the first event (`curl -siN $N:18081/events` prints nothing on an idle node), so the explorer's status label stays "connecting" until the first block or transaction arrives and only then changes. This is node behaviour, not something the playground changes.
 
-Verified: 2026-10-31, commit 9c41517.
+Verified: 2026-11-08, commit f3bd815.
 
 ## Metrics (`/metrics`)
 
@@ -299,31 +468,34 @@ Verified: 2026-10-31, commit 9c41517.
 $ curl -s $N:18081/metrics | grep -E '^(# (HELP|TYPE) )?(http_|blockchain_)'
 # HELP blockchain_blocks Number of blocks in the chain.
 # TYPE blockchain_blocks gauge
-blockchain_blocks 10
+blockchain_blocks 17
 # HELP blockchain_mining_duration_seconds Time spent mining blocks that were produced.
 # TYPE blockchain_mining_duration_seconds summary
-blockchain_mining_duration_seconds_sum 0.013883018
-blockchain_mining_duration_seconds_count 8
+blockchain_mining_duration_seconds_sum 0.03408702
+blockchain_mining_duration_seconds_count 15
 # HELP http_requests_total HTTP requests served, by method, route pattern and status code.
 # TYPE http_requests_total counter
-http_requests_total{code="200",method="GET",route="GET /balance/{addr}"} 10
-http_requests_total{code="200",method="GET",route="GET /blocks"} 1
+http_requests_total{code="200",method="GET",route="GET /balance/{addr}"} 22
+http_requests_total{code="200",method="GET",route="GET /contracts/{id}"} 1
 http_requests_total{code="200",method="GET",route="GET /headers"} 2
-http_requests_total{code="200",method="GET",route="GET /health"} 5
-http_requests_total{code="200",method="GET",route="GET /mempool"} 3
-http_requests_total{code="200",method="GET",route="GET /p2p/peers"} 42
-http_requests_total{code="200",method="POST",route="POST /p2p/block"} 1
-http_requests_total{code="200",method="POST",route="POST /p2p/hello"} 41
-http_requests_total{code="200",method="POST",route="POST /p2p/inv"} 7
-http_requests_total{code="201",method="POST",route="POST /mine"} 8
-http_requests_total{code="202",method="POST",route="POST /tx"} 6
-http_requests_total{code="404",method="GET",route="GET /contracts/{id}"} 1
+http_requests_total{code="200",method="GET",route="GET /health"} 6
+http_requests_total{code="200",method="GET",route="GET /mempool"} 4
+http_requests_total{code="200",method="GET",route="GET /p2p/peers"} 574
+http_requests_total{code="200",method="GET",route="GET /supply"} 1
+http_requests_total{code="200",method="POST",route="POST /p2p/block"} 2
+http_requests_total{code="200",method="POST",route="POST /p2p/hello"} 574
+http_requests_total{code="200",method="POST",route="POST /p2p/inv"} 13
+http_requests_total{code="201",method="POST",route="POST /mine"} 15
+http_requests_total{code="202",method="POST",route="POST /tx"} 12
+http_requests_total{code="400",method="POST",route="POST /tx"} 1
+http_requests_total{code="404",method="GET",route="GET /contracts/{id}"} 2
 http_requests_total{code="409",method="POST",route="POST /tx"} 1
+http_requests_total{code="422",method="POST",route="POST /tx"} 4
 ```
 
-This is after the SSE run above: `blockchain_blocks` is 10 (genesis plus 9 blocks) and the 8 mined blocks are the ones node1 mined itself (block 4 came from node2). The counters are per node; the double spend of the section above shows up as `code="409"`, the unknown contract as `code="404"`. Families are sorted by name and labels by name, and the same endpoint also serves the Go runtime (`go_*`) and process (`process_*`) metrics, left out of the `grep` above ([ADR-0022](adr/0022-prometheus-client-golang.md)).
+This is after the SSE run above: `blockchain_blocks` is 17 (genesis plus 16 blocks) and the 15 mined blocks are the ones node1 mined itself (block 4 came from node2). The counters are per node: the double spend shows up as `code="409"`; the unknown contract `GET`s as `code="404"` (the `curl` and `contract show` of the Contracts section); the refused contract calls as `code="422"` (out of gas, reverted and two unknown contracts) and `code="400"` (the 257 arguments). The `/p2p` counts depend on how long the run took. Families are sorted by name and labels by name, and the same endpoint also serves the Go runtime (`go_*`) and process (`process_*`) metrics, left out of the `grep` above ([ADR-0022](adr/0022-prometheus-client-golang.md)).
 
-Verified: 2026-10-31, commit 9c41517.
+Verified: 2026-11-08, commit f3bd815.
 
 ## Grafana and Prometheus (`--profile observability`)
 
@@ -344,29 +516,29 @@ Prometheus scrapes `node1:8080`, `node2:8080` and `node3:8080` every 5 s; the ta
 
 ```shell
 $ curl -s 127.0.0.1:19090/api/v1/targets | grep -o '"instance":"[^"]*"\|"health":"[^"]*"'
-"instance":"node1:8080"
-"health":"up"
 "instance":"node2:8080"
 "health":"up"
 "instance":"node3:8080"
+"health":"up"
+"instance":"node1:8080"
 "health":"up"
 $ curl -s -o /dev/null -w '%{http_code}\n' 127.0.0.1:13000/api/dashboards/uid/bwg-network
 200
 $ curl -s '127.0.0.1:13000/api/datasources/proxy/uid/prometheus/api/v1/query?query=blockchain_blocks' | grep -o '"instance":"[^"]*"'   # 3 series
-"instance":"node2:8080"
 "instance":"node3:8080"
+"instance":"node2:8080"
 "instance":"node1:8080"
 $ $B miner --node $N:18081 --count 1                  # all three values rise within 30 s
-block 10 4635b68f3d4050c7ed3f7b7e074e43bc42927ce2327d203ebb17364aceee840b txs=1
+block 17 768c3aff28255f649c6fc07bae33d8160dea5691dfec44f07bde839d4047ce21 txs=1
 $ curl -s '127.0.0.1:13000/api/datasources/proxy/uid/prometheus/api/v1/query?query=blockchain_blocks' | grep -o '"value":\[[^]]*\]'
-"value":[1793473986.777,"11"]
-"value":[1793473986.777,"11"]
-"value":[1793473986.777,"11"]
+"value":[1794150134.533,"18"]
+"value":[1794150134.533,"18"]
+"value":[1794150134.533,"18"]
 ```
 
 With `compose.tuning.yml`, node1 has `RATE_LIMIT=30` and a scrape every 5 s uses 12 of those requests per minute (scrapes are rate limited like any other request).
 
-Verified: 2026-10-31, commit 9c41517.
+Verified: 2026-11-08, commit f3bd815.
 
 ## Network dashboard (`--profile dashboard`)
 
@@ -419,7 +591,7 @@ One lane per node, in the order of `NODES`, over the same heights: the last 8 up
 | dashed, empty | a height the node does not have yet |
 | dashed, grey | the last known blocks of a node that does not answer |
 
-In the walkthrough below, after `dc stop node3` node3's lane keeps its blocks up to 10, dashed, and shows the new heights as empty while the others move on.
+In the walkthrough below, after `dc stop node3` node3's lane keeps its blocks up to 17, dashed, and shows the new heights as empty while the others move on.
 
 ### Metrics screen
 
@@ -427,14 +599,14 @@ The table reads each node's `/metrics`: `blockchain_blocks`, the mean mining tim
 
 ```shell
 $ curl -s $N:18081/metrics | grep -E '^(blockchain_blocks|blockchain_mining_duration_seconds_(sum|count)) '
-blockchain_blocks 11
-blockchain_mining_duration_seconds_sum 0.014694602000000001
-blockchain_mining_duration_seconds_count 9
+blockchain_blocks 18
+blockchain_mining_duration_seconds_sum 0.035229558
+blockchain_mining_duration_seconds_count 16
 $ curl -s $N:18080/fragments/metrics | grep '<td class="col-main">node1</td>'
-<tr><td class="col-main">node1</td><td class="col-num">11</td><td class="col-num">0.001633 s</td><td class="col-num">396</td><td class="col-num">2</td><td class="col-num">0</td><td class="col-num">0</td></tr>
+<tr><td class="col-main">node1</td><td class="col-num">18</td><td class="col-num">0.002202 s</td><td class="col-num">1476</td><td class="col-num">8</td><td class="col-num">0</td><td class="col-num">0</td></tr>
 ```
 
-(0.014694602 / 9 = 0.001633 s; the two `4xx` are the `409` and the `404` of the sections above.) Below the table, every 10 s:
+(0.035229558 / 16 = 0.002202 s; the eight `4xx` are the `409`, the two `404`, the four `422` and the `400` of the sections above.) Below the table, every 10 s:
 
 - **Block interval**: one bar per pair of consecutive blocks among the last 50 headers of the node chosen in the selector (one `GET /headers` per refresh); the scale is the largest bar, printed top left. In the playground the first bar is the time from the fixed genesis (`GENESIS_TIME` in `docker-compose.yml`) to block 1, which dwarfs the others until more blocks are mined.
 - **Transactions per block**: one bar per block among the last 50 blocks of the node chosen in the selector, the same node as the block interval.
@@ -468,15 +640,15 @@ $ curl -s $N:18080/fragments/network | grep -oE 'banner-title">[^<]*|</span>[^<]
 banner-title">Network in agreement · 1 of 3 unreachable
 </span>up to date</span></td>
 </span>up to date</span></td>
-</span>unreachable, last known height 10</span></td>
+</span>unreachable, last known height 17</span></td>
 $ $B miner --node $N:18081 --count 2
-block 11 145d5322fc62e2e171512851124b41e76bb9068ea92e6d9bfc165ef7e25561cc txs=1
-block 12 17d71155e64366d4cfdea7f5ff01797d2d88f41965d4663269a1ac9536c88d1e txs=1
+block 18 66737533767c30d0f209d026242f5669d16d9cf97746c1fce8942543b68aaff1 txs=1
+block 19 1e5748edef5196218be37c0a4ebf88a733830481cad9a467ff352d2d359b2a62 txs=1
 $ curl -s $N:18080/fragments/network | grep -oE 'banner-title">[^<]*|</span>[^<]*</span></td>'
 banner-title">Network in agreement · 1 of 3 unreachable
 </span>up to date</span></td>
 </span>up to date</span></td>
-</span>unreachable, last known height 10 (behind by 2)</span></td>
+</span>unreachable, last known height 17 (behind by 2)</span></td>
 $ dc start node3
  Container bwg-playground-node3-1 Started
 $ curl -s $N:18080/fragments/network | grep -oE 'banner-title">[^<]*|</span>[^<]*</span></td>'
@@ -488,28 +660,28 @@ banner-title">Network in agreement
 
 (Each `curl` was run a few seconds after the previous command, the poller reads every 2 s; right after `dc start node3` it needs a few more seconds.) The agreement is among the nodes that answer; the banner says how many do not. The stopped node keeps its last known height in the matrix and shows how far behind it is once the others move on. After `dc start node3` it syncs the two blocks on its own (a few seconds) and the last poll above shows three nodes up to date.
 
-Verified: 2026-10-31, commit 9c41517.
+Verified: 2026-11-08, commit f3bd815.
 
 ## Restart sync (stop and start node3)
 
 ```shell
 $ dc stop node3
 $ $B miner --node $N:18081 --count 3
-block 13 0114aed156bfd761eba3d41e5c011d2eba4d9bdad0cfa2ee05b059dccf4b286c txs=1
-block 14 2f4a2fe19f08063d7d5dbbffc4d15361046037cf6fd658fd97df799e3a16e220 txs=1
-block 15 4f801d314369a028331efbc57510af5a8162c53e48c37c772505f625f473229a txs=1
+block 20 02eb12d4f5357a45181d3bcb15662bffe2d04052b0c0ef5e931b3a41e7796b2b txs=1
+block 21 26ec31dcb1686ed56b061f2d2d59a42ec7008722e8a4b39ef62177f1a2cc438c txs=1
+block 22 564144911ea2820e15d9c073c378a7805e0545d096b0e3dfb1da7013a56f3669 txs=1
 $ dc start node3
 $ sleep 6; curl -s $N:18083/health
 {
   "status": "ok",
-  "height": 15,
-  "tip": "4f801d314369a028331efbc57510af5a8162c53e48c37c772505f625f473229a"
+  "height": 22,
+  "tip": "564144911ea2820e15d9c073c378a7805e0545d096b0e3dfb1da7013a56f3669"
 }
 ```
 
-While stopped, node3 misses three blocks; after the restart its volume still holds the old chain and initial block download (ADR-0019) fetches the missing ones from its seed. It reaches node1's tip within the 1 s peer interval plus the sync time (6 s was enough). The tip is the hash of block 15 above, the same one node1 reports.
+While stopped, node3 misses three blocks; after the restart its volume still holds the old chain and initial block download (ADR-0019) fetches the missing ones from its seed. It reaches node1's tip within the 1 s peer interval plus the sync time (6 s was enough). The tip is the hash of block 22 above, the same one node1 reports.
 
-Verified: 2026-10-31, commit 9c41517.
+Verified: 2026-11-08, commit f3bd815.
 
 ## Reorg and peer ban
 
@@ -527,9 +699,9 @@ Not reproducible by hand; covered by cmd/bwg/sync_test.go:TestForkEndsOnTheBranc
 
 ```shell
 $ dc --profile snapshots up -d snap1
-$ curl -s $N:18084/health          # it syncs from node1 (height 15 in this run)
+$ curl -s $N:18084/health          # it syncs from node1 (height 22 in this run)
 $ $B miner --node $N:18081 --count 120
-$ curl -s $N:18084/health          # height 135, same tip as node1
+$ curl -s $N:18084/health          # height 142, same tip as node1
 $ curl -s $N:18084/block/1
 {
   "error": "block body was pruned; only its header is kept",
@@ -538,16 +710,16 @@ $ curl -s $N:18084/block/1
 $ curl -s $N:18081/block/1 | head -c 60     # the full node still has the body
 {
   "Index": 1,
-  "Timestamp": "2026-10-31T19:12:04.63356771
+  "Timestamp": "2026-11-08T14:57:00.54562175
 ```
 
-`curl -s $N:18084/block/130 | head -c 80` returns the full block (`{ "Index": 130, "Timestamp": ...`): only the bodies older than the 100 most recent are replaced by headers. Known limitation seen while writing this page: once `snap1` has pruned, its log repeats the line `{"time":"...","level":"ERROR","msg":"p2p: cannot build the local hello","error":"storage: block body is pruned"}` every second (`docker logs bwg-playground-snap1-1 2>&1 | grep 'cannot build the local hello'`). It still received every block from node1 (height 135 above), only its own outbound handshake fails. This is a node behaviour, not something the playground changes.
+`curl -s $N:18084/block/130 | head -c 80` returns the full block (`{ "Index": 130, "Timestamp": ...`): only the bodies older than the 100 most recent are replaced by headers. Known limitation seen while writing this page: once `snap1` has pruned, its log repeats the line `{"time":"...","level":"ERROR","msg":"p2p: cannot build the local hello","error":"storage: block body is pruned"}` every second (`docker logs bwg-playground-snap1-1 2>&1 | grep 'cannot build the local hello'`). It still received every block from node1 (height 142 above), only its own outbound handshake fails. This is a node behaviour, not something the playground changes.
 
 Export and import of a snapshot (`--snapshot-export`, `--snapshot-import`) are not part of the playground; see the README, section "Snapshots and pruning".
 
 Look at: `http://127.0.0.1:18084/explorer/#/block/1` shows the error `block_pruned (HTTP 410): block body was pruned; only its header is kept` with a link back to the latest blocks; `#/block/130` on the same node opens normally.
 
-Verified: 2026-10-31, commit 9c41517.
+Verified: 2026-11-08, commit f3bd815.
 
 ## Reindex
 
@@ -556,19 +728,19 @@ Verified: 2026-10-31, commit 9c41517.
 ```shell
 $ dc stop node1
 $ dc run --rm node1 node --reindex
-reindexed: tip height 135
+reindexed: tip height 142
 $ dc start node1
 $ curl -s $N:18081/health
 {
   "status": "ok",
-  "height": 135,
-  "tip": "4dd32fa5449c436eae687f43682cab4193b30a1581cdd040a8f4092c3df1f4c8"
+  "height": 142,
+  "tip": "33c89735cb75f322ab82af5d434c2ca15b0d61496358e70f990f9da41b32cff4"
 }
 ```
 
 The tip is the one the nodes had before the reindex (the same as `snap1`'s in the section above).
 
-Verified: 2026-10-31, commit 9c41517.
+Verified: 2026-11-08, commit f3bd815.
 
 ## Proof of Authority (`--profile poa`)
 
