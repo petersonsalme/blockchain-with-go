@@ -534,3 +534,134 @@ func TestSyncHeaderAtWrongHeightIsInconsistent(t *testing.T) {
 		t.Fatalf("err %v, want ErrInconsistent naming header 9 at height 0", err)
 	}
 }
+
+// cappedNode is a fakeNode that refuses what the real /headers refuses: a page over 1000 or a
+// negative start.
+type cappedNode struct {
+	fakeNode
+	pages [][2]int
+}
+
+func (n *cappedNode) Headers(ctx context.Context, from, limit int) ([]indexer.Header, error) {
+	n.pages = append(n.pages, [2]int{from, limit})
+
+	if limit > 1000 || limit < 1 || from < 0 {
+		return nil, fmt.Errorf("bad headers page from=%d limit=%d", from, limit)
+	}
+
+	return n.fakeNode.Headers(ctx, from, limit)
+}
+
+func TestSyncForkPointPagesAreExactAndFindTheHighestCommonHeight(t *testing.T) {
+	tests := []struct {
+		name         string
+		oldLen       int
+		forkAt       int
+		wantFirstReq [2]int
+	}{
+		{"fork in the second page", 2600, 1200, [2]int{1600, 1000}},
+		{"fork at the last height of a lower page", 2600, 1599, [2]int{1600, 1000}},
+		{"fork at the first height of the top page", 2600, 1600, [2]int{1600, 1000}},
+		{"fork one below a page edge", 2600, 999, [2]int{1600, 1000}},
+		{"fork at genesis, reached by an exactly-one-height last page", 1001, 0, [2]int{1, 1000}},
+		{"fork at 1, top 1000", 1001, 1, [2]int{1, 1000}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			old := fakeChain("a", genesis("a"), tc.oldLen)
+			branch := fakeChain("b", old[tc.forkAt], tc.oldLen-tc.forkAt+5)
+			newChain := append(append([]indexer.Block{}, old[:tc.forkAt]...), branch...)
+
+			node := &cappedNode{fakeNode: fakeNode{chain: newChain}}
+			store := &fakeStore{blocks: append([]indexer.Block{}, old...)}
+
+			err := newFollower(node, store).Sync(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if len(store.rollbacks) != 1 || store.rollbacks[0] != tc.forkAt {
+				t.Fatalf("rollbacks %v, want [%d]", store.rollbacks, tc.forkAt)
+			}
+
+			// the node is longer than the store, so no level() probe: pages[0] is the first fork-point page.
+			if got := node.pages[0]; got != tc.wantFirstReq {
+				t.Fatalf("first fork-point page %v, want %v", got, tc.wantFirstReq)
+			}
+
+			if len(store.blocks) != len(newChain) {
+				t.Fatalf("stored %d blocks, want %d", len(store.blocks), len(newChain))
+			}
+		})
+	}
+}
+
+func TestSyncDifferentGenesisWithTopAtAPageEdge(t *testing.T) {
+	node := &cappedNode{fakeNode: fakeNode{chain: fakeChain("b", genesis("b"), 1500)}}
+	store := &fakeStore{blocks: fakeChain("a", genesis("a"), 1001)}
+
+	err := newFollower(node, store).Sync(t.Context())
+	if !errors.Is(err, indexer.ErrDifferentChain) {
+		t.Fatalf("err %v, want ErrDifferentChain", err)
+	}
+
+	if len(store.rollbacks) != 0 {
+		t.Fatalf("rollbacks %v", store.rollbacks)
+	}
+}
+
+func TestNewFollowerNilLoggerDiscards(t *testing.T) {
+	chain := fakeChain("a", genesis("a"), 3)
+	store := &fakeStore{}
+
+	err := indexer.NewFollower(&fakeNode{chain: chain}, store, nil).Sync(t.Context())
+	if err != nil || len(store.blocks) != 3 {
+		t.Fatalf("err %v blocks %d", err, len(store.blocks))
+	}
+}
+
+func TestWithPollIntervalIgnoresNonPositive(t *testing.T) {
+	for _, d := range []time.Duration{0, -time.Second} {
+		node := &fakeNode{}
+		f := indexer.NewFollower(node, &fakeStore{}, nil, indexer.WithPollInterval(d))
+
+		ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+		err := f.Run(ctx)
+
+		cancel()
+
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// the default interval is one second: one Sync in 200ms, not a busy loop
+		if node.blockCalls > 2 {
+			t.Fatalf("interval %v: %d polls in 200ms, the default interval was not kept", d, node.blockCalls)
+		}
+	}
+}
+
+// skewedNode answers /headers with the last height of every page off by one.
+type skewedNode struct{ fakeNode }
+
+func (n *skewedNode) Headers(ctx context.Context, from, limit int) ([]indexer.Header, error) {
+	hs, err := n.fakeNode.Headers(ctx, from, limit)
+	if len(hs) > 0 {
+		hs[len(hs)-1].Height++
+	}
+
+	return hs, err
+}
+
+func TestSyncHeaderHeightMismatchNamesTheExpectedHeightInALaterPage(t *testing.T) {
+	old := fakeChain("a", genesis("a"), 1500)
+	newChain := append(append([]indexer.Block{}, old[:700]...), fakeChain("b", old[700], 900)...)
+	node := &skewedNode{fakeNode: fakeNode{chain: newChain}}
+	store := &fakeStore{blocks: append([]indexer.Block{}, old...)}
+
+	err := newFollower(node, store).Sync(t.Context())
+	if !errors.Is(err, indexer.ErrInconsistent) || !strings.Contains(err.Error(), "header 1500 at height 1499") {
+		t.Fatalf("err %v, want ErrInconsistent naming header 1500 at height 1499", err)
+	}
+}
