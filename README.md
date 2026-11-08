@@ -169,6 +169,7 @@ Design decisions live in [`docs/adr/`](docs/adr/). For a walkthrough of the code
 | [0034](docs/adr/0034-median-time-past.md) | Block timestamp must be later than the median time past of the last 11 blocks (replaces the parent rule) |
 | [0035](docs/adr/0035-verify-stored-chain.md) | `bwg node --verify` replays the stored chain under the full block rules before serving (opt-in) |
 | [0036](docs/adr/0036-signed-release-sbom-image.md) | Signed release: `bwg version` from ldflags, syft SBOMs, cosign keyless checksums and a signed GHCR image |
+| [0037](docs/adr/0037-contract-cli.md) | Contract transactions from the CLI: `bwg contract deploy\|call\|show`, example contracts |
 
 ## Configuration & Environment Variables
 
@@ -326,10 +327,13 @@ $ export WALLET_PASSWORD='choose-a-password'
 $ go run ./cmd/bwg wallet new --keystore alice.key        # prints the new address; refuses an existing file
 $ go run ./cmd/bwg wallet balance <address>                # prints the confirmed balance
 $ go run ./cmd/bwg wallet send --keystore alice.key --to <address> --amount 30 --fee 1   # prints the transaction ID
+$ go run ./cmd/bwg contract deploy --keystore alice.key --code-file examples/contracts/adder.hex --gas-limit 100   # prints the contract ID (the transaction ID)
+$ go run ./cmd/bwg contract call --keystore alice.key --target <contract-id> --gas-limit 100 --args 7            # prints the transaction ID
+$ go run ./cmd/bwg contract show <contract-id>              # prints GET /contracts/{id}: code and storage
 $ go run ./cmd/bwg miner --count 1                         # calls POST /mine; prints "block <index> <hash> txs=<n>"
 ```
 
-`wallet send` spends the confirmed outputs of the keystore address in the order the node lists them, until they cover `amount + fee`, sends any change back to the same address, signs every input and submits the transaction to `POST /tx` (it is then in the mempool; `miner` or `POST /mine` confirms it). `miner` retries when the chain changed during mining (`409`) and, with `--count 0` (the default), mines until interrupted (`Ctrl+C`). `--node` (or `NODE_URL`) selects the node; the default matches the node's default `PORT`.
+`wallet send` spends the confirmed outputs of the keystore address in the order the node lists them, until they cover `amount + fee`, sends any change back to the same address, signs every input and submits the transaction to `POST /tx` (it is then in the mempool; `miner` or `POST /mine` confirms it). `contract deploy` (`--code HEX` or `--code-file PATH`, `--gas-limit`, optional `--args a,b,...` of decimal `uint64`, `--fee`) and `contract call` (`--target`, same flags) build their transaction the same way, but pay everything but the fee back to the sender in one output, since contracts hold no coins; the CLI checks no contract rule and prints the node's message when it rejects the operation ([ADR-0037](docs/adr/0037-contract-cli.md)). One confirmed output allows one pending spend, so mine a block between a deploy and its first call. Four ready-made contracts are in [`examples/contracts/`](examples/contracts/README.md). `miner` retries when the chain changed during mining (`409`) and, with `--count 0` (the default), mines until interrupted (`Ctrl+C`). `--node` (or `NODE_URL`) selects the node; the default matches the node's default `PORT`.
 
 ### Logs and shutdown
 
@@ -805,7 +809,7 @@ BPM payloads cannot be signed, so the endpoint answers `410 Gone` (with `Depreca
 
 #### Contracts
 
-`POST /tx` also accepts the optional lower-case `contract` object, a deploy or a call of the stack-machine VM ([ADR-0014](docs/adr/0014-contract-vm.md)). Without it the request and the response are exactly as above.
+`POST /tx` also accepts the optional lower-case `contract` object, a deploy or a call of the stack-machine VM ([ADR-0014](docs/adr/0014-contract-vm.md)). Without it the request and the response are exactly as above. From the command line use `bwg contract deploy|call|show` ([ADR-0037](docs/adr/0037-contract-cli.md)); example contracts are in [`examples/contracts/`](examples/contracts/README.md).
 
 | Field | Deploy | Call |
 |---|---|---|
