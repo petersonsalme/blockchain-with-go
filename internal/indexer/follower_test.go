@@ -539,6 +539,7 @@ func TestSyncHeaderAtWrongHeightIsInconsistent(t *testing.T) {
 // negative start.
 type cappedNode struct {
 	fakeNode
+
 	pages [][2]int
 }
 
