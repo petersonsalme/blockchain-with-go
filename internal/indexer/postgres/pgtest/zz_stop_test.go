@@ -19,13 +19,15 @@ func TestStopStopsTheServerAndRemovesItsFiles(t *testing.T) {
 	url := pgtest.NewDatabase(t)
 	dir := pgtest.DataDir()
 
-	if _, err := os.Stat(dir); err != nil {
+	_, err := os.Stat(dir)
+	if err != nil {
 		t.Fatalf("data dir before Stop: %v", err)
 	}
 
 	pgtest.Stop()
 
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+	_, err = os.Stat(dir)
+	if !os.IsNotExist(err) {
 		t.Fatalf("data dir still there after Stop: %v", err)
 	}
 
@@ -39,6 +41,7 @@ func TestStopStopsTheServerAndRemovesItsFiles(t *testing.T) {
 	c, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(context.Background(), "tcp", addr)
 	if err == nil {
 		_ = c.Close()
+
 		t.Fatal("server still listens after Stop")
 	}
 }
