@@ -130,7 +130,7 @@ func (s *Store) Apply(ctx context.Context, b indexer.Block) (err error) {
 	var created, spent, coinbase uint64
 
 	deltas := map[string]*big.Int{}
-	add := func(addr string, v uint64, sign int) {
+	add := func(addr string, v uint64, negative bool) {
 		d, ok := deltas[addr]
 		if !ok {
 			d = new(big.Int)
@@ -138,7 +138,7 @@ func (s *Store) Apply(ctx context.Context, b indexer.Block) (err error) {
 		}
 
 		x := new(big.Int).SetUint64(v)
-		if sign < 0 {
+		if negative {
 			x.Neg(x)
 		}
 
@@ -171,7 +171,7 @@ func (s *Store) Apply(ctx context.Context, b indexer.Block) (err error) {
 			}
 
 			spent += v
-			add(addr, v, -1)
+			add(addr, v, true)
 		}
 
 		for i, o := range t.Outputs {
@@ -186,7 +186,7 @@ func (s *Store) Apply(ctx context.Context, b indexer.Block) (err error) {
 				coinbase += o.Amount
 			}
 
-			add(o.Address, o.Amount, 1)
+			add(o.Address, o.Amount, false)
 		}
 	}
 
@@ -202,7 +202,7 @@ func (s *Store) Apply(ctx context.Context, b indexer.Block) (err error) {
 		// negative insert before ON CONFLICT is considered).
 		sql := `INSERT INTO balances (address, amount) VALUES ($1, $2)
 			ON CONFLICT (address) DO UPDATE SET amount = balances.amount + EXCLUDED.amount`
-		if deltas[a].Sign() < 0 {
+		if deltas[a].Sign() == -1 {
 			sql = "UPDATE balances SET amount = amount + $2::numeric WHERE address = $1"
 		}
 
