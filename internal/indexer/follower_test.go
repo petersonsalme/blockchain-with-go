@@ -38,6 +38,11 @@ func (n *fakeNode) Blocks(_ context.Context, from, limit int) ([]indexer.Block, 
 	n.blockCalls++
 	n.pageSizes = append(n.pageSizes, limit)
 
+	// A sync that never settles must fail the test fast instead of hanging it.
+	if n.blockCalls > 5000 {
+		return nil, errors.New("runaway sync: more than 5000 page requests")
+	}
+
 	if n.err != nil {
 		return nil, n.err
 	}
