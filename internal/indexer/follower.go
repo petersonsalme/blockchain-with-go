@@ -197,7 +197,7 @@ func (f *Follower) rollbackToFork(ctx context.Context, tip Tip) error {
 // forkPoint walks back over /headers pages, descending, to the highest height <= top where the
 // stored hash equals the node's.
 func (f *Follower) forkPoint(ctx context.Context, top int) (int, error) {
-	for hi := top; hi >= 0; {
+	for hi := top; hi >= 0; hi -= headerPage {
 		lo := max(0, hi-headerPage+1)
 
 		hs, err := f.node.Headers(ctx, lo, hi-lo+1)
@@ -219,8 +219,6 @@ func (f *Follower) forkPoint(ctx context.Context, top int) (int, error) {
 				return lo + i, nil
 			}
 		}
-
-		hi = lo - 1
 	}
 
 	return 0, ErrDifferentChain

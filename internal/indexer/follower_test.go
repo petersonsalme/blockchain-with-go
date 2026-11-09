@@ -666,3 +666,29 @@ func TestSyncHeaderHeightMismatchNamesTheExpectedHeightInALaterPage(t *testing.T
 		t.Fatalf("err %v, want ErrInconsistent naming header 1500 at height 1499", err)
 	}
 }
+
+// laxStore accepts any block, so only the follower's own checks can reject a page.
+type laxStore struct{ *fakeStore }
+
+func (s *laxStore) Apply(_ context.Context, b indexer.Block) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.blocks = append(s.blocks, b)
+	s.applied = append(s.applied, b.Height)
+
+	return nil
+}
+
+func TestSyncRejectsAPageAtTheWrongHeightBeforeTouchingTheStore(t *testing.T) {
+	chainA := fakeChain("a", genesis("a"), 5)
+	// The page starts at height 6 although 4 is the stored tip; it chains on the tip hash.
+	skipped := indexer.Block{Height: 6, Hash: "x6", PrevHash: chainA[4].Hash}
+	node := &pageNode{fakeNode: fakeNode{chain: chainA}, pages: [][]indexer.Block{{skipped}}}
+	store := &laxStore{&fakeStore{blocks: append([]indexer.Block{}, chainA...)}}
+
+	err := newFollower(node, store).Sync(t.Context())
+	if !errors.Is(err, indexer.ErrInconsistent) || len(store.applied) != 0 {
+		t.Fatalf("err %v applied %v, want ErrInconsistent and nothing applied", err, store.applied)
+	}
+}
