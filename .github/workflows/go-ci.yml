@@ -23,6 +23,12 @@ jobs:
     - name: Install dependencies
       run: go mod download
 
+    - name: Cache embedded Postgres binaries
+      uses: actions/cache@v4
+      with:
+        path: ~/.embedded-postgres-go
+        key: embedded-postgres-18.3.0-${{ runner.os }}
+
     - name: Run Tests (race + coverage profile)
       run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
 
