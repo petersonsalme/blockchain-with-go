@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
@@ -137,8 +138,8 @@ func exportSnapshot(file string, stdout io.Writer) error {
 
 // importSnapshot restores DATA_DIR/chain.db, which must be absent or empty,
 // from file. It reads the file, compares its hash with wantHash, verifies every
-// header against the consensus engine of CONSENSUS and only then restores, so a
-// failure writes nothing. It never opens a port.
+// header against the consensus engine of CONSENSUS and the median time past
+// and only then restores, so a failure writes nothing. It never opens a port.
 func importSnapshot(file, wantHash string, stdout io.Writer) error {
 	path, err := snapshotDB("--snapshot-import")
 	if err != nil {
@@ -175,8 +176,16 @@ func importSnapshot(file, wantHash string, stdout io.Writer) error {
 		return err
 	}
 
+	now := time.Now()
+
 	for i := 1; i < len(headers); i++ {
 		err := engine.Verify(headers[:i], headers[i])
+		if err != nil {
+			return fmt.Errorf("header %d: %w", i, err)
+		}
+
+		// The same header rule --verify applies (ADR-0034, ADR-0035).
+		err = domain.ValidateTimestamp(headers[i], headers[:i], now)
 		if err != nil {
 			return fmt.Errorf("header %d: %w", i, err)
 		}

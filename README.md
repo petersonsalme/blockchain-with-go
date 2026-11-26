@@ -29,7 +29,7 @@ A simple blockchain implementation in Go, created as an exercise to demonstrate 
 - **Contract VM**: A stack-machine interpreter with gas runs contract deploys and calls carried by transactions; `GET /contracts/{id}` reads a contract's state ([ADR-0014](docs/adr/0014-contract-vm.md)).
 - **Merkle Inclusion Proofs**: `GET /tx/{id}/proof` proves that a mined transaction is in its block, against the `MerkleRoot` of the header ([ADR-0009](docs/adr/0009-merkle-tree.md)).
 - **Peer-to-Peer over HTTP**: Handshake and persisted peer book ([ADR-0013](docs/adr/0013-p2p-over-http.md)), block and transaction gossip ([ADR-0018](docs/adr/0018-block-and-tx-gossip.md)), and initial sync and fork resolution with peer bans ([ADR-0019](docs/adr/0019-initial-sync-and-forks.md)).
-- **Persistence**: In-memory or bbolt storage with persisted indexes, UTXO snapshots and pruning ([ADR-0004](docs/adr/0004-disk-storage.md), [ADR-0014](docs/adr/0014-snapshots-and-pruning.md)).
+- **Persistence**: In-memory or bbolt storage with persisted indexes, UTXO snapshots and pruning ([ADR-0004](docs/adr/0004-disk-storage.md), [ADR-0031](docs/adr/0031-snapshots-and-pruning.md)).
 - **HTTP API and Tooling**: A REST API described by `openapi.yaml` with a generated Go client, server-sent events, Prometheus metrics, a web explorer, a read-only network dashboard and the `bwg` CLI with an HD wallet.
 
 ## Consensus Mechanism
@@ -315,9 +315,16 @@ $ DATA_DIR=./fresh PRUNE_KEEP_BLOCKS=100 go run ./cmd/bwg node --snapshot-import
 restored: height 990
 ```
 
-`--snapshot-import` needs an empty `DATA_DIR`. It checks the file's hash against `--snapshot-hash` and every header against the consensus (`CONSENSUS` and its settings must match the exporting node), then writes the headers and the UTXO set; blocks after the snapshot height arrive like any other blocks. Neither flag opens an HTTP port; both exit with a non-zero code and an error on stderr when a check fails, leaving `chain.db` empty on import.
+`--snapshot-import` needs an empty `DATA_DIR`. It checks the file's hash against `--snapshot-hash` and every header against the consensus (`CONSENSUS` and its settings must match the exporting node) and the median time past ([ADR-0034](docs/adr/0034-median-time-past.md)), then writes the headers and the UTXO set; blocks after the snapshot height arrive like any other blocks. Neither flag opens an HTTP port; both exit with a non-zero code and an error on stderr when a check fails, leaving `chain.db` empty on import.
 
 **Trust model:** blocks do not commit to the UTXO set, so no consensus rule can prove a snapshot is honest. The hash only proves the file is the one a full node reported. Take `--snapshot-hash` from a full node you trust (its `--snapshot-export` output), never from the same place as the file. This is the same model as Bitcoin Core's `assumeutxo`.
+
+**Known limitation: pruning loses the contract state of pruned blocks.** The contract state is not persisted. The node rebuilds it from the stored blocks ([ADR-0014](docs/adr/0014-contract-vm.md)), and a pruned block has no body to rebuild from. A snapshot does not carry it either. So, on a node with `PRUNE_KEEP_BLOCKS` above `0` or started from `--snapshot-import`:
+- contracts deployed or written in pruned blocks are missing after a restart and after a reorg;
+- a call to such a contract is rejected (`422` `unknown_contract`), and so is a peer's block that contains one;
+- if a kept block calls such a contract, the node does not start.
+
+Keep every body (`PRUNE_KEEP_BLOCKS=0`, no snapshot import) on a chain that uses contracts.
 
 ### CLI (bwg)
 
