@@ -345,7 +345,28 @@ $ go run ./cmd/bwg miner --count 1                         # calls POST /mine; p
 
 ### Chain indexer (bwg indexer)
 
-`bwg indexer run` follows one node through `GET /blocks` and `GET /headers` and copies its canonical chain into Postgres: `blocks`, `outputs` (spent or not), `balances` per address and `supply` per height ([ADR-0038](docs/adr/0038-chain-indexer-postgres.md)). It stays equal to the node across reorgs (it rolls back to the highest common block and applies forward, each step one transaction), crashes and restarts (the stored tip is the cursor). It needs a node that keeps every block body (`PRUNE_KEEP_BLOCKS=0`), and stops with `different chain; run bwg indexer resync` when the node's genesis is not the stored one. `bwg indexer resync` drops the indexer's tables, re-ingests from height 0 and exits when level. One indexer per database: a second one exits at once naming the advisory lock. Configuration: `INDEXER_DATABASE_URL` (required, a Postgres URL), `NODE_URL` or `--node` (default as the other commands), `INDEXER_POLL_INTERVAL` (default `1s`). The node is unchanged. The indexer's tests start an embedded Postgres 18 (downloaded on the first run, cached afterwards): `go test ./...` needs neither docker nor an environment variable.
+`bwg indexer run` follows one node through `GET /blocks` and `GET /headers` and copies its canonical chain into Postgres: `blocks`, `outputs` (spent or not), `balances` per address and `supply` per height ([ADR-0038](docs/adr/0038-chain-indexer-postgres.md)). It stays equal to the node across reorgs (it rolls back to the highest common block and applies forward, each step one transaction), crashes and restarts (the stored tip is the cursor). It needs a node that keeps every block body (`PRUNE_KEEP_BLOCKS=0`), and stops with `different chain; run bwg indexer resync` when the node's genesis is not the stored one. `bwg indexer resync` drops the indexer's tables, re-ingests from height 0 and exits when level. One indexer per database: a second one exits at once naming the advisory lock. Configuration: `INDEXER_DATABASE_URL` (required, a Postgres URL), `NODE_URL` or `--node` (default as the other commands), `INDEXER_POLL_INTERVAL` (default `1s`), `INDEXER_PORT` (default `8090`, `bwg indexer run` only). The node is unchanged. The indexer's tests start an embedded Postgres 18 (downloaded on the first run, cached afterwards): `go test ./...` needs neither docker nor an environment variable.
+
+`bwg indexer run` also serves a read-only HTTP API on `INDEXER_PORT` (default `8090`; not part of the node's `openapi.yaml`). Every query runs in one `REPEATABLE READ` read-only transaction so heights, hashes and amounts come from a single snapshot; methods other than `GET`/`HEAD` return `405` with `Allow: GET, HEAD`:
+
+- `GET /health` — indexed tip (`height`, `hash`), or `503` `unavailable` when empty or unreachable.
+- `GET /supply` — supply snapshot at the tip or at `?height=<n>` (`404` `height_not_indexed`, `400` `invalid_query`).
+- `GET /richest` — top addresses by balance at the indexed tip with 4-decimal `share` (`?limit=<n>`, default `20`, maximum `100`).
+- `GET /stats?from=<n>&to=<n>` — aggregated blocks, transactions, created, spent and coinbase over `from..to` inclusive (required, maximum span `10000` heights).
+
+```shell
+$ curl -s localhost:8090/health
+{"height": 12, "hash": "00a1b2..."}
+
+$ curl -s 'localhost:8090/supply?height=12'
+{"height": 12, "hash": "00a1b2...", "total": "60000000000", "created": "60000000000", "spent": "0", "coinbase": "60000000000"}
+
+$ curl -s 'localhost:8090/richest?limit=2'
+{"height": 12, "hash": "00a1b2...", "total": "60000000000", "addresses": [{"address": "00...", "balance": "60000000000", "share": "1.0000"}]}
+
+$ curl -s 'localhost:8090/stats?from=0&to=12'
+{"from": 0, "to": 12, "blocks": 13, "txs": 12, "created": "60000000000", "spent": "0", "coinbase": "60000000000"}
+```
 
 ### Logs and shutdown
 

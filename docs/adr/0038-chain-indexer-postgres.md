@@ -28,3 +28,4 @@ Status: Proposed (Spec-Opus, 2026-11-08, ENG-228)
 - The indexer lags the node by up to one poll interval and may show a shorter prefix while a reorg is being applied, never a mix of branches.
 - Postgres becomes a dependency of the indexer only; the base network, the node and its tests do not need it.
 - First test run downloads the Postgres binaries embedded-postgres uses (cached afterwards); CI caches them.
+- `bwg indexer run` serves a read-only HTTP API on `INDEXER_PORT` (default `8090`: `GET /health`, `GET /supply`, `GET /richest`, `GET /stats`, each running in a `REPEATABLE READ` read-only transaction); it is separate from the node and is not in the node's `openapi.yaml`.
