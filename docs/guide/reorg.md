@@ -88,9 +88,9 @@ sequenceDiagram
 8. **The swap.** `ReplaceChain` calls `Reorg` on the repository, for example
    `internal/storage/bolt/indexed.go:Repository.Reorg`: in one atomic step it
    reverts, from the tip down to the fork, the stored deltas of the dropped
-   blocks, drops them and commits the candidate blocks with their deltas. It is
-   the atomic `ReplaceFrom` of the ADR plus the UTXO and index updates; a crash
-   or an error cannot leave a mixed chain. A failure other than a tip conflict
+   blocks, drops them and commits the candidate blocks with their deltas, the
+   UTXO set and the indexes included; a crash or an error cannot leave a mixed
+   chain. A failure other than a tip conflict
    stops the service. See [ADR-0029](../adr/0029-reorg-by-cumulative-work.md)
    and [ADR-0011](../adr/0011-persisted-indexes.md).
 9. **Orphans.** `internal/chain/service.go:orphaned` lists, in chain order, the

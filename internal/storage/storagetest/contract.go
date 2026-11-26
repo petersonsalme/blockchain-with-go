@@ -23,10 +23,17 @@ const (
 	nilBlock
 )
 
-// BlockRepositoryContract registers Ginkgo specs that every storage.BlockRepository
-// implementation must satisfy.
-func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
-	var repo storage.BlockRepository
+// noDeltas returns one empty delta per block, for chains of blocks without
+// transactions whose UTXO effect is nothing.
+func noDeltas(blocks []*domain.Block) []domain.UTXODelta {
+	return make([]domain.UTXODelta, len(blocks))
+}
+
+// blockSpecs registers the specs on the shape of the stored chain (the block
+// reads, the tip check of Commit and the splice of Reorg) with blocks that
+// carry no transactions, so every delta is empty.
+func blockSpecs(newRepo func() storage.IndexedRepository) {
+	var repo storage.IndexedRepository
 
 	BeforeEach(func() {
 		repo = newRepo()
@@ -45,16 +52,16 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 		Expect(all).To(BeEmpty())
 	})
 
-	It("appends in order and returns the last block", func() {
+	It("commits in order and returns the last block", func() {
 		a := &domain.Block{Index: 0, Hash: "h0"}
 		b := &domain.Block{Index: 1, PrevHash: "h0", Hash: "h1"}
 
-		Expect(repo.Append(a)).To(Succeed())
+		Expect(repo.Commit(a, domain.UTXODelta{})).To(Succeed())
 		lastA, err := repo.Last()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(lastA.Hash).To(Equal(a.Hash))
 
-		Expect(repo.Append(b)).To(Succeed())
+		Expect(repo.Commit(b, domain.UTXODelta{})).To(Succeed())
 
 		last, err := repo.Last()
 		Expect(err).NotTo(HaveOccurred())
@@ -72,19 +79,19 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 	})
 
 	It("rejects a nil block and stores nothing", func() {
-		Expect(repo.Append(nil)).To(HaveOccurred())
+		Expect(repo.Commit(nil, domain.UTXODelta{})).To(HaveOccurred())
 		all, err := repo.All()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(all).To(BeEmpty())
 	})
 
-	It("returns a snapshot that later appends and caller edits do not affect", func() {
-		Expect(repo.Append(&domain.Block{Index: 0, Hash: "h0"})).To(Succeed())
+	It("returns a snapshot that later commits and caller edits do not affect", func() {
+		Expect(repo.Commit(&domain.Block{Index: 0, Hash: "h0"}, domain.UTXODelta{})).To(Succeed())
 		snap, err := repo.All()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(snap).To(HaveLen(1))
 
-		Expect(repo.Append(&domain.Block{Index: 1, PrevHash: "h0", Hash: "h1"})).To(Succeed())
+		Expect(repo.Commit(&domain.Block{Index: 1, PrevHash: "h0", Hash: "h1"}, domain.UTXODelta{})).To(Succeed())
 		Expect(snap).To(HaveLen(1))
 
 		snap[0] = nil
@@ -96,9 +103,9 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 	DescribeTable("rejects a block that does not extend the last one with ErrConflict and keeps the chain",
 		func(b *domain.Block) {
 			genesis := &domain.Block{Index: 0, Hash: "h0"}
-			Expect(repo.Append(genesis)).To(Succeed())
+			Expect(repo.Commit(genesis, domain.UTXODelta{})).To(Succeed())
 
-			Expect(repo.Append(b)).To(MatchError(storage.ErrConflict))
+			Expect(repo.Commit(b, domain.UTXODelta{})).To(MatchError(storage.ErrConflict))
 
 			all, err := repo.All()
 			Expect(err).NotTo(HaveOccurred())
@@ -111,15 +118,22 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 		Entry("skipped Index", &domain.Block{Index: 2, PrevHash: "h0", Hash: "h2"}),
 	)
 
+	It("rejects a first block that is not the genesis with ErrConflict and stores nothing", func() {
+		Expect(repo.Commit(&domain.Block{Index: 1, PrevHash: "h0", Hash: "h1"}, domain.UTXODelta{})).To(MatchError(storage.ErrConflict))
+		all, err := repo.All()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(all).To(BeEmpty())
+	})
+
 	It("accepts a block that extends the last one", func() {
-		Expect(repo.Append(&domain.Block{Index: 0, Hash: "h0"})).To(Succeed())
-		Expect(repo.Append(&domain.Block{Index: 1, PrevHash: "h0", Hash: "h1"})).To(Succeed())
+		Expect(repo.Commit(&domain.Block{Index: 0, Hash: "h0"}, domain.UTXODelta{})).To(Succeed())
+		Expect(repo.Commit(&domain.Block{Index: 1, PrevHash: "h0", Hash: "h1"}, domain.UTXODelta{})).To(Succeed())
 		all, err := repo.All()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(all).To(HaveLen(2))
 	})
 
-	It("keeps the chain linked under concurrent Append and All", func() {
+	It("keeps the chain linked under concurrent Commit and All", func() {
 		const writers, perWriter = 8, 30
 
 		var wg sync.WaitGroup
@@ -135,13 +149,13 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 
 					last, err := repo.Last()
 					if err != nil {
-						Expect(repo.Append(&domain.Block{Hash: "h0"})).To(Or(Succeed(), MatchError(storage.ErrConflict)))
+						Expect(repo.Commit(&domain.Block{Hash: "h0"}, domain.UTXODelta{})).To(Or(Succeed(), MatchError(storage.ErrConflict)))
 						continue
 					}
 
 					next := &domain.Block{Index: last.Index + 1, PrevHash: last.Hash, Hash: fmt.Sprintf("h%d", last.Index+1)}
 
-					err = repo.Append(next)
+					err = repo.Commit(next, domain.UTXODelta{})
 					if err == nil {
 						i++
 					} else {
@@ -189,7 +203,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 					b.PrevHash = blocks[i-1].Hash
 				}
 
-				Expect(repo.Append(b)).To(Succeed())
+				Expect(repo.Commit(b, domain.UTXODelta{})).To(Succeed())
 				blocks = append(blocks, b)
 			}
 		})
@@ -272,10 +286,10 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 			Expect(again[0].Index).To(Equal(blocks[0].Index))
 		})
 
-		It("leaves the lookups unchanged after a rejected Append", func() {
+		It("leaves the lookups unchanged after a rejected Commit", func() {
 			rejected := &domain.Block{Index: 9, PrevHash: "nope", Hash: "rejected"}
-			Expect(repo.Append(rejected)).To(MatchError(storage.ErrConflict))
-			Expect(repo.Append(nil)).To(HaveOccurred())
+			Expect(repo.Commit(rejected, domain.UTXODelta{})).To(MatchError(storage.ErrConflict))
+			Expect(repo.Commit(nil, domain.UTXODelta{})).To(HaveOccurred())
 
 			_, err := repo.ByHash("rejected")
 			Expect(err).To(MatchError(storage.ErrNotFound))
@@ -291,7 +305,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 			}
 		})
 
-		It("keeps the lookups consistent under concurrent Append", func() {
+		It("keeps the lookups consistent under concurrent Commit", func() {
 			var wg sync.WaitGroup
 			wg.Add(2)
 
@@ -302,7 +316,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 				for i := 5; i < 100; i++ {
 					prev, err := repo.Last()
 					Expect(err).NotTo(HaveOccurred())
-					Expect(repo.Append(&domain.Block{Index: i, PrevHash: prev.Hash, Hash: fmt.Sprintf("h%d", i)})).To(Succeed())
+					Expect(repo.Commit(&domain.Block{Index: i, PrevHash: prev.Hash, Hash: fmt.Sprintf("h%d", i)}, domain.UTXODelta{})).To(Succeed())
 				}
 			}()
 			go func() {
@@ -326,7 +340,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 			wg.Wait()
 		})
 	})
-	Describe("ReplaceFrom", func() {
+	Describe("Reorg of the chain shape", func() {
 		// link builds n blocks from index `from`, chained to prev, with hashes tag0, tag1, ...
 		link := func(tag string, from, n int, prev string) []*domain.Block {
 			out := make([]*domain.Block, 0, n)
@@ -344,7 +358,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 		BeforeEach(func() {
 			chain = link("h", 0, 5, "")
 			for _, b := range chain {
-				Expect(repo.Append(b)).To(Succeed())
+				Expect(repo.Commit(b, domain.UTXODelta{})).To(Succeed())
 			}
 		})
 
@@ -385,7 +399,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 				old := append([]*domain.Block(nil), chain...)
 				fork := link("n", height, n, chain[height-1].Hash)
 
-				Expect(repo.ReplaceFrom(height, fork)).To(Succeed())
+				Expect(repo.Reorg(height, fork, noDeltas(fork))).To(Succeed())
 
 				expectChain(append(append([]*domain.Block(nil), old[:height]...), fork...))
 
@@ -403,15 +417,15 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 		)
 
 		It("accepts the same blocks again (a no-op swap)", func() {
-			Expect(repo.ReplaceFrom(2, chain[2:])).To(Succeed())
+			Expect(repo.Reorg(2, chain[2:], noDeltas(chain[2:]))).To(Succeed())
 			expectChain(chain)
 		})
 
-		It("keeps accepting Append after a swap", func() {
+		It("keeps accepting Commit after a swap", func() {
 			fork := link("n", 2, 1, chain[1].Hash)
-			Expect(repo.ReplaceFrom(2, fork)).To(Succeed())
+			Expect(repo.Reorg(2, fork, noDeltas(fork))).To(Succeed())
 			next := link("m", 3, 1, fork[0].Hash)
-			Expect(repo.Append(next[0])).To(Succeed())
+			Expect(repo.Commit(next[0], domain.UTXODelta{})).To(Succeed())
 			expectChain(append(append(append([]*domain.Block(nil), chain[:2]...), fork...), next...))
 		})
 
@@ -419,7 +433,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 			func(height int, mk func() []*domain.Block, want rejection) {
 				blocks := mk()
 
-				err := repo.ReplaceFrom(height, blocks)
+				err := repo.Reorg(height, blocks, noDeltas(blocks))
 				if want == conflict {
 					Expect(err).To(MatchError(storage.ErrConflict))
 				} else {
@@ -497,9 +511,9 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 
 		It("returns ErrConflict on an empty repository", func() {
 			empty := newRepo()
-			Expect(empty.ReplaceFrom(0, link("n", 0, 2, ""))).To(MatchError(storage.ErrConflict))
-			Expect(empty.ReplaceFrom(1, link("n", 1, 2, "h0"))).To(MatchError(storage.ErrConflict))
-			nilErr := empty.ReplaceFrom(1, []*domain.Block{nil})
+			Expect(empty.Reorg(0, link("n", 0, 2, ""), noDeltas(link("n", 0, 2, "")))).To(MatchError(storage.ErrConflict))
+			Expect(empty.Reorg(1, link("n", 1, 2, "h0"), noDeltas(link("n", 1, 2, "h0")))).To(MatchError(storage.ErrConflict))
+			nilErr := empty.Reorg(1, []*domain.Block{nil}, noDeltas([]*domain.Block{nil}))
 			Expect(nilErr).To(HaveOccurred())
 			Expect(nilErr).NotTo(MatchError(storage.ErrConflict))
 
@@ -508,7 +522,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 			Expect(all).To(BeEmpty())
 		})
 
-		It("shows readers either the old or the new chain under concurrent ReplaceFrom and Append", func() {
+		It("shows readers either the old or the new chain under concurrent Reorg and Commit", func() {
 			const rounds = 150
 
 			stop := make(chan struct{})
@@ -551,7 +565,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 
 				for i := range rounds {
 					tag := fmt.Sprintf("v%d-", i)
-					Expect(repo.ReplaceFrom(2, link(tag, 2, 1+i%4, "h1"))).To(Succeed())
+					Expect(repo.Reorg(2, link(tag, 2, 1+i%4, "h1"), noDeltas(link(tag, 2, 1+i%4, "h1")))).To(Succeed())
 				}
 			}()
 			go func() {
@@ -562,7 +576,7 @@ func BlockRepositoryContract(newRepo func() storage.BlockRepository) {
 					last, err := repo.Last()
 					Expect(err).NotTo(HaveOccurred())
 
-					err = repo.Append(&domain.Block{Index: last.Index + 1, PrevHash: last.Hash, Hash: fmt.Sprintf("a%d-%d", i, last.Index+1)})
+					err = repo.Commit(&domain.Block{Index: last.Index + 1, PrevHash: last.Hash, Hash: fmt.Sprintf("a%d-%d", i, last.Index+1)}, domain.UTXODelta{})
 					if err != nil {
 						Expect(err).To(MatchError(storage.ErrConflict))
 					}
@@ -740,6 +754,8 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 		repo = newRepo()
 		fx = newIndexedFixture()
 	})
+
+	Describe("blocks", func() { blockSpecs(newRepo) })
 
 	// fresh returns a repository holding only Commits of w.
 	fresh := func(w *indexedWorld) storage.IndexedRepository {
@@ -920,7 +936,7 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 		})
 
 		It("rejects a repository that already holds a block", func() {
-			Expect(repo.Append(&domain.Block{Index: 0, Hash: "h0"})).To(Succeed())
+			Expect(repo.Commit(&domain.Block{Index: 0, Hash: "h0"}, domain.UTXODelta{})).To(Succeed())
 			Expect(repo.Restore(headersOf(3), copySet(fx.main.set))).To(MatchError(storage.ErrConflict))
 			all, err := repo.All()
 			Expect(err).NotTo(HaveOccurred())
@@ -1067,34 +1083,6 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 				return nil, fx.main.deltas[3]
 			}, nil),
 		)
-
-		It("refuses to commit on top of stale indexes", func() {
-			commitAll(repo, fx.main.blocks[:2], fx.main.deltas[:2])
-			Expect(repo.Append(fx.main.blocks[2])).To(Succeed())
-
-			Expect(repo.Commit(fx.main.blocks[3], fx.main.deltas[3])).To(MatchError(storage.ErrIndexStale))
-			last, err := repo.Last()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(last.Hash).To(Equal("m2"))
-		})
-	})
-
-	Describe("Append and ReplaceFrom", func() {
-		It("leave the indexes stale after an Append", func() {
-			commitAll(repo, fx.main.blocks[:2], fx.main.deltas[:2])
-			Expect(repo.Append(fx.main.blocks[2])).To(Succeed())
-			st := fx.observe(repo)
-			Expect(st.current).To(BeFalse())
-			Expect(st.heights[fx.main.blocks[2].Transactions[0].CalculateHash()]).To(Equal(-1))
-		})
-
-		It("leave the indexes stale after a swap that keeps the chain length", func() {
-			commitAll(repo, fx.main.blocks, fx.main.deltas)
-			Expect(repo.ReplaceFrom(2, fx.alt.blocks[2:4])).To(Succeed())
-			current, err := repo.IndexCurrent()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(current).To(BeFalse())
-		})
 	})
 
 	Describe("Reorg", func() {
@@ -1221,15 +1209,6 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 			Expect(repo.Reorg(1, fx.alt.blocks[1:], fx.alt.deltas[1:])).To(MatchError(storage.ErrConflict))
 			Expect(fx.observe(repo).hashes).To(BeEmpty())
 		})
-
-		It("refuses to reorg stale indexes", func() {
-			commitAll(repo, fx.main.blocks[:2], fx.main.deltas[:2])
-			Expect(repo.Append(fx.main.blocks[2])).To(Succeed())
-			Expect(repo.Reorg(2, fx.alt.blocks[2:], fx.alt.deltas[2:])).To(MatchError(storage.ErrIndexStale))
-			last, err := repo.Last()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(last.Hash).To(Equal("m2"))
-		})
 	})
 
 	Describe("Reindex", func() {
@@ -1247,33 +1226,11 @@ func IndexedRepositoryContract(newRepo func() storage.IndexedRepository) {
 			Expect(fx.observe(repo)).To(Equal(before))
 		})
 
-		It("rebuilds the indexes of a chain written with Append", func() {
-			for _, b := range fx.main.blocks {
-				Expect(repo.Append(b)).To(Succeed())
-			}
-
-			Expect(fx.observe(repo).current).To(BeFalse())
-
-			Expect(repo.Reindex()).To(Succeed())
-			Expect(fx.observe(repo)).To(Equal(fx.observe(fresh(fx.main))))
-			// The rebuilt undo data lets a Reorg run.
-			Expect(repo.Reorg(2, fx.alt.blocks[2:], fx.alt.deltas[2:])).To(Succeed())
-			Expect(fx.observe(repo)).To(Equal(fx.observe(fresh(fx.alt))))
-		})
-
-		It("rebuilds the indexes after ReplaceFrom", func() {
-			commitAll(repo, fx.main.blocks, fx.main.deltas)
-			Expect(repo.ReplaceFrom(2, fx.alt.blocks[2:])).To(Succeed())
-			Expect(fx.observe(repo).current).To(BeFalse())
-
-			Expect(repo.Reindex()).To(Succeed())
-			Expect(fx.observe(repo)).To(Equal(fx.observe(fresh(fx.alt))))
-		})
-
 		It("fails on a chain that does not replay and changes nothing", func() {
 			commitAll(repo, fx.main.blocks[:2], fx.main.deltas[:2])
-			// These transactions spend outputs that this chain never created.
-			Expect(repo.Append(&domain.Block{Index: 2, PrevHash: "m1", Hash: "bad2", Transactions: fx.main.blocks[3].Transactions})).To(Succeed())
+			// These transactions spend outputs that this chain never created; the
+			// empty delta lets Commit store them, so only a replay can catch them.
+			Expect(repo.Commit(&domain.Block{Index: 2, PrevHash: "m1", Hash: "bad2", Transactions: fx.main.blocks[3].Transactions}, domain.UTXODelta{})).To(Succeed())
 			before := fx.observe(repo)
 
 			Expect(repo.Reindex()).To(HaveOccurred())
@@ -1702,7 +1659,7 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 			}
 		})
 
-		It("refuses a Reorg, a ReplaceFrom and a ForkState below prunedBelow and changes nothing", func() {
+		It("refuses a Reorg and a ForkState below prunedBelow and changes nothing", func() {
 			repo := newRepo(p)
 			w := prunedWorld(addrs, 12, "m", 10)
 			commit(repo, w, 0, 12)
@@ -1712,7 +1669,6 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 				alt := w.forkAt(h)
 				alt.extend(addrs, 2, "a", 200)
 				Expect(repo.Reorg(h, alt.blocks[h:], alt.deltas[h:])).To(MatchError(storage.ErrReorgTooDeep))
-				Expect(repo.ReplaceFrom(h, alt.blocks[h:])).To(MatchError(storage.ErrReorgTooDeep))
 				_, err := repo.ForkState(h)
 				Expect(err).To(MatchError(storage.ErrReorgTooDeep))
 			}
@@ -1721,17 +1677,6 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 			// The first retained height is still a valid fork.
 			w = reorg(repo, w, 10, 2, "a", 200)
 			checkAgainst(repo, w, addrs, p)
-		})
-
-		It("accepts a ReplaceFrom at prunedBelow and Reindex repairs the indexes", func() {
-			repo := newRepo(p)
-			w := prunedWorld(addrs, 12, "m", 10)
-			commit(repo, w, 0, 12)
-			alt := w.forkAt(10)
-			alt.extend(addrs, 2, "a", 200)
-			Expect(repo.ReplaceFrom(10, alt.blocks[10:])).To(Succeed())
-			Expect(repo.Reindex()).To(Succeed())
-			checkAgainst(repo, alt, addrs, p)
 		})
 
 		It("leaves everything as it was when a Reorg fails after it pruned", func() {
@@ -1782,24 +1727,6 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 			_, err = repo.Snapshot()
 			Expect(err).To(MatchError(storage.ErrNotFound))
 			checkAgainst(repo, w, addrs, p)
-		})
-
-		It("drops the snapshot when a ReplaceFrom removes its block", func() {
-			repo := newRepo(p)
-			w := prunedWorld(addrs, 8, "m", 10)
-			commit(repo, w, 0, 8)
-			alt := w.forkAt(7)
-			alt.extend(addrs, 1, "a", 200)
-			Expect(repo.ReplaceFrom(7, alt.blocks[7:])).To(Succeed())
-			snap, err := repo.Snapshot()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(snap.Height).To(Equal(6))
-
-			alt = w.forkAt(6)
-			alt.extend(addrs, 2, "b", 300)
-			Expect(repo.ReplaceFrom(6, alt.blocks[6:])).To(Succeed())
-			_, err = repo.Snapshot()
-			Expect(err).To(MatchError(storage.ErrNotFound))
 		})
 
 		It("keeps the snapshot when a Reorg that would drop it is rejected", func() {
@@ -1860,15 +1787,6 @@ func PrunedRepositoryContract(newRepo func(storage.Pruning) storage.IndexedRepos
 			}
 
 			checkAgainst(repo, w, addrs, storage.Pruning{})
-		})
-
-		It("refuses ForkState on stale indexes", func() {
-			repo := newRepo(storage.Pruning{})
-			w := prunedWorld(addrs, 3, "m", 10)
-			commit(repo, w, 0, 2)
-			Expect(repo.Append(w.blocks[2])).To(Succeed())
-			_, err := repo.ForkState(1)
-			Expect(err).To(MatchError(storage.ErrIndexStale))
 		})
 	})
 }

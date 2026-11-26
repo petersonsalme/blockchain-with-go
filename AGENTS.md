@@ -35,7 +35,7 @@ blockchain-with-go/
 │   ├── mempool/       # mempool.Pool: admitted transactions, fee-rate selection (ADR-0028); depends only on domain
 │   ├── p2p/           # Hello, handshake checks, peer book, persisted peer addresses, the dialer loop (ADR-0013) and block/tx gossip: inv/want, seen-set, relay worker (ADR-0018); depends only on domain
 │   ├── server/        # HTTP adapter: server.Server (DI), handlers, DTOs, error mapping and the per-Server Prometheus registry (ADR-0022)
-│   ├── storage/       # BlockRepository port
+│   ├── storage/       # IndexedRepository port: block reads, UTXO set and indexes; Commit, Reorg and Restore are the only writes
 │   │   ├── bolt/      # bbolt disk adapter
 │   │   └── memory/    # In-memory adapter (sync.RWMutex)
 │   └── vm/            # Contract VM: pure stack-machine interpreter with gas (ADR-0014); depends only on domain
@@ -63,7 +63,7 @@ A story is **Risk: core** when it changes any of the areas below. Core stories n
 - **Block and transaction validation:** `internal/domain/block.go`, `rules.go`, `transaction.go`, `utxo.go` (hashing, validation order, UTXO rules, double-spend).
 - **Consensus:** `internal/consensus/` and `internal/consensus/pow/` (`Seal`/`Verify`, difficulty, error sentinels).
 - **Chain write path and concurrency:** `internal/chain/service.go` (`Mine`, append, any lock or semaphore, future reorg and sync) and `internal/mempool/` (pool lock, admission and eviction order).
-- **Storage guarantees:** `internal/storage/` contracts and adapters (`memory`, `bolt`), including atomicity of `Append`/`Apply`/`Revert` and the `storagetest` contract.
+- **Storage guarantees:** `internal/storage/` contracts and adapters (`memory`, `bolt`), including atomicity of `Commit`/`Reorg`/`Restore` and the `storagetest` contract.
 - **Contract VM:** `internal/vm/` (opcodes, gas costs, error sentinels, `Execute`/`ValidateCode`; from ADR-0014 on these are consensus rules) and the limits in `internal/domain/contract.go`.
 - **Peer-to-peer:** `internal/p2p/` (handshake checks, peer book lock and limits, dialer loop; ADR-0013).
 - **Keys and signatures:** `pkg/wallet/` (Ed25519, addressing, keystore).

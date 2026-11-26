@@ -1,4 +1,4 @@
-// Package bolt is a bbolt disk-backed implementation of storage.BlockRepository.
+// Package bolt is a bbolt disk-backed implementation of storage.IndexedRepository.
 package bolt
 
 import (
@@ -21,7 +21,7 @@ var (
 // indexBuckets are the buckets Commit, Reorg and Reindex maintain; Reindex rebuilds all of them.
 var indexBuckets = [][]byte{utxosBucket, undoBucket, txsBucket, addrtxBucket, addrutxoBucket}
 
-// ErrNilBlock is returned by Append and ReplaceFrom when given a nil block.
+// ErrNilBlock is returned by Commit and Reorg when given a nil block.
 var ErrNilBlock = errors.New("bolt: nil block")
 
 // Repository stores blocks in a bbolt database file.
@@ -29,8 +29,6 @@ type Repository struct {
 	db      *bbolt.DB
 	pruning storage.Pruning
 }
-
-var _ storage.BlockRepository = (*Repository)(nil)
 
 // Open opens or creates a bbolt database at path, initializing the buckets.
 // If the database is locked by another process, Open fails after 1 second.
@@ -119,26 +117,15 @@ func (r *Repository) Last() (*domain.Block, error) {
 	return block, nil
 }
 
-// Append writes b to disk atomically in a single transaction, indexing it by hash.
-func (r *Repository) Append(b *domain.Block) error {
-	if b == nil {
-		return ErrNilBlock
-	}
-
-	return r.db.Update(func(tx *bbolt.Tx) error {
-		err := checkTip(tx.Bucket(blocksBucket), b)
-		if err != nil {
-			return err
-		}
-
-		return putBlock(tx, b)
-	})
-}
-
-// checkTip returns storage.ErrConflict unless b extends the last stored block (any b extends an empty chain).
+// checkTip returns storage.ErrConflict unless b extends the last stored block
+// (an empty chain starts at the genesis, Index 0).
 func checkTip(bBucket *bbolt.Bucket, b *domain.Block) error {
 	k, v := bBucket.Cursor().Last()
 	if k == nil {
+		if b.Index != 0 {
+			return storage.ErrConflict
+		}
+
 		return nil
 	}
 
@@ -324,76 +311,7 @@ func (r *Repository) Range(from, limit int) ([]*domain.Block, error) {
 	return blocks, nil
 }
 
-// ReplaceFrom drops every block with Index >= height and appends blocks in a
-// single transaction, updating the hash index with it.
-func (r *Repository) ReplaceFrom(height int, blocks []*domain.Block) error {
-	for _, b := range blocks {
-		if b == nil {
-			return ErrNilBlock
-		}
-	}
-
-	if height < 1 || len(blocks) == 0 {
-		return storage.ErrConflict
-	}
-
-	return r.db.Update(func(tx *bbolt.Tx) error {
-		bBucket := tx.Bucket(blocksBucket)
-		hBucket := tx.Bucket(hashesBucket)
-
-		err := checkSplice(bBucket, height, blocks)
-		if err != nil {
-			return err
-		}
-
-		if height < metaInt(tx, prunedBelowKey) {
-			return storage.ErrReorgTooDeep
-		}
-
-		err = dropSnapshotFrom(tx, height)
-		if err != nil {
-			return err
-		}
-
-		// Collect first: bbolt cursors must not see deletes made while iterating.
-		var stale [][]byte
-
-		c := bBucket.Cursor()
-		for k, v := c.Seek(heightKey(height)); k != nil; k, v = c.Next() {
-			var removed domain.Block
-
-			err := json.Unmarshal(v, &removed)
-			if err != nil {
-				return err
-			}
-
-			stale = append(stale, append([]byte(nil), k...))
-			// Deleting a hash that was never indexed (an empty one) is a no-op.
-			err = hBucket.Delete([]byte(removed.Hash))
-			if err != nil {
-				return err
-			}
-		}
-
-		for _, key := range stale {
-			err := bBucket.Delete(key)
-			if err != nil {
-				return err
-			}
-		}
-
-		for _, b := range blocks {
-			err := putBlock(tx, b)
-			if err != nil {
-				return err
-			}
-		}
-		// The indexes still describe the removed tail; mark them stale even when the chain length is unchanged.
-		return tx.Bucket(metaBucket).Delete(indexedTipKey)
-	})
-}
-
-// checkSplice applies the ReplaceFrom preconditions to the stored chain.
+// checkSplice applies the Reorg preconditions on height and links to the stored chain.
 func checkSplice(bBucket *bbolt.Bucket, height int, blocks []*domain.Block) error {
 	k, _ := bBucket.Cursor().Last()
 	if k == nil || uint64(height) > binary.BigEndian.Uint64(k)+1 {

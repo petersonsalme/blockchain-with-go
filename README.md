@@ -39,7 +39,7 @@ Block validation checks cryptographic linkage, index sequentiality, Proof of Wor
 `chain.Service.ReplaceChain(ctx, candidate)` takes a full candidate chain (genesis first) and switches to it when it carries **strictly more accumulated work** after the fork point, the first height where it differs from the local chain. A block weighs `2^Difficulty` (difficulty counts leading zero bits), so a PoA block weighs 1 and PoA falls back to the longest chain. Equal work keeps the local chain (first seen wins), and the genesis must be the local one.
 
 - Every candidate block from the fork on is checked before anything is written: consensus, block rules, UTXO rules and input signatures, against the UTXO state of the candidate branch itself. The first failure is returned and the chain and the UTXO set stay as they were.
-- The swap is one atomic `ReplaceFrom` on the repository, then one `Apply` of the net UTXO difference. If that `Apply` fails the service stops accepting writes (`ErrStateDiverged`), like `Mine`.
+- The swap is one atomic `Reorg` on the repository: it reverts the stored deltas of the dropped blocks and commits the candidate blocks with their deltas, the UTXO set and the indexes in the same step ([ADR-0011](docs/adr/0011-persisted-indexes.md)). A failure other than a moved tip stops the service from accepting writes (`ErrStateDiverged`), like `Mine`.
 - The returned `Reorg` lists the fork height, the disconnected and connected blocks and `Orphaned`, the transactions of the dropped blocks that the new blocks do not hold, in chain order. After a switch made by sync, the node resubmits them to the mempool, which drops the ones it refuses (already mined on the new branch, or now invalid).
 - It shares the write turn with `Mine`. Forks arrive from peers: the sync of every dialer round fetches a better branch's headers and bodies and hands it to `ReplaceChain` (see [Sync and ban](#sync-and-ban) and [ADR-0019](docs/adr/0019-initial-sync-and-forks.md)).
 
@@ -161,7 +161,7 @@ Design decisions live in [`docs/adr/`](docs/adr/). For a walkthrough of the code
 | [0026](docs/adr/0026-consensus-status-route.md) | Read-only consensus status route `GET /consensus` |
 | [0027](docs/adr/0027-supply-route.md) | Read-only supply route `GET /supply` |
 | [0028](docs/adr/0028-mempool.md) | In-memory mempool with fee-rate selection |
-| [0029](docs/adr/0029-reorg-by-cumulative-work.md) | Reorg by cumulative work with an atomic `ReplaceFrom` |
+| [0029](docs/adr/0029-reorg-by-cumulative-work.md) | Reorg by cumulative work with an atomic repository swap |
 | [0030](docs/adr/0030-rate-limiter-sweep-interval.md) | Rate limiter evicts idle buckets at most once per refill window |
 | [0031](docs/adr/0031-snapshots-and-pruning.md) | UTXO snapshots every N blocks, pruning of old bodies to headers, and boot from a snapshot file |
 | [0032](docs/adr/0032-max-block-bytes-constant.md) | `MAX_BLOCK_BYTES` becomes a 1 MiB consensus constant in `internal/domain`; the environment variable is refused at startup |
@@ -223,7 +223,7 @@ blockchain-with-go/
 │   ├── mempool/       # Transaction pool with fee-rate selection
 │   ├── p2p/           # Handshake, peer book, dialer, gossip and sync
 │   ├── server/        # HTTP REST API: handlers, DTOs, error mapping, metrics
-│   ├── storage/       # BlockRepository port
+│   ├── storage/       # IndexedRepository port
 │   │   ├── bolt/      # bbolt disk adapter
 │   │   ├── memory/    # In-memory adapter (sync.RWMutex)
 │   │   └── storagetest/ # Shared contract suite for storage adapters
@@ -243,9 +243,9 @@ blockchain-with-go/
 | Layer | Package | Role |
 | --- | --- | --- |
 | Domain | `internal/domain` | Pure entities and rules (`Block`, `Transaction`, `ValidateBlockRules`). Imports no other internal package. |
-| Port (outbound) | `internal/storage` (`BlockRepository`) | `Last`, `Append`, `All`, `ByHeight`, `ByHash`, `Range` — where the chain is stored. |
+| Port (outbound) | `internal/storage` (`IndexedRepository`) | Block reads (`Last`, `All`, `ByHeight`, `ByHash`, `Range`), the UTXO set and indexes, and the only writes `Commit`, `Reorg` and `Restore` — where the chain is stored. |
 | Port (outbound) | `internal/consensus` (`Consensus`) | `Seal`/`Verify` — how blocks are produced and accepted. |
-| Application | `internal/chain` (`Service`) | `Blocks()`, `Tip()`, `BlockByHeight`, `BlockByHash`, `BlocksRange` and `Mine(ctx, txs)`: genesis, pre-validation, `Seal`, rules, `Verify`, `Append`. Rejection → `chain.ErrInvalidBlock`. |
+| Application | `internal/chain` (`Service`) | `Blocks()`, `Tip()`, `BlockByHeight`, `BlockByHash`, `BlocksRange` and `Mine(ctx, txs)`: genesis, pre-validation, `Seal`, rules, `Verify`, `Commit`. Rejection → `chain.ErrInvalidBlock`. |
 | Adapter (inbound) | `internal/server` (`Server`) | HTTP; maps `Service` errors to HTTP status codes. |
 | Adapters (outbound) | `internal/storage/bolt`, `internal/storage/memory`, `internal/consensus/pow` | Disk repository (bbolt), in-memory repository (`sync.RWMutex`) and Proof of Work. |
 | Composition root | `cmd/bwg` | Reads `.env`/environment, wires repo → pow → service → server and handles graceful shutdown. |

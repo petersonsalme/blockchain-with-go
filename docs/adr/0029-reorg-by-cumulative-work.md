@@ -39,3 +39,10 @@ S1 + W1 + U1.
 - A reorg costs a replay of the local chain. Acceptable at this scale; revisit with persisted undo data if chains grow.
 - `Difficulty` becomes part of the fork-choice rule, so every `Consensus.Verify` must keep pinning it. A new adapter that does not would let a peer inflate its work.
 - The `NewService` replay still does not revalidate stored blocks and still panics on a nil stored block (ENG-83 finding 4 for the startup path): out of scope, tracked separately. Closed by ADR-0035 (`bwg node --verify`).
+
+## Amendment (2026-11-26): what the code does now
+Two later decisions replaced parts of this ADR. The Decision above is kept as it was taken; this section records what holds today.
+- **Storage (S1 and U1 replaced by ADR-0011).** The swap is `IndexedRepository.Reorg(fork, blocks, deltas)`: in one atomic step it reverts the stored undo deltas of the dropped blocks, drops them and commits the candidate blocks with their deltas, the UTXO set and the indexes. There is no scratch replay and no `DiffUTXO`: `ReplaceChain` reads the fork state with `ForkState(fork)` and computes each candidate delta against it. `ReplaceFrom`, the index-blind write of option S1, had no production caller after that and was removed together with `Append`; `Commit`, `Reorg` and `Restore` are the only writes of the port. Option U2 (persisted undo deltas) is what ADR-0011 adopted.
+- **Work (W1 rescaled by ADR-0012).** `Difficulty` counts leading zero bits, so `domain.BlockWork(b) = 2^Difficulty` (`internal/domain/work.go`), not `16^Difficulty`. A PoA block (difficulty 0) still weighs 1.
+- **Consequences that no longer apply.** The window between the swap and a UTXO `Apply` is gone (one atomic step), and a reorg no longer replays the local chain for the UTXO set.
+- **Mempool.** The mempool exists (ADR-0028); the orphaned transactions are readmitted after the swap (ADR-0019).
