@@ -46,6 +46,7 @@ blockchain-with-go/
 ├── .goreleaser.yaml   # Release build of bwg (linux/darwin/windows × amd64/arm64); run on `v*` tags by release.yml
 ├── openapi.yaml       # HTTP API contract (OpenAPI 3.0.3); internal/server/contract_test.go checks the server against it
 ├── go.mod             # Go module and dependencies
+├── GLOSSARY.md        # Domain language: the terms code, ADRs and reviews use, and the synonyms to avoid
 └── README.md          # Project documentation and run instructions
 ```
 
