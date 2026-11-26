@@ -10,37 +10,52 @@ import (
 // ErrUTXOConflict is returned by Commit and Reorg when the delta does not match the current UTXO set.
 var ErrUTXOConflict = errors.New("storage: delta does not match the UTXO set")
 
-// ErrIndexStale is returned by Commit and Reorg when the persisted indexes do
-// not describe the current tip (the chain was written with Append or
-// ReplaceFrom, or the database predates the indexes). Reindex repairs it.
+// ErrIndexStale is returned by Commit, Reorg and ForkState when the persisted
+// indexes do not describe the current tip, which only a database written
+// before the indexes existed can show (ADR-0011). Reindex repairs it.
 var ErrIndexStale = errors.New("storage: indexes are stale, run Reindex")
 
-// IndexedRepository is a BlockRepository that also persists the UTXO set, the
-// per-block undo data and two lookup indexes (txid -> height and
-// address -> transactions), all updated atomically with the blocks.
+// IndexedRepository stores the blocks of a chain together with the UTXO set,
+// the per-block undo data and two lookup indexes (txid -> height and
+// address -> transactions). Commit, Reorg and Restore are its only writes, and
+// each updates the blocks and everything derived from them atomically.
 // Implementations must be safe for concurrent use.
 //
-// With pruning enabled, Reorg and ReplaceFrom with height < PrunedBelow return
+// With pruning enabled, Reorg and ForkState with height < PrunedBelow return
 // ErrReorgTooDeep and change nothing.
-//
-// Append and ReplaceFrom keep their BlockRepository behaviour and do not touch
-// the indexes; after ReplaceFrom, or an Append that moves the tip, IndexCurrent
-// reports false until Reindex runs. Commit and Reorg refuse to run on stale
-// indexes (ErrIndexStale).
 type IndexedRepository interface {
-	BlockRepository
+	// Last returns the most recently committed block, or ErrEmpty.
+	Last() (*domain.Block, error)
+	// All returns a snapshot of the chain, oldest block first.
+	All() ([]*domain.Block, error)
+	// ByHeight returns the block with Index h, or ErrNotFound.
+	ByHeight(h int) (*domain.Block, error)
+	// ByHash returns the block with the given Hash, or ErrNotFound.
+	ByHash(hash string) (*domain.Block, error)
+	// Range returns up to limit blocks starting at height from, oldest first.
+	// It returns an empty slice when from is negative or past the tip, or limit
+	// is not positive.
+	Range(from, limit int) ([]*domain.Block, error)
 	// Lookup reads the persisted UTXO set.
 	domain.UTXOView
-	// Commit appends b and applies d in one atomic step: the tip check of
-	// Append (ErrConflict), the check of UTXOSet.Apply (ErrUTXOConflict), the
-	// block, its undo data, the UTXO set and the indexes. A nil block returns
-	// the adapter's ErrNilBlock. Any rejection changes nothing.
+	// Commit appends b and applies d in one atomic step. It checks the tip (on
+	// an empty repository b.Index == 0, otherwise b.Index == last.Index+1 and
+	// b.PrevHash == last.Hash, or ErrConflict) and the delta (the check of
+	// UTXOSet.Apply, or ErrUTXOConflict), then writes the block, its undo data,
+	// the UTXO set and the indexes. A nil block returns the adapter's
+	// ErrNilBlock. Any rejection changes nothing.
 	Commit(b *domain.Block, d domain.UTXODelta) error
 	// Reorg reverts, from the tip down to height, the stored deltas, drops
 	// those blocks and their index entries, then commits each of blocks with
-	// the matching delta of deltas, in one atomic step. It has the
-	// preconditions of ReplaceFrom plus len(deltas) == len(blocks), otherwise
-	// ErrConflict. A rejection changes nothing.
+	// the matching delta of deltas, in one atomic step: readers see the old
+	// chain or the new one, never a mix. It accepts only 1 <= height <=
+	// len(chain) (the genesis never leaves; height == len extends the chain),
+	// a non-empty blocks with blocks[0].Index == height and blocks[0].PrevHash
+	// == chain[height-1].Hash, each following block chained to the one before
+	// it (Index+1, PrevHash == Hash) and len(deltas) == len(blocks). Anything
+	// else, or an empty repository, returns ErrConflict; a nil block returns
+	// the adapter's ErrNilBlock, checked before any other rule. Removed blocks
+	// are no longer found by ByHash. A rejection changes nothing.
 	Reorg(height int, blocks []*domain.Block, deltas []domain.UTXODelta) error
 	// TxHeight returns the height of the block holding txid, or ErrNotFound.
 	TxHeight(txid string) (int, error)
@@ -49,7 +64,8 @@ type IndexedRepository interface {
 	// It returns an empty, non-nil slice when there are none.
 	TxsByAddress(addr string) ([]string, error)
 	// IndexCurrent reports whether the indexes describe the current tip. An
-	// empty repository is current.
+	// empty repository is current, and so is every repository written only
+	// through Commit, Reorg and Restore.
 	IndexCurrent() (bool, error)
 	// Reindex discards the UTXO set, undo data and indexes and rebuilds them
 	// from the blocks, atomically. When PrunedBelow is positive it starts from

@@ -22,17 +22,6 @@ import (
 )
 
 var _ = Describe("Bolt Repository", func() {
-	storagetest.BlockRepositoryContract(func() storage.BlockRepository {
-		path := filepath.Join(GinkgoT().TempDir(), "contract.db")
-		repo, err := bolt.Open(path)
-		Expect(err).NotTo(HaveOccurred())
-		DeferCleanup(func() {
-			_ = repo.Close()
-		})
-
-		return repo
-	})
-
 	storagetest.IndexedRepositoryContract(func() storage.IndexedRepository {
 		path := filepath.Join(GinkgoT().TempDir(), "indexed.db")
 		repo, err := bolt.Open(path)
@@ -64,7 +53,7 @@ var _ = Describe("Bolt Repository", func() {
 			Difficulty: 1,
 		}
 		b0.Hash = b0.CalculateHash()
-		Expect(repo.Append(b0)).To(Succeed())
+		Expect(repo.Commit(b0, domain.UTXODelta{})).To(Succeed())
 
 		b1 := &domain.Block{
 			Index:        1,
@@ -75,7 +64,7 @@ var _ = Describe("Bolt Repository", func() {
 			Difficulty:   1,
 		}
 		b1.Hash = b1.CalculateHash()
-		Expect(repo.Append(b1)).To(Succeed())
+		Expect(repo.Commit(b1, domain.UTXODelta{})).To(Succeed())
 
 		Expect(repo.Close()).To(Succeed())
 
@@ -117,10 +106,10 @@ var _ = Describe("Bolt Repository", func() {
 			{Index: 1, PrevHash: "h0", Hash: "h1"},
 			{Index: 2, PrevHash: "h1", Hash: "h2"},
 		} {
-			Expect(repo.Append(b)).To(Succeed())
+			Expect(repo.Commit(b, domain.UTXODelta{})).To(Succeed())
 		}
 
-		Expect(repo.ReplaceFrom(1, []*domain.Block{{Index: 1, PrevHash: "h0", Hash: "n1"}})).To(Succeed())
+		Expect(repo.Reorg(1, []*domain.Block{{Index: 1, PrevHash: "h0", Hash: "n1"}}, make([]domain.UTXODelta, 1))).To(Succeed())
 		Expect(repo.Close()).To(Succeed())
 
 		reopened, err := bolt.Open(dbPath)
@@ -146,34 +135,34 @@ var _ = Describe("Bolt Repository", func() {
 		repo, err := bolt.Open(filepath.Join(GinkgoT().TempDir(), "nohash.db"))
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(func() { _ = repo.Close() })
-		Expect(repo.Append(&domain.Block{Index: 0})).To(Succeed())
-		Expect(repo.Append(&domain.Block{Index: 1})).To(Succeed())
+		Expect(repo.Commit(&domain.Block{Index: 0}, domain.UTXODelta{})).To(Succeed())
+		Expect(repo.Commit(&domain.Block{Index: 1}, domain.UTXODelta{})).To(Succeed())
 
-		Expect(repo.ReplaceFrom(1, []*domain.Block{{Index: 1}, {Index: 2}})).To(Succeed())
+		Expect(repo.Reorg(1, []*domain.Block{{Index: 1}, {Index: 2}}, make([]domain.UTXODelta, 2))).To(Succeed())
 		all, err := repo.All()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(all).To(HaveLen(3))
 	})
 
-	It("returns ErrNilBlock from ReplaceFrom when a block is nil", func() {
+	It("returns ErrNilBlock from Reorg when a block is nil", func() {
 		repo, err := bolt.Open(filepath.Join(GinkgoT().TempDir(), "nil.db"))
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(func() { _ = repo.Close() })
-		Expect(repo.Append(&domain.Block{Index: 0, Hash: "h0"})).To(Succeed())
+		Expect(repo.Commit(&domain.Block{Index: 0, Hash: "h0"}, domain.UTXODelta{})).To(Succeed())
 
 		blocks := []*domain.Block{{Index: 1, PrevHash: "h0", Hash: "h1"}, nil}
-		Expect(repo.ReplaceFrom(1, blocks)).To(MatchError(bolt.ErrNilBlock))
+		Expect(repo.Reorg(1, blocks, make([]domain.UTXODelta, 2))).To(MatchError(bolt.ErrNilBlock))
 		_, err = repo.ByHash("h1")
 		Expect(err).To(MatchError(storage.ErrNotFound))
 	})
 
-	It("rolls ReplaceFrom back when a stored block cannot be decoded", func() {
+	It("rolls Reorg back when a stored block cannot be decoded", func() {
 		dbPath := filepath.Join(GinkgoT().TempDir(), "corrupt-replace.db")
 		repo, err := bolt.Open(dbPath)
 		Expect(err).NotTo(HaveOccurred())
 
 		for _, b := range []*domain.Block{{Index: 0, Hash: "h0"}, {Index: 1, PrevHash: "h0", Hash: "h1"}, {Index: 2, PrevHash: "h1", Hash: "h2"}} {
-			Expect(repo.Append(b)).To(Succeed())
+			Expect(repo.Commit(b, domain.UTXODelta{})).To(Succeed())
 		}
 
 		Expect(repo.Close()).To(Succeed())
@@ -192,7 +181,7 @@ var _ = Describe("Bolt Repository", func() {
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(func() { _ = reopened.Close() })
 
-		err = reopened.ReplaceFrom(1, []*domain.Block{{Index: 1, PrevHash: "h0", Hash: "n1"}})
+		err = reopened.Reorg(1, []*domain.Block{{Index: 1, PrevHash: "h0", Hash: "n1"}}, make([]domain.UTXODelta, 1))
 		Expect(err).To(HaveOccurred())
 		Expect(err).NotTo(MatchError(storage.ErrConflict))
 
@@ -227,7 +216,7 @@ var _ = Describe("Bolt Repository", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		b := &domain.Block{Index: 0, Hash: "h0"}
-		Expect(repo.Append(b)).To(Succeed())
+		Expect(repo.Commit(b, domain.UTXODelta{})).To(Succeed())
 		Expect(repo.Close()).To(Succeed())
 
 		// Corrupt raw value in bbolt directly
@@ -367,14 +356,14 @@ var _ = Describe("Bolt Repository", func() {
 		Expect(err).To(MatchError(domain.ErrInputMissingOrSpent))
 	})
 
-	It("returns consistent snapshots during concurrent reads and appends", func() {
+	It("returns consistent snapshots during concurrent reads and commits", func() {
 		dbPath := filepath.Join(GinkgoT().TempDir(), "concurrent.db")
 		repo, err := bolt.Open(dbPath)
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(func() { _ = repo.Close() })
 
 		genesis := &domain.Block{Index: 0, Hash: "h0"}
-		Expect(repo.Append(genesis)).To(Succeed())
+		Expect(repo.Commit(genesis, domain.UTXODelta{})).To(Succeed())
 
 		const blocksToMine = 50
 
@@ -395,7 +384,7 @@ var _ = Describe("Bolt Repository", func() {
 					PrevHash: last.Hash,
 					Hash:     fmt.Sprintf("h%d", last.Index+1),
 				}
-				Expect(repo.Append(b)).To(Succeed())
+				Expect(repo.Commit(b, domain.UTXODelta{})).To(Succeed())
 			}
 		}()
 

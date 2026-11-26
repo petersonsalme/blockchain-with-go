@@ -6,7 +6,7 @@ import "errors"
 // blocks without a snapshot interval, or contradicts a pruned database.
 var ErrInvalidPruning = errors.New("storage: invalid pruning configuration")
 
-// ErrReorgTooDeep is returned by Reorg, ReplaceFrom and ForkState when the
+// ErrReorgTooDeep is returned by Reorg and ForkState when the
 // height lies below PrunedBelow: the bodies and undo data it needs are gone.
 var ErrReorgTooDeep = errors.New("storage: height is below the pruned history")
 

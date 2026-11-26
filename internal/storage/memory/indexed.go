@@ -30,9 +30,6 @@ type index struct {
 	snap *storage.Snapshot
 	// prunedBelow is the lowest height that still has a body and undo data.
 	prunedBelow int
-	// tip is the height the index describes; it is only meaningful while hasTip is set.
-	tip    int
-	hasTip bool
 }
 
 func newIndex() index {
@@ -73,7 +70,6 @@ func (ix *index) clone() index {
 		c.addrtx[a] = append([]addrEntry(nil), entries...)
 	}
 
-	c.tip, c.hasTip = ix.tip, ix.hasTip
 	c.snap, c.prunedBelow = ix.snap, ix.prunedBelow
 
 	return c
@@ -117,13 +113,10 @@ func (ix *index) apply(b *domain.Block, d domain.UTXODelta) error {
 		}
 	}
 
-	ix.tip, ix.hasTip = b.Index, true
-
 	return nil
 }
 
 // revert removes block b (the tip), or returns ErrUTXOConflict and changes nothing.
-// It leaves tip alone: Reorg always applies at least one block afterwards, which sets it.
 func (ix *index) revert(b *domain.Block) error {
 	d := ix.undo[b.Index]
 	if !holds(ix.utxos, d.Created) || intersects(ix.utxos, d.Spent) {
@@ -238,11 +231,6 @@ func (ix *index) snapshotStep(p storage.Pruning, chain []*domain.Block, t int) {
 	ix.prunedBelow = s + 1
 }
 
-// current reports whether the index describes the tip of blocks.
-func (r *Repository) current() bool {
-	return len(r.blocks) == 0 || (r.idx.hasTip && r.idx.tip == len(r.blocks)-1)
-}
-
 // Lookup reads the UTXO set kept by Commit, Reorg and Reindex.
 func (r *Repository) Lookup(op domain.OutPoint) (domain.TxOut, bool) {
 	r.mu.RLock()
@@ -260,15 +248,13 @@ func (r *Repository) Commit(b *domain.Block, d domain.UTXODelta) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if !r.current() {
-		return storage.ErrIndexStale
-	}
-
-	if n := len(r.blocks); n > 0 {
-		last := r.blocks[n-1]
-		if b.Index != last.Index+1 || b.PrevHash != last.Hash {
+	if n := len(r.blocks); n == 0 {
+		// An empty chain starts at the genesis.
+		if b.Index != 0 {
 			return storage.ErrConflict
 		}
+	} else if last := r.blocks[n-1]; b.Index != last.Index+1 || b.PrevHash != last.Hash {
+		return storage.ErrConflict
 	}
 
 	err := r.idx.apply(b, d)
@@ -314,10 +300,6 @@ func (r *Repository) Reorg(height int, blocks []*domain.Block, deltas []domain.U
 
 	if height < r.idx.prunedBelow {
 		return storage.ErrReorgTooDeep
-	}
-
-	if !r.current() {
-		return storage.ErrIndexStale
 	}
 
 	ix := r.idx.clone()
@@ -375,11 +357,10 @@ func (r *Repository) TxsByAddress(addr string) ([]string, error) {
 	return out, nil
 }
 
+// IndexCurrent is always true: Commit, Reorg and Restore, the only writes,
+// keep the indexes at the tip.
 func (r *Repository) IndexCurrent() (bool, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	return r.current(), nil
+	return true, nil
 }
 
 // Reindex rebuilds the UTXO set, undo data and indexes from the blocks, under
@@ -465,10 +446,6 @@ func (r *Repository) ForkState(height int) (domain.UTXOSet, error) {
 		return nil, storage.ErrReorgTooDeep
 	}
 
-	if !r.current() {
-		return nil, storage.ErrIndexStale
-	}
-
 	set := domain.UTXOSet(cloneOuts(r.idx.utxos))
 	for h := len(r.blocks); h > height; h-- {
 		set.Revert(r.idx.undo[h-1])
@@ -497,7 +474,6 @@ func (r *Repository) Restore(headers []*domain.Block, set domain.UTXOSet) error 
 	s := len(headers) - 1
 	ix.snap = &storage.Snapshot{Height: s, BlockHash: headers[s].Hash, Hash: storage.SnapshotHash(headers[s].Hash, set), UTXOs: domain.UTXOSet(cloneOuts(set))}
 	ix.prunedBelow = s + 1
-	ix.tip, ix.hasTip = s, true
 
 	blocks := make([]*domain.Block, len(headers))
 

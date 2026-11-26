@@ -1,4 +1,4 @@
-// Package memory is an in-memory storage.BlockRepository.
+// Package memory is an in-memory storage.IndexedRepository.
 package memory
 
 import (
@@ -9,7 +9,7 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 )
 
-// ErrNilBlock is returned by Append and ReplaceFrom when given a nil block.
+// ErrNilBlock is returned by Commit and Reorg when given a nil block.
 var ErrNilBlock = errors.New("memory: nil block")
 
 // Repository keeps blocks in a slice, indexed by hash, guarded by a RWMutex.
@@ -21,8 +21,6 @@ type Repository struct {
 	// pruning is fixed at construction.
 	pruning storage.Pruning
 }
-
-var _ storage.BlockRepository = (*Repository)(nil)
 
 // New returns an empty Repository that keeps the whole history and stores no snapshot.
 func New() *Repository {
@@ -52,27 +50,6 @@ func (r *Repository) Last() (*domain.Block, error) {
 	}
 
 	return r.blocks[len(r.blocks)-1], nil
-}
-
-func (r *Repository) Append(b *domain.Block) error {
-	if b == nil {
-		return ErrNilBlock
-	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if n := len(r.blocks); n > 0 {
-		last := r.blocks[n-1]
-		if b.Index != last.Index+1 || b.PrevHash != last.Hash {
-			return storage.ErrConflict
-		}
-	}
-
-	r.blocks = append(r.blocks, b)
-	r.byHash[b.Hash] = b
-
-	return nil
 }
 
 func (r *Repository) All() ([]*domain.Block, error) {
@@ -127,35 +104,7 @@ func (r *Repository) Range(from, limit int) ([]*domain.Block, error) {
 	return out, nil
 }
 
-// ReplaceFrom drops every block with Index >= height and appends blocks, under one lock.
-func (r *Repository) ReplaceFrom(height int, blocks []*domain.Block) error {
-	for _, b := range blocks {
-		if b == nil {
-			return ErrNilBlock
-		}
-	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	err := r.checkSplice(height, blocks)
-	if err != nil {
-		return err
-	}
-
-	if height < r.idx.prunedBelow {
-		return storage.ErrReorgTooDeep
-	}
-
-	r.splice(height, blocks)
-	// The indexes still describe the removed tail; mark them stale even when the chain length is unchanged.
-	r.idx.hasTip = false
-	r.idx.dropSnapshotFrom(height)
-
-	return nil
-}
-
-// checkSplice applies the ReplaceFrom preconditions; the caller holds the lock.
+// checkSplice applies the Reorg preconditions on height and links; the caller holds the lock.
 func (r *Repository) checkSplice(height int, blocks []*domain.Block) error {
 	if height < 1 || height > len(r.blocks) || len(blocks) == 0 {
 		return storage.ErrConflict

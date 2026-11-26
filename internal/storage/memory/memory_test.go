@@ -11,10 +11,6 @@ import (
 )
 
 var _ = Describe("Repository", func() {
-	storagetest.BlockRepositoryContract(func() storage.BlockRepository {
-		return memory.New()
-	})
-
 	storagetest.IndexedRepositoryContract(func() storage.IndexedRepository {
 		return memory.New()
 	})
@@ -54,16 +50,14 @@ var _ = Describe("Repository", func() {
 		Expect(repo.Reorg(1, []*domain.Block{nil}, nil)).To(MatchError(memory.ErrNilBlock))
 	})
 
-	It("returns ErrNilBlock when given a nil block", func() {
+	It("reports its indexes as current whatever it holds", func() {
+		mainChain, _, mainDeltas, _ := storagetest.IndexedChains()
 		repo := memory.New()
-		Expect(repo.Append(nil)).To(MatchError(memory.ErrNilBlock))
-	})
 
-	It("returns ErrNilBlock from ReplaceFrom when a block is nil", func() {
-		repo := memory.New()
-		Expect(repo.Append(&domain.Block{Index: 0, Hash: "h0"})).To(Succeed())
-		blocks := []*domain.Block{{Index: 1, PrevHash: "h0", Hash: "h1"}, nil}
-		Expect(repo.ReplaceFrom(1, blocks)).To(MatchError(memory.ErrNilBlock))
+		for i, b := range mainChain {
+			Expect(repo.Commit(b, mainDeltas[i])).To(Succeed())
+			Expect(repo.IndexCurrent()).To(BeTrue())
+		}
 	})
 })
 

@@ -14,6 +14,7 @@ import (
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/bolt"
+	"github.com/petersonsalme/blockchain-with-go/internal/storage/bolt/bolttest"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/memory"
 	"github.com/petersonsalme/blockchain-with-go/internal/vm"
 	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
@@ -63,6 +64,20 @@ func init() {
 
 // newRepo opens an empty repository of the backend under test.
 var newRepo func() storage.IndexedRepository
+
+// legacyRepo opens a bolt file written before the persisted indexes existed
+// (ADR-0011) holding blocks as given, unchecked, so its indexes are stale and
+// NewService has to Reindex it. Only such a file can be stale.
+func legacyRepo(blocks ...*domain.Block) storage.IndexedRepository {
+	path := filepath.Join(GinkgoT().TempDir(), "legacy.db")
+	Expect(bolttest.WriteLegacy(path, blocks)).To(Succeed())
+
+	r, err := bolt.Open(path)
+	Expect(err).NotTo(HaveOccurred())
+	DeferCleanup(func() { _ = r.Close() })
+
+	return r
+}
 
 // funding hands out one signed, valid spend of a genesis allocation per call.
 type funding struct {

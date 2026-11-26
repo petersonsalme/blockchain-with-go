@@ -9,7 +9,9 @@ import (
 	bbolt "go.etcd.io/bbolt"
 
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
+	"github.com/petersonsalme/blockchain-with-go/internal/storage"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/bolt"
+	"github.com/petersonsalme/blockchain-with-go/internal/storage/bolt/bolttest"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/storagetest"
 )
 
@@ -95,47 +97,70 @@ var _ = Describe("Bolt IndexedRepository", func() {
 		Expect(dumpBuckets(dbPath, indexBucketNames...)).To(Equal(before))
 	})
 
-	It("opens a database written before the indexes, reports it stale and fixes it with Reindex", func() {
-		legacy, err := bbolt.Open(dbPath, 0o600, nil)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(legacy.Update(func(tx *bbolt.Tx) error {
-			for _, name := range []string{"blocks", "hashes"} {
-				_, err := tx.CreateBucket([]byte(name))
-				if err != nil {
-					return err
-				}
+	Describe("a database written before the indexes", func() {
+		var repo *bolt.Repository
+
+		BeforeEach(func() {
+			Expect(bolttest.WriteLegacy(dbPath, mainChain)).To(Succeed())
+
+			repo = open()
+
+			DeferCleanup(func() { _ = repo.Close() })
+		})
+
+		It("is reported stale, serves its blocks and has no index entries", func() {
+			current, err := repo.IndexCurrent()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(current).To(BeFalse())
+
+			all, err := repo.All()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(all).To(HaveLen(len(mainChain)))
+
+			_, err = repo.TxHeight(mainChain[0].Transactions[0].CalculateHash())
+			Expect(err).To(MatchError(storage.ErrNotFound))
+		})
+
+		It("refuses Commit, Reorg and ForkState with ErrIndexStale and changes nothing", func() {
+			next := &domain.Block{Index: len(mainChain), PrevHash: mainChain[len(mainChain)-1].Hash, Hash: "next"}
+			Expect(repo.Commit(next, domain.UTXODelta{})).To(MatchError(storage.ErrIndexStale))
+			Expect(repo.Reorg(2, altChain[2:], altDeltas[2:])).To(MatchError(storage.ErrIndexStale))
+			_, err := repo.ForkState(1)
+			Expect(err).To(MatchError(storage.ErrIndexStale))
+
+			last, err := repo.Last()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(last.Hash).To(Equal(mainChain[len(mainChain)-1].Hash))
+
+			_, err = repo.ByHash("next")
+			Expect(err).To(MatchError(storage.ErrNotFound))
+			current, err := repo.IndexCurrent()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(current).To(BeFalse())
+		})
+
+		It("is rebuilt by Reindex into the state Commit writes, and then reorgs", func() {
+			Expect(repo.Reindex()).To(Succeed())
+
+			current, err := repo.IndexCurrent()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(current).To(BeTrue())
+
+			h, err := repo.TxHeight(mainChain[3].Transactions[0].CalculateHash())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(h).To(Equal(3))
+
+			for op, o := range mainDelta[3].Created {
+				found, ok := repo.Lookup(op)
+				Expect(ok).To(BeTrue())
+				Expect(found).To(Equal(o))
 			}
-
-			return nil
-		})).To(Succeed())
-		Expect(legacy.Close()).To(Succeed())
-
-		repo := open()
-		for _, b := range mainChain {
-			Expect(repo.Append(b)).To(Succeed())
-		}
-
-		Expect(repo.Close()).To(Succeed())
-
-		reopened := open()
-
-		DeferCleanup(func() { _ = reopened.Close() })
-
-		current, err := reopened.IndexCurrent()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(current).To(BeFalse())
-
-		_, err = reopened.TxHeight(mainChain[0].Transactions[0].CalculateHash())
-		Expect(err).To(HaveOccurred())
-
-		Expect(reopened.Reindex()).To(Succeed())
-		current, err = reopened.IndexCurrent()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(current).To(BeTrue())
-
-		h, err := reopened.TxHeight(mainChain[3].Transactions[0].CalculateHash())
-		Expect(err).NotTo(HaveOccurred())
-		Expect(h).To(Equal(3))
+			// The rebuilt undo data lets a Reorg run.
+			Expect(repo.Reorg(2, altChain[2:], altDeltas[2:])).To(Succeed())
+			last, err := repo.Last()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(last.Hash).To(Equal(altChain[len(altChain)-1].Hash))
+		})
 	})
 
 	It("rolls a rejected Commit back at the byte level", func() {

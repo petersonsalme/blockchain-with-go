@@ -8,6 +8,7 @@ import (
 
 	"github.com/petersonsalme/blockchain-with-go/internal/domain"
 	"github.com/petersonsalme/blockchain-with-go/internal/storage/bolt"
+	"github.com/petersonsalme/blockchain-with-go/internal/storage/bolt/bolttest"
 	"github.com/petersonsalme/blockchain-with-go/pkg/wallet"
 )
 
@@ -20,13 +21,6 @@ func benchRepo(b *testing.B, n int) (*bolt.Repository, []string) {
 	if err != nil {
 		b.Fatal(err)
 	}
-
-	repo, err := bolt.Open(filepath.Join(b.TempDir(), "bench.db"))
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	b.Cleanup(func() { _ = repo.Close() })
 
 	blocks := make([]*domain.Block, 0, n)
 	txids := make([]string, 0, n)
@@ -51,18 +45,20 @@ func benchRepo(b *testing.B, n int) (*bolt.Repository, []string) {
 		txids = append(txids, tx.CalculateHash())
 		prevTx = &tx
 	}
-	// One transaction for the whole chain: Commit would fsync n times.
-	err = repo.Append(blocks[0])
+	// One transaction for the whole chain, as a legacy file: Commit would fsync n times.
+	path := filepath.Join(b.TempDir(), "bench.db")
+
+	err = bolttest.WriteLegacy(path, blocks)
 	if err != nil {
 		b.Fatal(err)
 	}
 
-	if n > 1 {
-		err := repo.ReplaceFrom(1, blocks[1:])
-		if err != nil {
-			b.Fatal(err)
-		}
+	repo, err := bolt.Open(path)
+	if err != nil {
+		b.Fatal(err)
 	}
+
+	b.Cleanup(func() { _ = repo.Close() })
 
 	err = repo.Reindex()
 	if err != nil {

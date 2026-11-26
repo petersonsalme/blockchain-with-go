@@ -175,7 +175,8 @@ var _ = Describe("Bolt pruned database", func() {
 			Expect(repo.Commit(b, deltas[i])).To(Succeed())
 		}
 
-		Expect(repo.ReplaceFrom(6, blocks[6:7])).To(Succeed())
+		// Forking at 5 drops the snapshot of 6, and the shorter chain stores no new one.
+		Expect(repo.Reorg(5, blocks[5:6], deltas[5:6])).To(Succeed())
 		Expect(repo.Close()).To(Succeed())
 
 		dump := dumpBuckets(dbPath, "snapshot", "meta")

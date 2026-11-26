@@ -193,7 +193,7 @@ var _ = Describe("Service", func() {
 
 		It("keeps an existing chain untouched", func() {
 			existing := &domain.Block{Index: 0}
-			Expect(repo.Append(existing)).To(Succeed())
+			Expect(repo.Commit(existing, domain.UTXODelta{})).To(Succeed())
 
 			_, err := NewService(repo, eng)
 			Expect(err).NotTo(HaveOccurred())
@@ -234,9 +234,7 @@ var _ = Describe("Service", func() {
 		})
 
 		It("reindexes once when the indexes are stale", func() {
-			Expect(repo.Append(&domain.Block{Index: 0})).To(Succeed())
-
-			spy := &failingRepo{IndexedRepository: repo}
+			spy := &failingRepo{IndexedRepository: legacyRepo(&domain.Block{Index: 0})}
 			_, err := NewService(spy, eng)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(spy.reindexes.Load()).To(Equal(int32(1)))
@@ -245,8 +243,7 @@ var _ = Describe("Service", func() {
 		It("fails when the reindex fails", func() {
 			boom := errors.New("boom")
 
-			Expect(repo.Append(&domain.Block{Index: 0})).To(Succeed())
-			_, err := NewService(&failingRepo{IndexedRepository: repo, reindexErr: boom}, eng)
+			_, err := NewService(&failingRepo{IndexedRepository: legacyRepo(&domain.Block{Index: 0}), reindexErr: boom}, eng)
 			Expect(err).To(MatchError(boom))
 		})
 
