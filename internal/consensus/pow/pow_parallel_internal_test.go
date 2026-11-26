@@ -14,8 +14,10 @@ import (
 
 // The smallest nonce N that solves the difficulty is known from the sequential
 // search, so its worker, N % workers, is the winner. onTry holds every other
-// worker before its first hash until the search is cancelled: only the winner
-// advances, which makes the nonces each worker tries deterministic, and
+// worker before its first hash until the search is cancelled, and holds the
+// winner before its first hash until every loser reached its own: only the
+// winner advances and no loser is cancelled before it starts, which makes the
+// nonces each worker tries deterministic under any scheduling, and
 // mineParallel returns only if the winner cancels the losers.
 func TestMineParallelPartitionsNoncesAndCancelsLosers(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
@@ -39,17 +41,30 @@ func TestMineParallelPartitionsNoncesAndCancelsLosers(t *testing.T) {
 
 	winner := seq.Nonce % workers
 
-	var mu sync.Mutex
+	var (
+		mu     sync.Mutex
+		losers sync.WaitGroup
+	)
+
+	losers.Add(workers - 1)
 
 	tried := make(map[int][]int, workers)
 	onTry := func(ctx context.Context, worker, nonce int) {
 		mu.Lock()
 
 		tried[worker] = append(tried[worker], nonce)
+		first := len(tried[worker]) == 1
 		mu.Unlock()
 
 		if worker != winner {
+			losers.Done() // a loser tries once: it then waits for the cancel
 			<-ctx.Done()
+
+			return
+		}
+
+		if first {
+			losers.Wait() // the winner may cancel only after every loser tried once
 		}
 	}
 
