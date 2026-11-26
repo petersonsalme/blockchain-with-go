@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -508,6 +509,33 @@ func TestSnapshotImportRejects(t *testing.T) {
 		_, err := importInto(t, dir, bad, s.Hash)
 		if err == nil || !strings.Contains(err.Error(), consensus.ErrInvalidProofOfWork.Error()) {
 			t.Fatalf("err = %v, want ErrInvalidProofOfWork", err)
+		}
+
+		expectNoBlocks(t, dir)
+	})
+
+	t.Run("header not later than the median time past", func(t *testing.T) {
+		bad := rewriteSnapshot(t, file, func(h []*domain.Block, _ *storage.Snapshot) {
+			eng := pow.New(1)
+
+			last := h[len(h)-1]
+			last.Timestamp = domain.MedianTimePast(h[:len(h)-1])
+
+			for last.Nonce = 0; ; last.Nonce++ { // valid proof of work, so only the timestamp rule can catch it
+				last.Hash = last.CalculateHash()
+				if eng.Verify(h[:len(h)-1], last) == nil {
+					return
+				}
+			}
+		})
+		_, s := readFile(t, bad)
+		dir := t.TempDir()
+
+		_, err := importInto(t, dir, bad, s.Hash)
+
+		var ve *domain.ValidationError
+		if !errors.As(err, &ve) || ve.Code != domain.CodeTimestampNotAfterMedianTimePast {
+			t.Fatalf("err = %v, want %s", err, domain.CodeTimestampNotAfterMedianTimePast)
 		}
 
 		expectNoBlocks(t, dir)
